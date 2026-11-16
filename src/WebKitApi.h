@@ -66,6 +66,8 @@ enum {
 // ---- Callback types -------------------------------------------------------
 typedef void (*WKPageEvaluateJavaScriptFunction)(WKTypeRef, WKErrorRef, void*);
 typedef void (*WKHTTPCookieStoreSetHTTPCookieAcceptPolicyFunction)(void*);
+// Completion callback used by the data-removal functions.
+typedef void (*WKCompletionFunction)(void*);
 
 // UI client (WKPageUIClient.h)
 typedef void (*WKPageUIClientCallback)(WKPageRef page, const void* clientInfo);
@@ -326,6 +328,8 @@ typedef struct WKDownloadClientV0 {
     X(WKFramePolicyListenerIgnore, void, (WKFramePolicyListenerRef)) \
     X(WKFramePolicyListenerDownload, void, (WKFramePolicyListenerRef)) \
     X(WKFrameInfoGetIsMainFrame, bool, (WKFrameInfoRef)) \
+    X(WKFrameIsMainFrame, bool, (WKFrameRef)) \
+    X(WKFrameCopyURL, WKURLRef, (WKFrameRef)) \
     X(WKNavigationActionCopyRequest, WKURLRequestRef, (WKNavigationActionRef)) \
     X(WKNavigationResponseCanShowMIMEType, bool, (WKNavigationResponseRef)) \
     X(WKNavigationResponseCopyFrameInfo, WKFrameInfoRef, (WKNavigationResponseRef)) \
@@ -350,6 +354,12 @@ typedef struct WKDownloadClientV0 {
     X(WKWebsiteDataStoreSetResourceLoadStatisticsEnabled, void, (WKWebsiteDataStoreRef, bool)) \
     X(WKWebsiteDataStoreGetHTTPCookieStore, WKHTTPCookieStoreRef, (WKWebsiteDataStoreRef)) \
     X(WKHTTPCookieStoreSetHTTPCookieAcceptPolicy, void, (WKHTTPCookieStoreRef, WKHTTPCookieAcceptPolicy, void*, WKHTTPCookieStoreSetHTTPCookieAcceptPolicyFunction)) \
+    X(WKHTTPCookieStoreDeleteAllCookies, void, (WKHTTPCookieStoreRef, void*, WKCompletionFunction)) \
+    X(WKWebsiteDataStoreClearStorage, void, (WKWebsiteDataStoreRef, void*, WKCompletionFunction)) \
+    X(WKWebsiteDataStoreRemoveNetworkCache, void, (WKWebsiteDataStoreRef, void*, WKCompletionFunction)) \
+    X(WKWebsiteDataStoreRemoveMemoryCaches, void, (WKWebsiteDataStoreRef, void*, WKCompletionFunction)) \
+    X(WKWebsiteDataStoreRemoveAllFetchCaches, void, (WKWebsiteDataStoreRef, void*, WKCompletionFunction)) \
+    X(WKWebsiteDataStoreStatisticsClearThroughWebsiteDataRemoval, void, (WKWebsiteDataStoreRef, void*, WKCompletionFunction)) \
     X(WKPreferencesSetDNSPrefetchingEnabled, void, (WKPreferencesRef, bool)) \
     X(WKPreferencesSetHyperlinkAuditingEnabled, void, (WKPreferencesRef, bool)) \
     X(WKPreferencesSetDeveloperExtrasEnabled, void, (WKPreferencesRef, bool)) \

@@ -6,6 +6,7 @@
 
 #include "BrowserWindow.h"
 #include "Engine.h"
+#include "Settings.h"
 #include "Util.h"
 #include "Version.h"
 
@@ -20,6 +21,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     OleInitialize(nullptr);
 
+    engine::deleteProfileIfRequested();
+
     std::wstring error;
     if (!engine::initialize(error)) {
         MessageBoxW(nullptr, error.c_str(), L"Prism can't start", MB_OK | MB_ICONERROR);
@@ -33,7 +36,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         return 1;
     }
 
-    // Pages to open: anything passed on the command line, otherwise a new tab.
+    // Pages to open: last time's tabs (if "continue where you left off" is
+    // on), plus anything passed on the command line, otherwise a new tab.
     // After an update, the "What's new" page opens once.
     std::vector<std::wstring> urls;
     int argc = 0;
@@ -50,14 +54,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         }
         LocalFree(argv);
     }
-    if (urls.empty())
-        urls.push_back(L"prism://newtab");
     if (util::readSetting(L"LastVersion") != PRISM_VERSION_WSTRING) {
         urls.push_back(L"prism://whatsnew");
         util::writeSetting(L"LastVersion", PRISM_VERSION_WSTRING);
     }
 
-    if (!BrowserWindow::open(urls)) {
+    bool opened = settings::restoreSession() && BrowserWindow::restoreSession(urls);
+    if (!opened) {
+        if (urls.empty() || urls.front() == L"prism://whatsnew")
+            urls.insert(urls.begin(), L"prism://newtab");
+        opened = BrowserWindow::open(urls) != nullptr;
+    }
+    if (!opened) {
         MessageBoxW(nullptr, L"Couldn't open a browser window.", L"Prism can't start", MB_OK | MB_ICONERROR);
         OleUninitialize();
         return 1;
@@ -71,6 +79,22 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         }
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
+    }
+
+    if (settings::clearOnExit()) {
+        // Delete cookies, site data and caches now. Give WebKit up to five
+        // seconds; anything left over is wiped at the next start.
+        bool done = false;
+        engine::clearBrowsingData(true, true, [&done] { done = true; });
+        ULONGLONG deadline = GetTickCount64() + 5000;
+        while (!done && GetTickCount64() < deadline) {
+            MSG pending;
+            if (PeekMessageW(&pending, nullptr, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&pending);
+                DispatchMessageW(&pending);
+            } else
+                MsgWaitForMultipleObjects(0, nullptr, FALSE, 50, QS_ALLINPUT);
+        }
     }
 
     OleUninitialize();

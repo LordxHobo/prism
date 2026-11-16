@@ -65,15 +65,9 @@ Everything goes in `%LOCALAPPDATA%\Prism`:
 | `Profile\` | Cookies, cache, site storage. Delete it to clear all browsing data. |
 | `prism.ini` | Settings. |
 
-Settings you can already change by editing `prism.ini` (close Prism first):
+| `session.txt` | Your open tabs, for "Continue where you left off". |
 
-```ini
-[Prism]
-; Address bar search engine. %s is replaced by what you typed.
-SearchURL=https://duckduckgo.com/?q=%s
-; system, dark or light
-Theme=system
-```
+Change settings at `prism://settings` (or press Ctrl+,).
 
 ## Troubleshooting
 

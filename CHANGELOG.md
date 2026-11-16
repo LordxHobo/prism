@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0: settings
+
+- Settings page (`prism://settings`, Ctrl+, , the menu, or the address-bar shield) with General, Appearance, Privacy and About sections. Changes apply immediately.
+- Search engine choice: DuckDuckGo, Startpage, Brave Search, Ecosia, Google, Bing, or a custom address.
+- "Continue where you left off": windows and tabs are saved and restored.
+- Choose the download folder.
+- Theme (System/Dark/Light), accent color, compact tabs.
+- Third-party cookie blocking: Standard or Strict.
+- Clear browsing data now, or every time Prism closes.
+- Opening Settings or What's new reuses an existing tab.
+
 ## 0.1.0: first build
 
 - Windows app built on WebKit's C API, loading WebKit at runtime (no WebKit compile needed).

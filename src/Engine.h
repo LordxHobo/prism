@@ -6,11 +6,22 @@
 
 #include "WebKitApi.h"
 
+#include <functional>
+
 // Shared WebKit state for the whole app: one browsing context, one set of
 // preferences and one on-disk profile, used by every window and tab.
 namespace engine {
 
+// Call before initialize(): wipes the profile if "clear on exit" is on.
+void deleteProfileIfRequested();
+
 bool initialize(std::wstring& error);
+
+// Applies the third-party cookie setting (call again after it changes).
+void applyCookiePolicy();
+
+// Deletes browsing data; `done` runs on the main thread when finished.
+void clearBrowsingData(bool cookiesAndSiteData, bool cache, std::function<void()> done);
 
 WKPageConfigurationRef pageConfiguration();
 

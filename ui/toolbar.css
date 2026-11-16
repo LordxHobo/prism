@@ -8,6 +8,8 @@
 :root[data-theme="dark"] {
   --toolbar-height: 76px; /* must match kToolbarCSSHeight in BrowserWindow.cpp */
   --tabstrip-height: 36px;
+  --tab-height: 30px;
+  --field-height: 30px;
   --frame: #1c1c20;
   --tab-hover: #26262c;
   --tab-active: #2e2e36;
@@ -23,6 +25,14 @@
   --shield: #3ddc84;
   --toast-bg: #ececf1;
   --toast-text: #16161a;
+}
+
+/* Compact tabs: must match kCompactToolbarCSSHeight in BrowserWindow.cpp. */
+:root.compact {
+  --toolbar-height: 66px;
+  --tabstrip-height: 30px;
+  --tab-height: 26px;
+  --field-height: 28px;
 }
 
 :root[data-theme="light"] {
@@ -133,7 +143,7 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 30px;
+  height: var(--tab-height);
   width: 220px;
   min-width: 48px;
   flex: 0 1 220px;
@@ -244,7 +254,7 @@ button {
   position: relative;
   flex: 1;
   min-width: 0;
-  height: 30px;
+  height: var(--field-height);
   margin: 0 4px;
   display: flex;
   align-items: center;
@@ -252,7 +262,7 @@ button {
   padding: 0 4px;
   background: var(--field);
   border: 1px solid var(--field-border);
-  border-radius: 15px;
+  border-radius: calc(var(--field-height) / 2);
 }
 
 #addressform:focus-within {

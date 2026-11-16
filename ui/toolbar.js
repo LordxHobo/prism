@@ -185,7 +185,13 @@ window.prism = {
   update(newState) {
     const previousActive = state && state.active;
     state = newState;
-    document.documentElement.dataset.theme = state.theme;
+    const root = document.documentElement;
+    root.dataset.theme = state.theme;
+    root.classList.toggle('compact', !!state.compact);
+    if (/^#[0-9a-f]{6}$/i.test(state.accent || '')) {
+      root.style.setProperty('--accent', state.accent);
+      root.style.setProperty('--field-focus', state.accent);
+    }
     // Switching tabs throws away anything half-typed in the address bar.
     if (previousActive !== state.active)
       editing = false;
@@ -234,9 +240,7 @@ elements.menu.addEventListener('click', () => {
   send('menu', Math.round(rect.right) + ',' + Math.round(rect.bottom));
 });
 
-elements.shield.addEventListener('click', () => {
-  showToast('Protected: trackers limited, third-party cookies blocked');
-});
+elements.shield.addEventListener('click', () => send('settings'));
 
 // Double-clicking empty tab strip space opens a new tab.
 $('tabstrip').addEventListener('dblclick', (event) => {

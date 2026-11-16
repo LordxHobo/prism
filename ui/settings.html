@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings</title>
+<script src="pages.js"></script>
+<link rel="stylesheet" href="pages.css">
+<link rel="stylesheet" href="settings.css">
+</head>
+<body>
+<div id="layout">
+  <nav id="sidebar" aria-label="Settings sections">
+    <div class="brand"><img src="prism.svg" alt=""> Settings</div>
+    <a href="#general" class="current">General</a>
+    <a href="#appearance">Appearance</a>
+    <a href="#privacy">Privacy</a>
+    <a href="#about">About</a>
+  </nav>
+
+  <main id="content">
+    <section id="general">
+      <h1>General</h1>
+
+      <div class="row">
+        <div class="label">
+          <label for="searchEngine">Search engine</label>
+          <p class="dim">Used when you type something that isn't a web address.</p>
+        </div>
+        <div class="control">
+          <select id="searchEngine"></select>
+        </div>
+      </div>
+      <div class="row sub" id="customSearchRow" hidden>
+        <div class="label">
+          <label for="searchURL">Custom search address</label>
+          <p class="dim">Use <code>%s</code> where the search words go, e.g. <code>https://example.com/search?q=%s</code></p>
+        </div>
+        <div class="control">
+          <input id="searchURL" type="url" spellcheck="false" placeholder="https://…?q=%s">
+          <p class="error" id="searchURLError" hidden>Enter an address that starts with https:// and contains %s.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">When Prism starts</span>
+        </div>
+        <div class="control segmented" id="startup" role="radiogroup">
+          <button data-value="newtab" role="radio">New tab page</button>
+          <button data-value="restore" role="radio">Continue where you left off</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Downloads</span>
+          <p class="dim path" id="downloadDir"></p>
+        </div>
+        <div class="control buttons">
+          <button class="button secondary" id="changeDownloads">Change…</button>
+          <button class="button secondary" id="openDownloads">Open</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="appearance">
+      <h1>Appearance</h1>
+
+      <div class="row">
+        <div class="label"><span class="title">Theme</span></div>
+        <div class="control segmented" id="theme" role="radiogroup">
+          <button data-value="system" role="radio">System</button>
+          <button data-value="dark" role="radio">Dark</button>
+          <button data-value="light" role="radio">Light</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Accent color</span>
+          <p class="dim">Used for the loading bar, focus rings and buttons.</p>
+        </div>
+        <div class="control swatches" id="accent" role="radiogroup">
+          <!-- filled in by script -->
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Tabs</span>
+          <p class="dim">Compact uses a smaller tab strip and toolbar.</p>
+        </div>
+        <div class="control segmented" id="tabStyle" role="radiogroup">
+          <button data-value="normal" role="radio">Normal</button>
+          <button data-value="compact" role="radio">Compact</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacy">
+      <h1>Privacy</h1>
+
+      <div class="card protections">
+        <h2>Always on</h2>
+        <ul>
+          <li><b>No telemetry.</b> Prism never sends anything about you or your browsing to anyone.</li>
+          <li><b>Tracking prevention.</b> Sites that follow you around the web lose access to their cookies and storage.</li>
+          <li><b>No link pings or DNS prefetching.</b> Links can't report your clicks, and Prism doesn't look up links you didn't click.</li>
+          <li><b>Popups only when you click.</b></li>
+        </ul>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Third-party cookies</span>
+          <p class="dim" id="cookieHelp"></p>
+        </div>
+        <div class="control segmented" id="cookiePolicy" role="radiogroup">
+          <button data-value="standard" role="radio">Standard</button>
+          <button data-value="strict" role="radio">Strict</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <label for="clearOnExit" class="title">Clear browsing data when Prism closes</label>
+          <p class="dim">Deletes cookies, site data and cached files every time you close Prism. You'll be signed out of websites. Your open tabs still come back if “Continue where you left off” is on.</p>
+        </div>
+        <div class="control">
+          <label class="switch"><input type="checkbox" id="clearOnExit"><span></span></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Clear browsing data now</h2>
+        <label class="check"><input type="checkbox" id="clearCookies" checked> Cookies and site data <span class="dim">(signs you out of most sites)</span></label>
+        <label class="check"><input type="checkbox" id="clearCache" checked> Cached images and files</label>
+        <div class="buttons">
+          <button class="button" id="clearNow">Clear now</button>
+          <span class="dim" id="clearStatus" role="status"></span>
+        </div>
+      </div>
+    </section>
+
+    <section id="about">
+      <h1>About</h1>
+      <div class="card about">
+        <img class="logo" src="prism.svg" alt="">
+        <div>
+          <h2>Prism <span id="version"></span></h2>
+          <p class="dim">A private, independent web browser built on WebKit. Licensed under the Mozilla Public License 2.0.</p>
+          <p class="dim">Your data and settings are stored only on this PC.</p>
+          <div class="buttons">
+            <button class="button secondary" id="openData">Open data folder</button>
+            <a class="button secondary" href="prism://whatsnew" id="whatsNew">What's new</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="settings.js"></script>
+</body>
+</html>

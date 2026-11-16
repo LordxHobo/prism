@@ -123,6 +123,26 @@ std::wstring urlEncode(const std::wstring& value)
     return out;
 }
 
+std::wstring urlDecode(const std::wstring& value)
+{
+    std::string utf8 = toUTF8(value);
+    std::string out;
+    auto hex = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    for (size_t i = 0; i < utf8.size(); ++i) {
+        if (utf8[i] == '%' && i + 2 < utf8.size() && hex(utf8[i + 1]) >= 0 && hex(utf8[i + 2]) >= 0) {
+            out += static_cast<char>(hex(utf8[i + 1]) * 16 + hex(utf8[i + 2]));
+            i += 2;
+        } else
+            out += utf8[i];
+    }
+    return fromUTF8(out);
+}
+
 std::string jsonString(const std::wstring& value)
 {
     std::string utf8 = toUTF8(value);
@@ -179,6 +199,41 @@ std::wstring uniqueFilePath(const std::wstring& folder, std::wstring name)
     for (int i = 1; GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES && i < 1000; ++i)
         candidate = folder + L"\\" + stem + L" (" + std::to_wstring(i) + L")" + ext;
     return candidate;
+}
+
+bool writeFileAtomically(const std::wstring& path, const std::string& contents)
+{
+    std::wstring temporary = path + L".tmp";
+    HANDLE file = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return false;
+    DWORD written = 0;
+    bool ok = WriteFile(file, contents.data(), static_cast<DWORD>(contents.size()), &written, nullptr) && written == contents.size();
+    ok = FlushFileBuffers(file) && ok;
+    CloseHandle(file);
+    if (!ok) {
+        DeleteFileW(temporary.c_str());
+        return false;
+    }
+    return MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+}
+
+std::string readFile(const std::wstring& path)
+{
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return { };
+    std::string contents;
+    LARGE_INTEGER size;
+    if (GetFileSizeEx(file, &size) && size.QuadPart < 16 * 1024 * 1024) {
+        contents.resize(static_cast<size_t>(size.QuadPart));
+        DWORD read = 0;
+        if (!ReadFile(file, contents.data(), static_cast<DWORD>(contents.size()), &read, nullptr))
+            read = 0;
+        contents.resize(read);
+    }
+    CloseHandle(file);
+    return contents;
 }
 
 static std::wstring settingsFile()

@@ -32,11 +32,18 @@ std::wstring formatWindowsError(DWORD code);
 // Percent-encodes text (as UTF-8) for use in a URL query value.
 std::wstring urlEncode(const std::wstring&);
 
+// Reverses urlEncode (%XX sequences, as UTF-8; '+' stays '+').
+std::wstring urlDecode(const std::wstring&);
+
 // Escapes text for use inside a JSON string literal; output is UTF-8.
 std::string jsonString(const std::wstring&);
 
 // Makes a file name safe for the file system and unique in `folder`.
 std::wstring uniqueFilePath(const std::wstring& folder, std::wstring name);
+
+// Writes a file atomically (write to a temporary file, then replace).
+bool writeFileAtomically(const std::wstring& path, const std::string& contents);
+std::string readFile(const std::wstring& path);
 
 // Simple key/value settings stored in %LOCALAPPDATA%\Prism\prism.ini.
 std::wstring readSetting(const wchar_t* key, const wchar_t* fallback = L"");

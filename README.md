@@ -7,7 +7,7 @@ A private, independent web browser for Windows, built on **WebKit** (the engine 
 - **Extensions from both stores** *(planned)*. Chrome Web Store and Firefox Add-ons extensions, starting with uBlock Origin and Bitwarden.
 - **Customizable.** The whole interface is HTML and CSS (see [`ui/`](ui)), so themes and layouts are easy to change.
 
-> **Status: early development (v0.1).** Expect rough edges. Copy-protected (DRM) video such as Netflix or Disney+ can't play in any WebKit browser on Windows.
+> **Status: early development (v0.2).** Expect rough edges. Copy-protected (DRM) video such as Netflix or Disney+ can't play in any WebKit browser on Windows.
 
 ## Download
 
@@ -37,9 +37,9 @@ dist\Prism.exe
 ## Roadmap
 
 - [x] Tabs, address bar, downloads, privacy defaults (v0.1)
-- [ ] Settings page (search engine, theme, privacy levels)
+- [x] Settings, session restore, clear browsing data (v0.2)
 - [ ] Chrome and Firefox extensions (WebExtensions API)
-- [ ] Bookmarks, history, session restore
+- [ ] Bookmarks and history
 - [ ] Themes, layouts and custom CSS
 - [ ] Fingerprinting protection
 

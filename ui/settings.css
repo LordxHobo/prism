@@ -1,0 +1,314 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+#layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+#sidebar {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  width: 220px;
+  flex: none;
+  padding: 28px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#sidebar .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  font-weight: 650;
+  padding: 0 10px 18px;
+}
+
+#sidebar .brand img {
+  width: 28px;
+  height: 28px;
+}
+
+#sidebar a {
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+#sidebar a:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+#sidebar a.current {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+
+#content {
+  flex: 1;
+  max-width: 760px;
+  margin: 0;
+  padding: 28px 32px 120px;
+}
+
+section {
+  padding-top: 8px;
+  margin-bottom: 36px;
+}
+
+section h1 {
+  font-size: 24px;
+  margin: 0 0 14px;
+}
+
+h2 {
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.row.sub {
+  padding-left: 20px;
+}
+
+.row .label {
+  flex: 1;
+  min-width: 0;
+}
+
+.row .label .title,
+.row .label label {
+  font-weight: 600;
+}
+
+.row .label p {
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+
+.row .control {
+  flex: none;
+  max-width: 55%;
+}
+
+.path {
+  word-break: break-all;
+}
+
+code {
+  font: 12px "Cascadia Mono", Consolas, monospace;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+select,
+input[type="url"] {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  min-width: 220px;
+  outline: none;
+}
+
+input[type="url"] {
+  width: 340px;
+}
+
+select:focus,
+input[type="url"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.error {
+  color: #ff6b6b;
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+/* Segmented buttons (radio groups) */
+.segmented {
+  display: inline-flex;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.segmented button {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-dim);
+  background: none;
+  border: 0;
+  border-radius: 7px;
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.segmented button:hover {
+  color: var(--text);
+}
+
+.segmented button[aria-checked="true"] {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* Accent swatches */
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.swatches button {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  outline: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.swatches button[aria-checked="true"] {
+  border-color: var(--bg);
+  outline-color: var(--text);
+}
+
+/* Switch */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch span {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: var(--border);
+  transition: background 0.15s;
+}
+
+.switch span::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+
+.switch input:checked + span {
+  background: var(--accent);
+}
+
+.switch input:checked + span::after {
+  transform: translateX(20px);
+}
+
+.switch input:focus-visible + span {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Checkboxes */
+.check {
+  display: block;
+  margin: 8px 0;
+  cursor: pointer;
+}
+
+.check input {
+  accent-color: var(--accent);
+  margin-right: 8px;
+}
+
+.buttons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.row .buttons {
+  margin-top: 0;
+}
+
+.protections ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.protections li {
+  margin: 6px 0;
+  color: var(--text-dim);
+}
+
+.protections b {
+  color: var(--text);
+}
+
+.about {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.about h2 {
+  font-size: 20px;
+}
+
+.about p {
+  margin: 4px 0;
+}
+
+@media (max-width: 760px) {
+  #sidebar {
+    display: none;
+  }
+  .row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .row .control {
+    max-width: 100%;
+  }
+}

@@ -4,10 +4,13 @@
 
 #include "Engine.h"
 
+#include "Settings.h"
 #include "Util.h"
 
 #include <cctype>
 #include <cwctype>
+#include <filesystem>
+#include <functional>
 
 using namespace wk;
 
@@ -27,6 +30,78 @@ static void setDirectory(void (*setter)(WKWebsiteDataStoreConfigurationRef, WKSt
         return;
     util::ensureDirectory(path);
     setter(configuration, string(path).get());
+}
+
+void deleteProfileIfRequested()
+{
+    // "Clear browsing data when Prism closes": WebKit's helper processes may
+    // still have the files open while Prism exits, so the profile is wiped
+    // here, at the next start, before WebKit is running. Either way nothing
+    // from the last session is ever loaded again.
+    if (!settings::clearOnExit())
+        return;
+    std::error_code ignored;
+    std::filesystem::remove_all(std::filesystem::path(util::dataDirectory() + L"\\Profile"), ignored);
+}
+
+void applyCookiePolicy()
+{
+    // Block third-party cookies (cookies from sites other than the one in the
+    // address bar), the main tool ad networks use to follow you around.
+    // Standard still lets a site you've visited directly keep its cookies when
+    // it's embedded elsewhere (needed for some logins); strict never does.
+    if (!s_dataStore || !WKWebsiteDataStoreGetHTTPCookieStore || !WKHTTPCookieStoreSetHTTPCookieAcceptPolicy)
+        return;
+    auto policy = settings::strictCookies() ? kWKHTTPCookieAcceptPolicyExclusivelyFromMainDocumentDomain : kWKHTTPCookieAcceptPolicyOnlyFromMainDocumentDomain;
+    if (auto cookieStore = WKWebsiteDataStoreGetHTTPCookieStore(s_dataStore.get()))
+        WKHTTPCookieStoreSetHTTPCookieAcceptPolicy(cookieStore, policy, nullptr, [](void*) { });
+}
+
+namespace {
+
+// Counts down the asynchronous removals and reports once all are done.
+struct ClearOperation {
+    int pending { 1 };
+    std::function<void()> done;
+};
+
+void clearStepFinished(void* context)
+{
+    auto* operation = static_cast<ClearOperation*>(context);
+    if (--operation->pending == 0) {
+        if (operation->done)
+            operation->done();
+        delete operation;
+    }
+}
+
+} // namespace
+
+void clearBrowsingData(bool cookiesAndSiteData, bool cache, std::function<void()> done)
+{
+    auto* operation = new ClearOperation;
+    operation->done = std::move(done);
+    auto run = [operation](auto function, auto target) {
+        if (!function || !target)
+            return;
+        ++operation->pending;
+        function(target, operation, clearStepFinished);
+    };
+
+    WKWebsiteDataStoreRef store = s_dataStore.get();
+    if (cookiesAndSiteData) {
+        WKHTTPCookieStoreRef cookies = WKWebsiteDataStoreGetHTTPCookieStore ? WKWebsiteDataStoreGetHTTPCookieStore(store) : nullptr;
+        run(WKHTTPCookieStoreDeleteAllCookies, cookies);
+        run(WKWebsiteDataStoreClearStorage, store);
+        run(WKWebsiteDataStoreStatisticsClearThroughWebsiteDataRemoval, store);
+    }
+    if (cache) {
+        run(WKWebsiteDataStoreRemoveNetworkCache, store);
+        run(WKWebsiteDataStoreRemoveMemoryCaches, store);
+        run(WKWebsiteDataStoreRemoveAllFetchCaches, store);
+    }
+    // Drop the initial count; reports immediately if nothing was started.
+    clearStepFinished(operation);
 }
 
 bool initialize(std::wstring& error)
@@ -72,12 +147,7 @@ bool initialize(std::wstring& error)
     if (WKWebsiteDataStoreSetResourceLoadStatisticsEnabled)
         WKWebsiteDataStoreSetResourceLoadStatisticsEnabled(s_dataStore.get(), true);
 
-    // Block third-party cookies (cookies from sites other than the one in the
-    // address bar), the main tool ad networks use to follow you around.
-    if (WKWebsiteDataStoreGetHTTPCookieStore && WKHTTPCookieStoreSetHTTPCookieAcceptPolicy) {
-        if (auto cookieStore = WKWebsiteDataStoreGetHTTPCookieStore(s_dataStore.get()))
-            WKHTTPCookieStoreSetHTTPCookieAcceptPolicy(cookieStore, kWKHTTPCookieAcceptPolicyOnlyFromMainDocumentDomain, nullptr, [](void*) { });
-    }
+    applyCookiePolicy();
 
     s_preferences = Ref<WKPreferencesRef>::adopt(WKPreferencesCreate());
     // No DNS prefetching: don't look up links you never clicked.
@@ -134,7 +204,8 @@ bool darkTheme()
 
 std::wstring internalPageURL(const std::wstring& name, const std::wstring& query)
 {
-    std::wstring url = s_uiDirectoryURL + name + L".html?theme=" + (s_darkTheme ? L"dark" : L"light");
+    std::wstring url = s_uiDirectoryURL + name + L".html?theme=" + (s_darkTheme ? L"dark" : L"light")
+        + L"&accent=" + util::urlEncode(settings::accent());
     if (!query.empty())
         url += L"&" + query;
     return url;
@@ -183,7 +254,7 @@ bool isInternalPage(const std::wstring& value, const std::wstring& name)
 
 std::wstring searchURLTemplate()
 {
-    return util::readSetting(L"SearchURL", L"https://duckduckgo.com/?q=%s");
+    return settings::searchURL();
 }
 
 } // namespace engine

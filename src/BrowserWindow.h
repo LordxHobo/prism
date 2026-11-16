@@ -23,12 +23,21 @@ struct Tab {
     bool loading { false };
     double progress { 0 };
     bool crashed { false };
+    std::wstring savedURL; // what the session file has for this tab
 };
 
 class BrowserWindow {
 public:
-    // Opens a new window. `startURLs` are opened as tabs (empty = new tab page).
-    static BrowserWindow* open(const std::vector<std::wstring>& startURLs);
+    // Opens a new window. `startURLs` are opened as tabs (empty = new tab page);
+    // `activeIndex` picks the selected one (-1 = the last).
+    static BrowserWindow* open(const std::vector<std::wstring>& startURLs, int activeIndex = -1);
+
+    // Reopens the windows and tabs from last time. `extraURLs` are added to
+    // the first window. Returns false if there was nothing to restore.
+    static bool restoreSession(const std::vector<std::wstring>& extraURLs);
+
+    // Re-applies settings (theme, accent, tab size, ...) to every window.
+    static void settingsChanged();
     static bool registerWindowClass(HINSTANCE);
     static BrowserWindow* fromHWND(HWND);
     static size_t windowCount();
@@ -47,6 +56,9 @@ public:
 
     void showToast(const std::wstring& text);
 
+    // Opens prism://<name>, or switches to it if a tab already shows it.
+    void openInternalPage(const std::wstring& name);
+
 private:
     BrowserWindow() = default;
     static LRESULT CALLBACK windowProc(HWND, UINT, WPARAM, LPARAM);
@@ -56,6 +68,7 @@ private:
     void layout();
     double scaleFactor() const;
     int toolbarHeight() const;
+    int toolbarCSSHeight() const;
     void applyScaleFactor();
     void updateTheme();
 
@@ -75,6 +88,10 @@ private:
     void runToolbarScript(const std::string& script);
     void updateTitle();
     void onDestroy();
+    std::string handleSettingsCommand(const std::wstring& command, const std::wstring& argument);
+    static void scheduleSessionSave();
+    static void saveSession();
+    static std::wstring sessionURL(const Tab*);
 
     // WebKit callbacks
     static void tabStateChanged(const void*);
@@ -105,4 +122,5 @@ private:
     int m_activeTabId { 0 };
     bool m_darkTheme { true };
     std::vector<std::wstring> m_pendingStartURLs;
+    int m_pendingActiveIndex { -1 };
 };

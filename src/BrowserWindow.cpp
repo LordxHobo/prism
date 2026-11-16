@@ -6,6 +6,7 @@
 
 #include "Dialogs.h"
 #include "Engine.h"
+#include "Settings.h"
 #include "Util.h"
 #include "Version.h"
 
@@ -15,6 +16,7 @@
 #include <cwctype>
 #include <dwmapi.h>
 #include <shellapi.h>
+#include <shobjidl.h>
 #include <windowsx.h>
 
 using namespace wk;
@@ -23,7 +25,11 @@ namespace {
 
 constexpr wchar_t kWindowClass[] = L"PrismBrowserWindow";
 constexpr UINT WM_PRISM_CLOSE_TAB = WM_APP + 1;
-constexpr int kToolbarCSSHeight = 76; // must match --toolbar-height in ui/toolbar.css
+constexpr UINT_PTR kSessionTimer = 1;
+// Must match --toolbar-height in ui/toolbar.css (normal and compact).
+constexpr int kToolbarCSSHeight = 76;
+constexpr int kCompactToolbarCSSHeight = 66;
+bool s_sessionDirty = false;
 
 std::vector<BrowserWindow*> s_windows;
 int s_nextTabId = 0;
@@ -75,7 +81,7 @@ bool systemUsesDarkTheme()
 // Internal prism:// pages that may be opened from the address bar.
 bool isKnownInternalPage(const std::wstring& name)
 {
-    return name == L"newtab" || name == L"whatsnew";
+    return name == L"newtab" || name == L"whatsnew" || name == L"settings";
 }
 
 struct DownloadInfo {
@@ -106,7 +112,7 @@ WKStringRef downloadDecideDestination(WKDownloadRef, WKURLResponseRef response, 
         urlText = urlText.substr(0, end);
         name = fileNameOf(urlText);
     }
-    info->path = util::uniqueFilePath(util::downloadsDirectory(), name);
+    info->path = util::uniqueFilePath(settings::downloadDirectory(), name);
     downloadToast(info->window, L"Downloading " + fileNameOf(info->path) + L"…");
     // WebKit takes ownership of the returned string.
     return WKStringCreateWithUTF8CString(util::toUTF8(info->path).c_str());
@@ -145,10 +151,11 @@ bool BrowserWindow::registerWindowClass(HINSTANCE instance)
     return RegisterClassExW(&wc) != 0;
 }
 
-BrowserWindow* BrowserWindow::open(const std::vector<std::wstring>& startURLs)
+BrowserWindow* BrowserWindow::open(const std::vector<std::wstring>& startURLs, int activeIndex)
 {
     auto* window = new BrowserWindow();
     window->m_pendingStartURLs = startURLs;
+    window->m_pendingActiveIndex = activeIndex;
     if (window->m_pendingStartURLs.empty())
         window->m_pendingStartURLs.push_back(L"prism://newtab");
 
@@ -212,8 +219,16 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         updateTheme();
         createToolbar();
         auto urls = std::move(m_pendingStartURLs);
-        for (size_t i = 0; i < urls.size(); ++i)
-            newTab(urls[i], i + 1 == urls.size());
+        int active = m_pendingActiveIndex >= 0 && m_pendingActiveIndex < static_cast<int>(urls.size())
+            ? m_pendingActiveIndex : static_cast<int>(urls.size()) - 1;
+        Tab* selected = nullptr;
+        for (size_t i = 0; i < urls.size(); ++i) {
+            Tab* tab = newTab(urls[i], false);
+            if (static_cast<int>(i) == active)
+                selected = tab;
+        }
+        if (selected)
+            selectTab(selected->id);
         return 0;
     }
     case WM_SIZE:
@@ -271,6 +286,13 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             return TRUE;
         }
         break;
+    case WM_TIMER:
+        if (wParam == kSessionTimer) {
+            KillTimer(m_hwnd, kSessionTimer);
+            saveSession();
+            return 0;
+        }
+        break;
     case WM_PRISM_CLOSE_TAB:
         closeTab(static_cast<int>(wParam));
         return 0;
@@ -304,10 +326,18 @@ void BrowserWindow::onDestroy()
     for (auto& tab : m_tabs)
         detachClients(tab->page);
     m_toolbarReady = false;
+    KillTimer(m_hwnd, kSessionTimer);
 
+    // Closing the last window quits Prism: remember its tabs for next time.
+    // Closing one of several windows forgets that window's tabs.
+    bool last = s_windows.size() == 1;
+    if (last)
+        saveSession();
     s_windows.erase(std::remove(s_windows.begin(), s_windows.end(), this), s_windows.end());
-    if (s_windows.empty())
+    if (last)
         PostQuitMessage(0);
+    else
+        saveSession();
 }
 
 double BrowserWindow::scaleFactor() const
@@ -322,7 +352,12 @@ double BrowserWindow::scaleFactor() const
 
 int BrowserWindow::toolbarHeight() const
 {
-    return static_cast<int>(std::lround(kToolbarCSSHeight * scaleFactor()));
+    return static_cast<int>(std::lround(toolbarCSSHeight() * scaleFactor()));
+}
+
+int BrowserWindow::toolbarCSSHeight() const
+{
+    return settings::compactTabs() ? kCompactToolbarCSSHeight : kToolbarCSSHeight;
 }
 
 void BrowserWindow::applyScaleFactor()
@@ -338,7 +373,7 @@ void BrowserWindow::applyScaleFactor()
 
 void BrowserWindow::updateTheme()
 {
-    std::wstring setting = util::readSetting(L"Theme", L"system");
+    std::wstring setting = settings::theme();
     if (setting == L"dark")
         m_darkTheme = true;
     else if (setting == L"light")
@@ -457,7 +492,9 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
         swscanf_s(argument.c_str(), L"%d,%d", &x, &y);
         showMenu(x, y);
     } else if (command == L"openDownloads") {
-        ShellExecuteW(m_hwnd, L"open", util::downloadsDirectory().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        ShellExecuteW(m_hwnd, L"open", settings::downloadDirectory().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    } else if (command == L"settings") {
+        openInternalPage(L"settings");
     } else if (command == L"focusContent") {
         focusContent();
     }
@@ -478,6 +515,8 @@ void BrowserWindow::pushState()
     json += ",\"uiBase\":" + util::jsonString(engine::uiDirectoryURL());
     json += ",\"theme\":\"" + std::string(m_darkTheme ? "dark" : "light") + "\"";
     json += ",\"search\":" + util::jsonString(engine::searchURLTemplate());
+    json += ",\"accent\":" + util::jsonString(settings::accent());
+    json += ",\"compact\":" + std::string(settings::compactTabs() ? "true" : "false");
     json += ",\"active\":" + std::to_string(m_activeTabId);
     json += ",\"tabs\":[";
     for (size_t i = 0; i < m_tabs.size(); ++i) {
@@ -600,6 +639,7 @@ Tab* BrowserWindow::newTab(const std::wstring& url, bool select, WKPageConfigura
         selectTab(raw->id);
     else
         pushState();
+    scheduleSessionSave();
     return raw;
 }
 
@@ -653,6 +693,7 @@ void BrowserWindow::selectTab(int id)
     focusContent();
     updateTitle();
     pushState();
+    scheduleSessionSave();
 }
 
 void BrowserWindow::selectAdjacentTab(int delta)
@@ -679,6 +720,7 @@ void BrowserWindow::closeTab(int id)
 
     bool wasActive = tab->id == m_activeTabId;
     detachClients(tab->page);
+    scheduleSessionSave();
     // Destroying the view's window makes WebKit close the page and its process.
     DestroyWindow(tab->hwnd);
     m_tabs.erase(m_tabs.begin() + index);
@@ -744,6 +786,239 @@ void BrowserWindow::tabChanged(Tab* tab)
     if (tab->id == m_activeTabId)
         updateTitle();
     pushState();
+    if (sessionURL(tab) != tab->savedURL)
+        scheduleSessionSave();
+}
+
+// ---------------------------------------------------------------------------
+// Session restore
+//
+// %LOCALAPPDATA%\Prism\session.txt, UTF-8, one line per entry:
+//   W                 starts a window
+//   T <tab> 1|0 <tab> url   a tab (1 = the selected one)
+
+static std::wstring sessionFile()
+{
+    return util::dataDirectory() + L"\\session.txt";
+}
+
+// The address to reopen a tab with: prism:// names for Prism's pages, and the
+// original address for error pages.
+std::wstring BrowserWindow::sessionURL(const Tab* tab)
+{
+    const std::wstring& url = tab->url;
+    if (url.empty())
+        return { };
+    if (!engine::isInternalURL(url))
+        return url;
+    for (auto* name : { L"newtab", L"whatsnew", L"settings" }) {
+        if (engine::isInternalPage(url, name))
+            return std::wstring(L"prism://") + name;
+    }
+    if (engine::isInternalPage(url, L"error")) {
+        size_t start = url.find(L"url=");
+        if (start == std::wstring::npos)
+            return { };
+        start += 4;
+        size_t end = url.find(L'&', start);
+        return util::urlDecode(url.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start));
+    }
+    return { };
+}
+
+void BrowserWindow::scheduleSessionSave()
+{
+    if (s_windows.empty())
+        return;
+    s_sessionDirty = true;
+    // Save a second after things settle rather than on every change.
+    SetTimer(s_windows.front()->m_hwnd, kSessionTimer, 1000, nullptr);
+}
+
+void BrowserWindow::saveSession()
+{
+    s_sessionDirty = false;
+    std::string contents;
+    for (auto* window : s_windows) {
+        std::string tabs;
+        for (auto& tab : window->m_tabs) {
+            tab->savedURL = sessionURL(tab.get());
+            if (tab->savedURL.empty())
+                continue;
+            tabs += std::string("T\t") + (tab->id == window->m_activeTabId ? "1" : "0") + "\t" + util::toUTF8(tab->savedURL) + "\n";
+        }
+        if (!tabs.empty())
+            contents += "W\n" + tabs;
+    }
+    util::writeFileAtomically(sessionFile(), contents);
+}
+
+bool BrowserWindow::restoreSession(const std::vector<std::wstring>& extraURLs)
+{
+    struct SavedWindow {
+        std::vector<std::wstring> urls;
+        int active { -1 };
+    };
+    std::vector<SavedWindow> windows;
+
+    std::string contents = util::readFile(sessionFile());
+    size_t position = 0;
+    while (position < contents.size()) {
+        size_t end = contents.find('\n', position);
+        std::string line = contents.substr(position, end == std::string::npos ? std::string::npos : end - position);
+        position = end == std::string::npos ? contents.size() : end + 1;
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (line == "W") {
+            windows.emplace_back();
+        } else if (line.rfind("T\t", 0) == 0 && line.size() > 4 && !windows.empty()) {
+            size_t tab = line.find('\t', 2);
+            if (tab == std::string::npos)
+                continue;
+            std::wstring url = util::fromUTF8(line.substr(tab + 1));
+            // Only reopen web pages and Prism's own pages.
+            std::wstring scheme = schemeOf(url);
+            if (scheme != L"http" && scheme != L"https" && scheme != L"prism" && scheme != L"file")
+                continue;
+            if (line.substr(2, tab - 2) == "1")
+                windows.back().active = static_cast<int>(windows.back().urls.size());
+            windows.back().urls.push_back(url);
+        }
+    }
+    windows.erase(std::remove_if(windows.begin(), windows.end(), [](const SavedWindow& w) { return w.urls.empty(); }), windows.end());
+    if (windows.empty())
+        return false;
+
+    for (auto& url : extraURLs) {
+        windows.front().urls.push_back(url);
+        windows.front().active = static_cast<int>(windows.front().urls.size()) - 1;
+    }
+    bool opened = false;
+    for (auto& window : windows)
+        opened = BrowserWindow::open(window.urls, window.active) || opened;
+    return opened;
+}
+
+// ---------------------------------------------------------------------------
+// Settings
+
+void BrowserWindow::settingsChanged()
+{
+    engine::applyCookiePolicy();
+    for (auto* window : s_windows) {
+        window->updateTheme();
+        window->layout();
+        window->pushState();
+    }
+}
+
+void BrowserWindow::openInternalPage(const std::wstring& name)
+{
+    for (auto& tab : m_tabs) {
+        if (engine::isInternalPage(tab->url, name)) {
+            selectTab(tab->id);
+            return;
+        }
+    }
+    Tab* active = activeTab();
+    // Reuse an empty new tab instead of opening another one.
+    if (active && engine::isInternalPage(active->url, L"newtab")) {
+        navigate(active, L"prism://" + name);
+        focusContent();
+        return;
+    }
+    newTab(L"prism://" + name, true);
+}
+
+static std::wstring pickFolder(HWND owner, const std::wstring& start)
+{
+    std::wstring result;
+    IFileOpenDialog* dialog = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))))
+        return result;
+    DWORD options = 0;
+    dialog->GetOptions(&options);
+    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+    dialog->SetTitle(L"Choose where Prism saves downloads");
+    IShellItem* folder = nullptr;
+    if (!start.empty() && SUCCEEDED(SHCreateItemFromParsingName(start.c_str(), nullptr, IID_PPV_ARGS(&folder)))) {
+        dialog->SetFolder(folder);
+        folder->Release();
+    }
+    if (SUCCEEDED(dialog->Show(owner))) {
+        IShellItem* item = nullptr;
+        if (SUCCEEDED(dialog->GetResult(&item))) {
+            PWSTR path = nullptr;
+            if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+                result = path;
+                CoTaskMemFree(path);
+            }
+            item->Release();
+        }
+    }
+    dialog->Release();
+    return result;
+}
+
+// Commands from prism://settings. Each returns a string to the page.
+// Settings as JSON, plus the theme actually in use (for "system").
+static std::string settingsForPage()
+{
+    std::string json = settings::toJSON();
+    return std::string("{\"effectiveTheme\":\"") + (engine::darkTheme() ? "dark" : "light") + "\"," + json.substr(1);
+}
+
+std::string BrowserWindow::handleSettingsCommand(const std::wstring& command, const std::wstring& argument)
+{
+    if (command == L"get")
+        return settingsForPage();
+
+    if (command == L"set") {
+        size_t newline = argument.find(L'\n');
+        std::wstring key = argument.substr(0, newline);
+        std::wstring value = newline == std::wstring::npos ? L"" : argument.substr(newline + 1);
+        if (!settings::set(key, value))
+            return "{\"error\":\"invalid\"}";
+        settingsChanged();
+        return settingsForPage();
+    }
+
+    if (command == L"pickDownloadFolder") {
+        std::wstring folder = pickFolder(m_hwnd, settings::downloadDirectory());
+        if (!folder.empty() && settings::set(L"downloadDir", folder))
+            settingsChanged();
+        return settingsForPage();
+    }
+
+    if (command == L"clearData") {
+        bool cookies = argument.find(L"cookies") != std::wstring::npos;
+        bool cache = argument.find(L"cache") != std::wstring::npos;
+        if (!cookies && !cache)
+            return "false";
+        HWND hwnd = m_hwnd;
+        engine::clearBrowsingData(cookies, cache, [hwnd] {
+            if (auto* window = BrowserWindow::fromHWND(hwnd))
+                window->showToast(L"Browsing data cleared");
+        });
+        if (cookies)
+            m_closedURLs.clear();
+        return "true";
+    }
+
+    if (command == L"openDownloads") {
+        ShellExecuteW(m_hwnd, L"open", settings::downloadDirectory().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        return "true";
+    }
+
+    if (command == L"openDataFolder") {
+        ShellExecuteW(m_hwnd, L"open", util::dataDirectory().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        return "true";
+    }
+
+    if (command == L"version")
+        return util::jsonString(PRISM_VERSION_WSTRING);
+
+    return "null";
 }
 
 // ---------------------------------------------------------------------------
@@ -786,9 +1061,27 @@ void BrowserWindow::runJavaScriptConfirm(WKPageRef, WKStringRef text, WKFrameRef
     WKPageRunJavaScriptConfirmResultListenerCall(listener, result);
 }
 
-void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef defaultValue, WKFrameRef, WKSecurityOriginRef, WKPageRunJavaScriptPromptResultListenerRef listener, const void* clientInfo)
+void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef defaultValue, WKFrameRef frame, WKSecurityOriginRef, WKPageRunJavaScriptPromptResultListenerRef listener, const void* clientInfo)
 {
     Tab* tab = tabFromClientInfo(clientInfo);
+    std::wstring message = toWide(text);
+
+    // prism://settings talks to Prism the same way the toolbar does. Only the
+    // settings page itself (its main frame, checked by the frame's own URL)
+    // gets an answer, so websites can't read or change settings.
+    if (message.rfind(L"prism:", 0) == 0 && frame && WKFrameIsMainFrame(frame)) {
+        std::wstring frameURL = toWide(Ref<WKURLRef>::adopt(WKFrameCopyURL(frame)).get());
+        if (engine::isInternalPage(frameURL, L"settings")) {
+            std::wstring body = message.substr(6);
+            size_t newline = body.find(L'\n');
+            std::wstring command = body.substr(0, newline);
+            std::wstring argument = newline == std::wstring::npos ? L"" : body.substr(newline + 1);
+            std::string answer = tab->window->handleSettingsCommand(command, argument);
+            WKPageRunJavaScriptPromptResultListenerCall(listener, stringUTF8(answer).get());
+            return;
+        }
+    }
+
     auto answer = dialogs::prompt(tab->window->m_hwnd, dialogTitle(tab), toWide(text), toWide(defaultValue));
     if (!answer) {
         WKPageRunJavaScriptPromptResultListenerCall(listener, nullptr);
@@ -906,7 +1199,7 @@ void BrowserWindow::startDownload(WKDownloadRef download)
 
 void BrowserWindow::showMenu(int x, int y)
 {
-    enum { NewTab = 1, NewWindow, ReopenTab, ZoomIn, ZoomOut, ZoomReset, DevTools, Downloads, WhatsNew, About };
+    enum { NewTab = 1, NewWindow, ReopenTab, ZoomIn, ZoomOut, ZoomReset, DevTools, Downloads, Settings, WhatsNew, About };
 
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, NewTab, L"New tab\tCtrl+T");
@@ -920,6 +1213,7 @@ void BrowserWindow::showMenu(int x, int y)
     AppendMenuW(menu, MF_STRING, Downloads, L"Open Downloads folder");
     AppendMenuW(menu, MF_STRING | (WKPageGetInspector ? 0 : MF_GRAYED), DevTools, L"Developer tools\tF12");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, Settings, L"Settings\tCtrl+,");
     AppendMenuW(menu, MF_STRING, WhatsNew, L"What's new");
     AppendMenuW(menu, MF_STRING, About, L"About Prism");
 
@@ -939,7 +1233,8 @@ void BrowserWindow::showMenu(int x, int y)
     case ZoomReset: zoom(0); break;
     case DevTools: showDevTools(); break;
     case Downloads: handleToolbarCommand(L"openDownloads", L""); break;
-    case WhatsNew: newTab(L"prism://whatsnew", true); break;
+    case Settings: openInternalPage(L"settings"); break;
+    case WhatsNew: openInternalPage(L"whatsnew"); break;
     case About: {
         std::wstring text = L"Prism " PRISM_VERSION_WSTRING L"\n\n"
             L"A private, independent web browser built on WebKit.\n"
@@ -1031,6 +1326,9 @@ bool BrowserWindow::handleShortcut(const MSG& msg)
         case VK_OEM_PLUS:
         case VK_ADD:
             zoom(1.1);
+            return true;
+        case VK_OEM_COMMA:
+            openInternalPage(L"settings");
             return true;
         case VK_OEM_MINUS:
         case VK_SUBTRACT:
