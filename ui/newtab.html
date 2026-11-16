@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>New Tab</title>
+<script src="pages.js"></script>
+<link rel="stylesheet" href="pages.css">
+<style>
+  main {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding-top: 0;
+    padding-bottom: 12vh;
+    text-align: center;
+  }
+  h1 {
+    font-size: 26px;
+    margin: 14px 0 22px;
+  }
+  form {
+    width: 100%;
+    max-width: 560px;
+  }
+  input {
+    width: 100%;
+    height: 48px;
+    padding: 0 20px;
+    border-radius: 24px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 16px;
+    outline: none;
+  }
+  input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .privacy {
+    margin-top: 26px;
+    font-size: 13px;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .privacy svg {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    fill: none;
+    stroke: var(--good);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+</style>
+</head>
+<body>
+<main>
+  <img class="logo" src="prism.svg" alt="">
+  <h1>Prism</h1>
+  <form id="search" autocomplete="off">
+    <input id="query" type="search" placeholder="Search privately or enter an address" aria-label="Search or enter an address">
+  </form>
+  <p class="privacy">
+    <svg viewBox="0 0 16 16"><path d="M8 1.5l5 2v4c0 3.2-2.1 5.6-5 7-2.9-1.4-5-3.8-5-7v-4z"/><path d="M5.8 8l1.6 1.6L10.4 6.4"/></svg>
+    Trackers limited and third-party cookies blocked. Prism never collects your data.
+  </p>
+</main>
+<script>
+'use strict';
+const search = new URLSearchParams(location.search).get('search') || 'https://duckduckgo.com/?q=%s';
+document.getElementById('search').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const text = document.getElementById('query').value.trim();
+  if (!text) return;
+  const looksLikeAddress = !/\s/.test(text) && /^([a-z][a-z0-9+.-]*:\/\/|localhost|([a-z0-9-]+\.)+[a-z]{2,})/i.test(text);
+  if (looksLikeAddress)
+    location.href = /^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : 'https://' + text;
+  else
+    location.href = search.replace('%s', encodeURIComponent(text));
+});
+</script>
+</body>
+</html>

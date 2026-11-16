@@ -1,0 +1,57 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+cmake_minimum_required(VERSION 3.21)
+project(Prism VERSION 0.1.0 LANGUAGES CXX RC)
+
+if(NOT WIN32)
+    message(FATAL_ERROR "Prism currently builds for Windows only.")
+endif()
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
+add_executable(Prism WIN32
+    src/main.cpp
+    src/BrowserWindow.cpp
+    src/BrowserWindow.h
+    src/Dialogs.cpp
+    src/Dialogs.h
+    src/Engine.cpp
+    src/Engine.h
+    src/Util.cpp
+    src/Util.h
+    src/Version.h
+    src/WebKitApi.cpp
+    src/WebKitApi.h
+    res/Prism.rc
+)
+
+target_compile_definitions(Prism PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+
+if(MSVC)
+    target_compile_options(Prism PRIVATE /W4 /utf-8 /permissive- /Zc:__cplusplus)
+    # The manifest is embedded by res/Prism.rc.
+    target_link_options(Prism PRIVATE /MANIFEST:NO)
+else()
+    target_compile_options(Prism PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+endif()
+
+# Prism loads WebKit at runtime (see src/WebKitApi.h), so it only links
+# against Windows' own libraries.
+target_link_libraries(Prism PRIVATE user32 gdi32 shell32 shlwapi ole32 dwmapi advapi32)
+
+# Everything needed to run Prism ends up in dist/: Prism.exe, the ui folder,
+# and the WebKit runtime (put there by scripts/fetch-webkit.ps1).
+# The generator expression stops Visual Studio from adding a Release/ subfolder.
+set(PRISM_DIST_DIR "${CMAKE_SOURCE_DIR}/dist")
+set_target_properties(Prism PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$<1:${PRISM_DIST_DIR}>")
+
+add_custom_command(TARGET Prism POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/ui" "${PRISM_DIST_DIR}/ui"
+    COMMENT "Copying Prism's interface files to dist/ui"
+)

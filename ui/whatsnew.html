@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>What's new in Prism</title>
+<script src="pages.js"></script>
+<link rel="stylesheet" href="pages.css">
+<style>
+  header { display: flex; align-items: center; gap: 18px; margin-bottom: 8px; }
+  header h1 { margin: 0; }
+  .version { font-size: 13px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 2px 10px; }
+  table { border-collapse: collapse; font-size: 14px; }
+  td { padding: 4px 16px 4px 0; vertical-align: top; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img class="logo" src="prism.svg" alt="">
+    <div>
+      <h1>What's new in Prism</h1>
+      <span class="version">Version 0.1.0 &middot; first build</span>
+    </div>
+  </header>
+
+  <div class="card">
+    <h2 style="margin-top:0">Welcome to Prism</h2>
+    <p>Prism is a private, independent browser built on WebKit, the engine behind Safari. It isn't based on Chromium or Firefox, and it never collects your data.</p>
+  </div>
+
+  <h2>In this build</h2>
+  <ul class="notes">
+    <li><b>Tabs</b> with a tab strip, middle-click to close, and reopen closed tabs.</li>
+    <li><b>Address bar</b> that takes web addresses or searches (DuckDuckGo by default).</li>
+    <li><b>Privacy on by default:</b> WebKit's tracking prevention, third-party cookies blocked, no DNS prefetching, no link-click pings, and popups only when you click.</li>
+    <li><b>Zero telemetry.</b> Prism has no analytics, crash reporting or accounts, and it never contacts us.</li>
+    <li><b>Downloads</b> save to your Downloads folder.</li>
+    <li><b>Dark and light themes</b> that follow your Windows setting.</li>
+    <li><b>Developer tools</b> with <kbd>F12</kbd>.</li>
+  </ul>
+
+  <h2>Keyboard shortcuts</h2>
+  <table>
+    <tr><td><kbd>Ctrl</kbd> <kbd>T</kbd></td><td>New tab</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>W</kbd></td><td>Close tab</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>T</kbd></td><td>Reopen closed tab</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>Tab</kbd> / <kbd>Ctrl</kbd> <kbd>1</kbd>&ndash;<kbd>9</kbd></td><td>Switch tabs</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>L</kbd></td><td>Go to the address bar</td></tr>
+    <tr><td><kbd>Alt</kbd> <kbd>&larr;</kbd> / <kbd>Alt</kbd> <kbd>&rarr;</kbd></td><td>Back / forward</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd></td><td>Zoom in / out / reset</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>N</kbd></td><td>New window</td></tr>
+  </table>
+
+  <h2>Coming next</h2>
+  <ul class="notes dim">
+    <li>Settings page: search engine, theme, privacy levels.</li>
+    <li>Extensions from the Chrome Web Store and Firefox Add-ons, starting with uBlock Origin and Bitwarden.</li>
+    <li>Bookmarks, history and session restore.</li>
+    <li>Customization: themes, layouts and custom CSS.</li>
+  </ul>
+</main>
+</body>
+</html>

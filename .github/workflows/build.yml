@@ -1,0 +1,99 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Builds Prism on GitHub's Windows servers and packages a ready-to-run zip
+# (Prism.exe + interface + WebKit runtime). Download it from the run's
+# "Artifacts" section. Pushing a tag like v0.1.0 also publishes a Release.
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      update_webkit:
+        description: 'Use the newest WebKit build instead of the one in webkit.lock'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # needed to publish Releases from tags
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up the Visual Studio C++ compiler
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build Prism
+        shell: cmd
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+      - name: Work out the WebKit version
+        id: webkit
+        shell: pwsh
+        run: |
+          $key = 'none'
+          if (Test-Path webkit.lock) { $key = (Get-Content webkit.lock -Raw | ConvertFrom-Json).revision }
+          "revision=$key" >> $env:GITHUB_OUTPUT
+
+      - name: Cache the WebKit download
+        if: steps.webkit.outputs.revision != 'none' && inputs.update_webkit != true
+        uses: actions/cache@v4
+        with:
+          path: .cache/webkit-*.zip
+          key: webkit-${{ steps.webkit.outputs.revision }}
+
+      - name: Download the WebKit runtime
+        shell: pwsh
+        run: |
+          if ('${{ inputs.update_webkit }}' -eq 'true') {
+            ./scripts/fetch-webkit.ps1 -Update
+          } else {
+            ./scripts/fetch-webkit.ps1
+          }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path src/Version.h -Pattern 'PRISM_VERSION_STRING "(.+)"').Matches[0].Groups[1].Value
+          $name = "Prism-$version-windows-x64"
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item -Recurse dist "package/$name"
+          Copy-Item LICENSE, README.md, webkit.lock "package/$name/" -ErrorAction SilentlyContinue
+          Compress-Archive -Path "package/$name" -DestinationPath "package/$name.zip"
+          "PACKAGE=$name" >> $env:GITHUB_ENV
+
+      - name: Upload the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE }}
+          path: package/${{ env.PACKAGE }}
+          retention-days: 30
+
+      - name: Upload webkit.lock (pin it by committing this file)
+        if: hashFiles('webkit.lock') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: webkit.lock
+          path: webkit.lock
+
+      - name: Publish a Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: package/${{ env.PACKAGE }}.zip
+          generate_release_notes: true

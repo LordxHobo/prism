@@ -1,0 +1,30 @@
+# Build output
+/build/
+/out/
+/dist/
+/package/
+
+# Downloaded WebKit builds
+/.cache/
+
+# Patch files (applied with git am)
+/patches/
+
+# Visual Studio / CMake
+.vs/
+CMakeSettings.json
+CMakeUserPresets.json
+*.user
+*.suo
+*.ilk
+*.obj
+*.pdb
+*.exp
+*.lib
+
+# Editors and OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

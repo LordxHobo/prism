@@ -1,0 +1,1092 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#include "BrowserWindow.h"
+
+#include "Dialogs.h"
+#include "Engine.h"
+#include "Util.h"
+#include "Version.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cwctype>
+#include <dwmapi.h>
+#include <shellapi.h>
+#include <windowsx.h>
+
+using namespace wk;
+
+namespace {
+
+constexpr wchar_t kWindowClass[] = L"PrismBrowserWindow";
+constexpr UINT WM_PRISM_CLOSE_TAB = WM_APP + 1;
+constexpr int kToolbarCSSHeight = 76; // must match --toolbar-height in ui/toolbar.css
+
+std::vector<BrowserWindow*> s_windows;
+int s_nextTabId = 0;
+
+Tab* tabFromClientInfo(const void* clientInfo)
+{
+    return const_cast<Tab*>(static_cast<const Tab*>(clientInfo));
+}
+
+BrowserWindow* windowFromClientInfo(const void* clientInfo)
+{
+    return const_cast<BrowserWindow*>(static_cast<const BrowserWindow*>(clientInfo));
+}
+
+std::wstring lower(std::wstring value)
+{
+    for (auto& c : value)
+        c = static_cast<wchar_t>(towlower(c));
+    return value;
+}
+
+std::wstring schemeOf(const std::wstring& url)
+{
+    size_t colon = url.find(L':');
+    if (colon == std::wstring::npos)
+        return { };
+    return lower(url.substr(0, colon));
+}
+
+std::wstring hostOf(const std::wstring& url)
+{
+    size_t start = url.find(L"://");
+    if (start == std::wstring::npos)
+        return url;
+    start += 3;
+    size_t end = url.find_first_of(L"/?#", start);
+    return url.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start);
+}
+
+bool systemUsesDarkTheme()
+{
+    DWORD value = 0, size = sizeof(value);
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+            L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS)
+        return value == 0;
+    return false;
+}
+
+// Internal prism:// pages that may be opened from the address bar.
+bool isKnownInternalPage(const std::wstring& name)
+{
+    return name == L"newtab" || name == L"whatsnew";
+}
+
+struct DownloadInfo {
+    HWND window { };
+    std::wstring path;
+};
+
+void downloadToast(HWND window, const std::wstring& text)
+{
+    if (auto* browser = BrowserWindow::fromHWND(window))
+        browser->showToast(text);
+}
+
+std::wstring fileNameOf(const std::wstring& path)
+{
+    size_t slash = path.find_last_of(L"\\/");
+    return slash == std::wstring::npos ? path : path.substr(slash + 1);
+}
+
+WKStringRef downloadDecideDestination(WKDownloadRef, WKURLResponseRef response, WKStringRef suggestedFilename, const void* clientInfo)
+{
+    auto* info = static_cast<DownloadInfo*>(const_cast<void*>(clientInfo));
+    std::wstring name = toWide(suggestedFilename);
+    if (name.empty() && response) {
+        auto responseURL = Ref<WKURLRef>::adopt(WKURLResponseCopyURL(response));
+        std::wstring urlText = toWide(responseURL.get());
+        size_t end = urlText.find_first_of(L"?#");
+        urlText = urlText.substr(0, end);
+        name = fileNameOf(urlText);
+    }
+    info->path = util::uniqueFilePath(util::downloadsDirectory(), name);
+    downloadToast(info->window, L"Downloading " + fileNameOf(info->path) + L"…");
+    // WebKit takes ownership of the returned string.
+    return WKStringCreateWithUTF8CString(util::toUTF8(info->path).c_str());
+}
+
+void downloadDidFinish(WKDownloadRef, const void* clientInfo)
+{
+    auto* info = static_cast<DownloadInfo*>(const_cast<void*>(clientInfo));
+    downloadToast(info->window, L"Downloaded " + fileNameOf(info->path) + L" — click to open your Downloads folder");
+    delete info;
+}
+
+void downloadDidFail(WKDownloadRef, WKErrorRef error, WKDataRef, const void* clientInfo)
+{
+    auto* info = static_cast<DownloadInfo*>(const_cast<void*>(clientInfo));
+    std::wstring reason = error ? toWide(Ref<WKStringRef>::adopt(WKErrorCopyLocalizedDescription(error)).get()) : L"";
+    downloadToast(info->window, L"Download failed: " + fileNameOf(info->path) + (reason.empty() ? L"" : L" (" + reason + L")"));
+    delete info;
+}
+
+} // namespace
+
+// ---------------------------------------------------------------------------
+// Window setup
+
+bool BrowserWindow::registerWindowClass(HINSTANCE instance)
+{
+    WNDCLASSEXW wc = { sizeof(wc) };
+    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.lpfnWndProc = windowProc;
+    wc.hInstance = instance;
+    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
+    wc.hIconSm = wc.hIcon;
+    wc.lpszClassName = kWindowClass;
+    return RegisterClassExW(&wc) != 0;
+}
+
+BrowserWindow* BrowserWindow::open(const std::vector<std::wstring>& startURLs)
+{
+    auto* window = new BrowserWindow();
+    window->m_pendingStartURLs = startURLs;
+    if (window->m_pendingStartURLs.empty())
+        window->m_pendingStartURLs.push_back(L"prism://newtab");
+
+    UINT dpi = GetDpiForSystem();
+    int width = MulDiv(1280, dpi, 96), height = MulDiv(820, dpi, 96);
+    HWND hwnd = CreateWindowExW(0, kWindowClass, L"Prism", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+        CW_USEDEFAULT, CW_USEDEFAULT, width, height, nullptr, nullptr, GetModuleHandleW(nullptr), window);
+    if (!hwnd)
+        return nullptr; // windowProc deleted `window` in WM_NCDESTROY.
+    ShowWindow(hwnd, SW_SHOWNORMAL);
+    UpdateWindow(hwnd);
+    return window;
+}
+
+BrowserWindow* BrowserWindow::fromHWND(HWND hwnd)
+{
+    if (!hwnd)
+        return nullptr;
+    HWND root = GetAncestor(hwnd, GA_ROOT);
+    for (auto* window : s_windows) {
+        if (window->m_hwnd == root)
+            return window;
+    }
+    return nullptr;
+}
+
+size_t BrowserWindow::windowCount()
+{
+    return s_windows.size();
+}
+
+LRESULT CALLBACK BrowserWindow::windowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    BrowserWindow* window = nullptr;
+    if (message == WM_NCCREATE) {
+        window = static_cast<BrowserWindow*>(reinterpret_cast<CREATESTRUCTW*>(lParam)->lpCreateParams);
+        window->m_hwnd = hwnd;
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(window));
+    } else
+        window = reinterpret_cast<BrowserWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+    if (!window)
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+
+    if (message == WM_NCDESTROY) {
+        // Child windows (the WebKit views) are gone by now, so it's safe to
+        // release our references to them.
+        LRESULT result = DefWindowProcW(hwnd, message, wParam, lParam);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+        delete window;
+        return result;
+    }
+    return window->handleMessage(message, wParam, lParam);
+}
+
+LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message) {
+    case WM_CREATE: {
+        s_windows.push_back(this);
+        updateTheme();
+        createToolbar();
+        auto urls = std::move(m_pendingStartURLs);
+        for (size_t i = 0; i < urls.size(); ++i)
+            newTab(urls[i], i + 1 == urls.size());
+        return 0;
+    }
+    case WM_SIZE:
+        layout();
+        return 0;
+    case WM_GETMINMAXINFO: {
+        auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
+        UINT dpi = GetDpiForWindow(m_hwnd);
+        info->ptMinTrackSize.x = MulDiv(480, dpi, 96);
+        info->ptMinTrackSize.y = MulDiv(320, dpi, 96);
+        return 0;
+    }
+    case WM_DPICHANGED: {
+        auto* suggested = reinterpret_cast<RECT*>(lParam);
+        SetWindowPos(m_hwnd, nullptr, suggested->left, suggested->top,
+            suggested->right - suggested->left, suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        applyScaleFactor();
+        layout();
+        return 0;
+    }
+    case WM_ERASEBKGND: {
+        RECT rect;
+        GetClientRect(m_hwnd, &rect);
+        HBRUSH brush = CreateSolidBrush(m_darkTheme ? RGB(28, 28, 32) : RGB(246, 246, 248));
+        FillRect(reinterpret_cast<HDC>(wParam), &rect, brush);
+        DeleteObject(brush);
+        return 1;
+    }
+    case WM_SETTINGCHANGE:
+        if (lParam && !lstrcmpW(reinterpret_cast<const wchar_t*>(lParam), L"ImmersiveColorSet")) {
+            updateTheme();
+            pushState();
+        }
+        break;
+    case WM_ACTIVATE:
+        if (LOWORD(wParam) != WA_INACTIVE)
+            focusContent();
+        return 0;
+    case WM_APPCOMMAND:
+        switch (GET_APPCOMMAND_LPARAM(lParam)) {
+        case APPCOMMAND_BROWSER_BACKWARD:
+            if (auto* tab = activeTab()) WKPageGoBack(tab->page);
+            return TRUE;
+        case APPCOMMAND_BROWSER_FORWARD:
+            if (auto* tab = activeTab()) WKPageGoForward(tab->page);
+            return TRUE;
+        case APPCOMMAND_BROWSER_REFRESH:
+            if (auto* tab = activeTab()) WKPageReload(tab->page);
+            return TRUE;
+        case APPCOMMAND_BROWSER_STOP:
+            if (auto* tab = activeTab()) WKPageStopLoading(tab->page);
+            return TRUE;
+        case APPCOMMAND_BROWSER_HOME:
+            if (auto* tab = activeTab()) navigate(tab, L"prism://newtab");
+            return TRUE;
+        }
+        break;
+    case WM_PRISM_CLOSE_TAB:
+        closeTab(static_cast<int>(wParam));
+        return 0;
+    case WM_CLOSE:
+        DestroyWindow(m_hwnd);
+        return 0;
+    case WM_DESTROY:
+        onDestroy();
+        return 0;
+    }
+    return DefWindowProcW(m_hwnd, message, wParam, lParam);
+}
+
+// Stops WebKit from calling back into a tab or window we're about to free.
+static void detachClients(WKPageRef page)
+{
+    if (!page)
+        return;
+    WKPageUIClientV6 uiClient = { };
+    uiClient.base.version = 6;
+    WKPageSetPageUIClient(page, &uiClient.base);
+    WKPageNavigationClientV3 navigationClient = { };
+    navigationClient.base.version = 3;
+    WKPageSetPageNavigationClient(page, &navigationClient.base);
+    WKPageSetPageStateClient(page, nullptr);
+}
+
+void BrowserWindow::onDestroy()
+{
+    detachClients(m_toolbarPage);
+    for (auto& tab : m_tabs)
+        detachClients(tab->page);
+    m_toolbarReady = false;
+
+    s_windows.erase(std::remove(s_windows.begin(), s_windows.end(), this), s_windows.end());
+    if (s_windows.empty())
+        PostQuitMessage(0);
+}
+
+double BrowserWindow::scaleFactor() const
+{
+    double scale = GetDpiForWindow(m_hwnd) / 96.0;
+    // Like WebKit's own MiniBrowser, round to whole numbers when we can: WebKit's
+    // Windows port draws fractional scales (125%, 150%) less cleanly.
+    if (WKPageSetCustomBackingScaleFactor)
+        scale = std::max(1.0, std::round(scale));
+    return scale;
+}
+
+int BrowserWindow::toolbarHeight() const
+{
+    return static_cast<int>(std::lround(kToolbarCSSHeight * scaleFactor()));
+}
+
+void BrowserWindow::applyScaleFactor()
+{
+    double scale = scaleFactor();
+    if (!WKPageSetCustomBackingScaleFactor)
+        return;
+    if (m_toolbarPage)
+        WKPageSetCustomBackingScaleFactor(m_toolbarPage, scale);
+    for (auto& tab : m_tabs)
+        WKPageSetCustomBackingScaleFactor(tab->page, scale);
+}
+
+void BrowserWindow::updateTheme()
+{
+    std::wstring setting = util::readSetting(L"Theme", L"system");
+    if (setting == L"dark")
+        m_darkTheme = true;
+    else if (setting == L"light")
+        m_darkTheme = false;
+    else
+        m_darkTheme = systemUsesDarkTheme();
+    engine::setDarkTheme(m_darkTheme);
+
+    BOOL dark = m_darkTheme ? TRUE : FALSE;
+    constexpr DWORD kUseImmersiveDarkMode = 20; // DWMWA_USE_IMMERSIVE_DARK_MODE
+    DwmSetWindowAttribute(m_hwnd, kUseImmersiveDarkMode, &dark, sizeof(dark));
+    InvalidateRect(m_hwnd, nullptr, TRUE);
+}
+
+void BrowserWindow::layout()
+{
+    RECT client;
+    GetClientRect(m_hwnd, &client);
+    int width = client.right - client.left;
+    int height = client.bottom - client.top;
+    int toolbar = std::min(toolbarHeight(), height);
+
+    if (m_toolbarHwnd)
+        MoveWindow(m_toolbarHwnd, 0, 0, width, toolbar, TRUE);
+    if (auto* tab = activeTab())
+        MoveWindow(tab->hwnd, 0, toolbar, width, std::max(0, height - toolbar), TRUE);
+}
+
+// ---------------------------------------------------------------------------
+// Toolbar (the browser's own interface, drawn by WebKit from ui/toolbar.html)
+
+void BrowserWindow::createToolbar()
+{
+    RECT rect = { };
+    m_toolbarView = Ref<WKViewRef>::adopt(WKViewCreate(rect, engine::pageConfiguration(), m_hwnd));
+    WKViewSetIsInWindow(m_toolbarView.get(), true);
+    m_toolbarHwnd = WKViewGetWindow(m_toolbarView.get());
+    m_toolbarPage = WKViewGetPage(m_toolbarView.get());
+    engine::configurePage(m_toolbarPage, scaleFactor());
+
+    WKPageUIClientV6 uiClient = { };
+    uiClient.base.version = 6;
+    uiClient.base.clientInfo = this;
+    uiClient.runJavaScriptPrompt = toolbarPrompt;
+    WKPageSetPageUIClient(m_toolbarPage, &uiClient.base);
+
+    WKPageNavigationClientV3 navigationClient = { };
+    navigationClient.base.version = 3;
+    navigationClient.base.clientInfo = this;
+    navigationClient.decidePolicyForNavigationAction = toolbarDecidePolicyForNavigationAction;
+    WKPageSetPageNavigationClient(m_toolbarPage, &navigationClient.base);
+
+    engine::loadInternalPage(m_toolbarPage, L"toolbar");
+    layout();
+}
+
+void BrowserWindow::toolbarDecidePolicyForNavigationAction(WKPageRef, WKNavigationActionRef action, WKFramePolicyListenerRef listener, WKTypeRef, const void*)
+{
+    // The toolbar may only ever show toolbar.html.
+    auto request = Ref<WKURLRequestRef>::adopt(WKNavigationActionCopyRequest(action));
+    auto requestURL = Ref<WKURLRef>::adopt(WKURLRequestCopyURL(request.get()));
+    std::wstring target = toWide(requestURL.get());
+    if (engine::isInternalPage(target, L"toolbar"))
+        WKFramePolicyListenerUse(listener);
+    else
+        WKFramePolicyListenerIgnore(listener);
+}
+
+// The toolbar talks to Prism through window.prompt("prism:<command>\n<argument>").
+// It's synchronous, needs no extra WebKit plumbing, and only the toolbar's own
+// page is listened to, so websites can't send Prism commands.
+void BrowserWindow::toolbarPrompt(WKPageRef, WKStringRef message, WKStringRef, WKFrameRef, WKSecurityOriginRef, WKPageRunJavaScriptPromptResultListenerRef listener, const void* clientInfo)
+{
+    auto* window = windowFromClientInfo(clientInfo);
+    std::wstring text = toWide(message);
+    WKPageRunJavaScriptPromptResultListenerCall(listener, nullptr);
+
+    if (text.rfind(L"prism:", 0) != 0)
+        return;
+    text = text.substr(6);
+    size_t newline = text.find(L'\n');
+    std::wstring command = text.substr(0, newline);
+    std::wstring argument = newline == std::wstring::npos ? L"" : text.substr(newline + 1);
+    window->handleToolbarCommand(command, argument);
+}
+
+void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std::wstring& argument)
+{
+    Tab* tab = activeTab();
+    if (command == L"ready") {
+        m_toolbarReady = true;
+        pushState();
+        if (GetForegroundWindow() == m_hwnd)
+            focusContent();
+    } else if (command == L"navigate") {
+        if (tab && !argument.empty()) {
+            navigate(tab, argument);
+            focusContent();
+        }
+    } else if (command == L"back") {
+        if (tab) WKPageGoBack(tab->page);
+    } else if (command == L"forward") {
+        if (tab) WKPageGoForward(tab->page);
+    } else if (command == L"reload") {
+        if (tab) WKPageReload(tab->page);
+    } else if (command == L"stop") {
+        if (tab) WKPageStopLoading(tab->page);
+    } else if (command == L"newtab") {
+        newTab(L"prism://newtab", true);
+    } else if (command == L"select") {
+        selectTab(_wtoi(argument.c_str()));
+    } else if (command == L"close") {
+        closeTab(_wtoi(argument.c_str()));
+    } else if (command == L"menu") {
+        int x = 0, y = 0;
+        swscanf_s(argument.c_str(), L"%d,%d", &x, &y);
+        showMenu(x, y);
+    } else if (command == L"openDownloads") {
+        ShellExecuteW(m_hwnd, L"open", util::downloadsDirectory().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    } else if (command == L"focusContent") {
+        focusContent();
+    }
+}
+
+void BrowserWindow::runToolbarScript(const std::string& script)
+{
+    if (!m_toolbarPage || !m_toolbarReady)
+        return;
+    WKPageEvaluateJavaScriptInMainFrame(m_toolbarPage, stringUTF8(script).get(), nullptr, nullptr);
+}
+
+void BrowserWindow::pushState()
+{
+    if (!m_toolbarReady)
+        return;
+    std::string json = "{\"version\":" + util::jsonString(PRISM_VERSION_WSTRING);
+    json += ",\"uiBase\":" + util::jsonString(engine::uiDirectoryURL());
+    json += ",\"theme\":\"" + std::string(m_darkTheme ? "dark" : "light") + "\"";
+    json += ",\"search\":" + util::jsonString(engine::searchURLTemplate());
+    json += ",\"active\":" + std::to_string(m_activeTabId);
+    json += ",\"tabs\":[";
+    for (size_t i = 0; i < m_tabs.size(); ++i) {
+        Tab* tab = m_tabs[i].get();
+        if (i)
+            json += ',';
+        char progress[32];
+        snprintf(progress, sizeof(progress), "%.3f", tab->progress);
+        char zoom[32];
+        snprintf(zoom, sizeof(zoom), "%.3f", WKPageGetPageZoomFactor(tab->page));
+        json += "{\"id\":" + std::to_string(tab->id);
+        json += ",\"title\":" + util::jsonString(tab->title);
+        json += ",\"url\":" + util::jsonString(tab->url);
+        json += ",\"loading\":" + std::string(tab->loading ? "true" : "false");
+        json += ",\"progress\":" + std::string(progress);
+        json += ",\"canBack\":" + std::string(WKPageCanGoBack(tab->page) ? "true" : "false");
+        json += ",\"canForward\":" + std::string(WKPageCanGoForward(tab->page) ? "true" : "false");
+        json += ",\"zoom\":" + std::string(zoom);
+        json += "}";
+    }
+    json += "]}";
+    runToolbarScript("window.prism && prism.update(" + json + ");");
+}
+
+void BrowserWindow::showToast(const std::wstring& text)
+{
+    runToolbarScript("window.prism && prism.toast(" + util::jsonString(text) + ");");
+}
+
+void BrowserWindow::focusAddressBar()
+{
+    if (!m_toolbarHwnd)
+        return;
+    SetFocus(m_toolbarHwnd);
+    runToolbarScript("window.prism && prism.focusAddress();");
+}
+
+void BrowserWindow::focusContent()
+{
+    Tab* tab = activeTab();
+    if (!tab)
+        return;
+    if (engine::isInternalPage(tab->url, L"newtab")) {
+        // New tab: start typing straight away.
+        focusAddressBar();
+        return;
+    }
+    SetFocus(tab->hwnd);
+}
+
+void BrowserWindow::updateTitle()
+{
+    Tab* tab = activeTab();
+    std::wstring title = tab && !tab->title.empty() ? tab->title + L" - Prism" : L"Prism";
+    SetWindowTextW(m_hwnd, title.c_str());
+}
+
+// ---------------------------------------------------------------------------
+// Tabs
+
+Tab* BrowserWindow::activeTab() const
+{
+    return findTab(m_activeTabId);
+}
+
+Tab* BrowserWindow::findTab(int id) const
+{
+    for (auto& tab : m_tabs) {
+        if (tab->id == id)
+            return tab.get();
+    }
+    return nullptr;
+}
+
+Tab* BrowserWindow::findTab(WKPageRef page) const
+{
+    for (auto& tab : m_tabs) {
+        if (tab->page == page)
+            return tab.get();
+    }
+    return nullptr;
+}
+
+int BrowserWindow::indexOf(const Tab* tab) const
+{
+    for (size_t i = 0; i < m_tabs.size(); ++i) {
+        if (m_tabs[i].get() == tab)
+            return static_cast<int>(i);
+    }
+    return -1;
+}
+
+Tab* BrowserWindow::newTab(const std::wstring& url, bool select, WKPageConfigurationRef configuration)
+{
+    auto tab = std::make_unique<Tab>();
+    tab->window = this;
+    tab->id = ++s_nextTabId;
+
+    RECT rect = { };
+    tab->view = Ref<WKViewRef>::adopt(WKViewCreate(rect, configuration ? configuration : engine::pageConfiguration(), m_hwnd));
+    WKViewSetIsInWindow(tab->view.get(), true);
+    tab->hwnd = WKViewGetWindow(tab->view.get());
+    tab->page = WKViewGetPage(tab->view.get());
+    ShowWindow(tab->hwnd, SW_HIDE);
+    engine::configurePage(tab->page, scaleFactor());
+
+    Tab* raw = tab.get();
+    attachClients(raw);
+
+    // Popups and links open next to the tab they came from; new tabs go last.
+    int active = indexOf(activeTab());
+    if (configuration && active >= 0)
+        m_tabs.insert(m_tabs.begin() + active + 1, std::move(tab));
+    else
+        m_tabs.push_back(std::move(tab));
+
+    if (!url.empty())
+        navigate(raw, url);
+    if (select)
+        selectTab(raw->id);
+    else
+        pushState();
+    return raw;
+}
+
+void BrowserWindow::attachClients(Tab* tab)
+{
+    WKPageUIClientV6 uiClient = { };
+    uiClient.base.version = 6;
+    uiClient.base.clientInfo = tab;
+    uiClient.createNewPage = createNewPage;
+    uiClient.close = closePage;
+    uiClient.runJavaScriptAlert = runJavaScriptAlert;
+    uiClient.runJavaScriptConfirm = runJavaScriptConfirm;
+    uiClient.runJavaScriptPrompt = runJavaScriptPrompt;
+    WKPageSetPageUIClient(tab->page, &uiClient.base);
+
+    WKPageNavigationClientV3 navigationClient = { };
+    navigationClient.base.version = 3;
+    navigationClient.base.clientInfo = tab;
+    navigationClient.decidePolicyForNavigationAction = decidePolicyForNavigationAction;
+    navigationClient.decidePolicyForNavigationResponse = decidePolicyForNavigationResponse;
+    navigationClient.didFailProvisionalNavigation = didFailProvisionalNavigation;
+    navigationClient.webProcessDidTerminate = webProcessDidTerminate;
+    navigationClient.navigationActionDidBecomeDownload = navigationActionDidBecomeDownload;
+    navigationClient.navigationResponseDidBecomeDownload = navigationResponseDidBecomeDownload;
+    navigationClient.contextMenuDidCreateDownload = contextMenuDidCreateDownload;
+    WKPageSetPageNavigationClient(tab->page, &navigationClient.base);
+
+    WKPageStateClientV0 stateClient = { };
+    stateClient.base.version = 0;
+    stateClient.base.clientInfo = tab;
+    stateClient.didChangeTitle = tabStateChanged;
+    stateClient.didChangeIsLoading = tabStateChanged;
+    stateClient.didChangeEstimatedProgress = tabStateChanged;
+    stateClient.didChangeActiveURL = tabStateChanged;
+    stateClient.didChangeCanGoBack = tabStateChanged;
+    stateClient.didChangeCanGoForward = tabStateChanged;
+    WKPageSetPageStateClient(tab->page, &stateClient.base);
+}
+
+void BrowserWindow::selectTab(int id)
+{
+    Tab* next = findTab(id);
+    if (!next)
+        return;
+    Tab* previous = activeTab();
+    m_activeTabId = id;
+    layout();
+    ShowWindow(next->hwnd, SW_SHOW);
+    if (previous && previous != next)
+        ShowWindow(previous->hwnd, SW_HIDE);
+    focusContent();
+    updateTitle();
+    pushState();
+}
+
+void BrowserWindow::selectAdjacentTab(int delta)
+{
+    if (m_tabs.size() < 2)
+        return;
+    int count = static_cast<int>(m_tabs.size());
+    int index = (indexOf(activeTab()) + delta + count) % count;
+    selectTab(m_tabs[index]->id);
+}
+
+void BrowserWindow::closeTab(int id)
+{
+    Tab* tab = findTab(id);
+    if (!tab)
+        return;
+    int index = indexOf(tab);
+
+    if (!tab->url.empty() && !engine::isInternalURL(tab->url)) {
+        m_closedURLs.push_back(tab->url);
+        if (m_closedURLs.size() > 25)
+            m_closedURLs.erase(m_closedURLs.begin());
+    }
+
+    bool wasActive = tab->id == m_activeTabId;
+    detachClients(tab->page);
+    // Destroying the view's window makes WebKit close the page and its process.
+    DestroyWindow(tab->hwnd);
+    m_tabs.erase(m_tabs.begin() + index);
+
+    if (m_tabs.empty()) {
+        // Last tab closed: close the window, but not from inside a WebKit
+        // callback (this may be running inside the toolbar's own callback).
+        m_activeTabId = 0;
+        PostMessageW(m_hwnd, WM_CLOSE, 0, 0);
+        return;
+    }
+    if (wasActive) {
+        index = std::min(index, static_cast<int>(m_tabs.size()) - 1);
+        m_activeTabId = 0;
+        selectTab(m_tabs[index]->id);
+    } else
+        pushState();
+}
+
+void BrowserWindow::reopenClosedTab()
+{
+    if (m_closedURLs.empty())
+        return;
+    std::wstring url = m_closedURLs.back();
+    m_closedURLs.pop_back();
+    newTab(url, true);
+}
+
+void BrowserWindow::navigate(Tab* tab, const std::wstring& url)
+{
+    if (url.rfind(L"prism://", 0) == 0) {
+        std::wstring name = lower(url.substr(8));
+        while (!name.empty() && name.back() == L'/')
+            name.pop_back();
+        if (!isKnownInternalPage(name))
+            name = L"newtab";
+        std::wstring query;
+        if (name == L"newtab")
+            query = L"search=" + util::urlEncode(engine::searchURLTemplate());
+        tab->url = engine::internalPageURL(name, query);
+        engine::loadInternalPage(tab->page, name, query);
+    } else {
+        tab->url = url;
+        WKPageLoadURL(tab->page, wk::url(url).get());
+    }
+    tabChanged(tab);
+}
+
+void BrowserWindow::tabStateChanged(const void* clientInfo)
+{
+    Tab* tab = tabFromClientInfo(clientInfo);
+    tab->title = toWide(Ref<WKStringRef>::adopt(WKPageCopyTitle(tab->page)).get());
+    std::wstring active = toWide(Ref<WKURLRef>::adopt(WKPageCopyActiveURL(tab->page)).get());
+    if (!active.empty())
+        tab->url = active;
+    tab->progress = WKPageGetEstimatedProgress(tab->page);
+    tab->loading = tab->progress > 0 && tab->progress < 1;
+    tab->window->tabChanged(tab);
+}
+
+void BrowserWindow::tabChanged(Tab* tab)
+{
+    if (tab->id == m_activeTabId)
+        updateTitle();
+    pushState();
+}
+
+// ---------------------------------------------------------------------------
+// Page callbacks
+
+WKPageRef BrowserWindow::createNewPage(WKPageRef, WKPageConfigurationRef configuration, WKNavigationActionRef, WKWindowFeaturesRef, const void* clientInfo)
+{
+    // window.open() and target="_blank" links open as a new tab. WebKit loads
+    // the page into it; we only have to create it with the given configuration.
+    Tab* opener = tabFromClientInfo(clientInfo);
+    Tab* tab = opener->window->newTab(L"", true, configuration);
+    // WebKit takes ownership of one reference.
+    return static_cast<WKPageRef>(WKRetain(tab->page));
+}
+
+void BrowserWindow::closePage(WKPageRef, const void* clientInfo)
+{
+    // window.close(): close the tab once WebKit is done with this callback.
+    Tab* tab = tabFromClientInfo(clientInfo);
+    PostMessageW(tab->window->m_hwnd, WM_PRISM_CLOSE_TAB, static_cast<WPARAM>(tab->id), 0);
+}
+
+static std::wstring dialogTitle(Tab* tab)
+{
+    std::wstring host = engine::isInternalURL(tab->url) ? L"Prism" : hostOf(tab->url);
+    return host.empty() ? L"Prism" : host + L" says";
+}
+
+void BrowserWindow::runJavaScriptAlert(WKPageRef, WKStringRef text, WKFrameRef, WKSecurityOriginRef, WKPageRunJavaScriptAlertResultListenerRef listener, const void* clientInfo)
+{
+    Tab* tab = tabFromClientInfo(clientInfo);
+    MessageBoxW(tab->window->m_hwnd, toWide(text).c_str(), dialogTitle(tab).c_str(), MB_OK);
+    WKPageRunJavaScriptAlertResultListenerCall(listener);
+}
+
+void BrowserWindow::runJavaScriptConfirm(WKPageRef, WKStringRef text, WKFrameRef, WKSecurityOriginRef, WKPageRunJavaScriptConfirmResultListenerRef listener, const void* clientInfo)
+{
+    Tab* tab = tabFromClientInfo(clientInfo);
+    bool result = MessageBoxW(tab->window->m_hwnd, toWide(text).c_str(), dialogTitle(tab).c_str(), MB_OKCANCEL) == IDOK;
+    WKPageRunJavaScriptConfirmResultListenerCall(listener, result);
+}
+
+void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef defaultValue, WKFrameRef, WKSecurityOriginRef, WKPageRunJavaScriptPromptResultListenerRef listener, const void* clientInfo)
+{
+    Tab* tab = tabFromClientInfo(clientInfo);
+    auto answer = dialogs::prompt(tab->window->m_hwnd, dialogTitle(tab), toWide(text), toWide(defaultValue));
+    if (!answer) {
+        WKPageRunJavaScriptPromptResultListenerCall(listener, nullptr);
+        return;
+    }
+    WKPageRunJavaScriptPromptResultListenerCall(listener, string(*answer).get());
+}
+
+void BrowserWindow::decidePolicyForNavigationAction(WKPageRef, WKNavigationActionRef action, WKFramePolicyListenerRef listener, WKTypeRef, const void* clientInfo)
+{
+    Tab* tab = tabFromClientInfo(clientInfo);
+    auto request = Ref<WKURLRequestRef>::adopt(WKNavigationActionCopyRequest(action));
+    auto requestURL = Ref<WKURLRef>::adopt(WKURLRequestCopyURL(request.get()));
+    std::wstring target = toWide(requestURL.get());
+    std::wstring scheme = schemeOf(target);
+
+    static const wchar_t* webSchemes[] = { L"http", L"https", L"file", L"about", L"data", L"blob", L"javascript", L"ws", L"wss" };
+    for (auto* web : webSchemes) {
+        if (scheme == web) {
+            WKFramePolicyListenerUse(listener);
+            return;
+        }
+    }
+
+    WKFramePolicyListenerIgnore(listener);
+
+    if (scheme == L"prism") {
+        tab->window->navigate(tab, target);
+        return;
+    }
+    if (scheme.empty())
+        return;
+
+    // mailto:, tel:, steam:, ... belong to other apps. Always ask first, so a
+    // website can't launch programs on your PC behind your back.
+    std::wstring question = L"This page wants to open a link in another app:\n\n" + target + L"\n\nOpen it?";
+    if (MessageBoxW(tab->window->m_hwnd, question.c_str(), L"Open in another app?", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES)
+        ShellExecuteW(tab->window->m_hwnd, L"open", target.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+void BrowserWindow::decidePolicyForNavigationResponse(WKPageRef, WKNavigationResponseRef response, WKFramePolicyListenerRef listener, WKTypeRef, const void*)
+{
+    auto frame = Ref<WKFrameInfoRef>::adopt(WKNavigationResponseCopyFrameInfo(response));
+    bool isMainFrame = frame && WKFrameInfoGetIsMainFrame(frame.get());
+    // Anything WebKit can't display in the main frame (zip files, installers,
+    // ...) becomes a download.
+    if (WKNavigationResponseCanShowMIMEType(response) || !isMainFrame)
+        WKFramePolicyListenerUse(listener);
+    else
+        WKFramePolicyListenerDownload(listener);
+}
+
+void BrowserWindow::didFailProvisionalNavigation(WKPageRef, WKNavigationRef, WKErrorRef error, WKTypeRef, const void* clientInfo)
+{
+    Tab* tab = tabFromClientInfo(clientInfo);
+    int code = WKErrorGetErrorCode(error);
+    // -999: cancelled (e.g. you clicked another link), 102: became a download,
+    // 204: handled by a plug-in. None of these are real failures.
+    if (code == -999 || code == 102 || code == 204)
+        return;
+
+    std::wstring failingURL = toWide(Ref<WKURLRef>::adopt(WKErrorCopyFailingURL(error)).get());
+    std::wstring description = toWide(Ref<WKStringRef>::adopt(WKErrorCopyLocalizedDescription(error)).get());
+    std::wstring query = L"kind=network&url=" + util::urlEncode(failingURL)
+        + L"&message=" + util::urlEncode(description) + L"&code=" + std::to_wstring(code);
+    tab->url = failingURL;
+    engine::loadInternalPage(tab->page, L"error", query);
+    tab->window->tabChanged(tab);
+}
+
+void BrowserWindow::webProcessDidTerminate(WKPageRef, uint32_t reason, const void* clientInfo)
+{
+    Tab* tab = tabFromClientInfo(clientInfo);
+    // 2 = Prism closed it on purpose (closing the tab); anything else is a crash
+    // or the page using too much memory/CPU.
+    if (reason == 2)
+        return;
+    std::wstring lastURL = engine::isInternalURL(tab->url) ? L"" : tab->url;
+    std::wstring query = L"kind=crash&url=" + util::urlEncode(lastURL) + L"&code=" + std::to_wstring(reason);
+    tab->crashed = true;
+    tab->loading = false;
+    engine::loadInternalPage(tab->page, L"error", query);
+    tab->window->tabChanged(tab);
+}
+
+void BrowserWindow::navigationActionDidBecomeDownload(WKPageRef, WKNavigationActionRef, WKDownloadRef download, const void* clientInfo)
+{
+    tabFromClientInfo(clientInfo)->window->startDownload(download);
+}
+
+void BrowserWindow::navigationResponseDidBecomeDownload(WKPageRef, WKNavigationResponseRef, WKDownloadRef download, const void* clientInfo)
+{
+    tabFromClientInfo(clientInfo)->window->startDownload(download);
+}
+
+void BrowserWindow::contextMenuDidCreateDownload(WKPageRef, WKDownloadRef download, const void* clientInfo)
+{
+    tabFromClientInfo(clientInfo)->window->startDownload(download);
+}
+
+void BrowserWindow::startDownload(WKDownloadRef download)
+{
+    auto* info = new DownloadInfo { m_hwnd, { } };
+    WKDownloadClientV0 client = { };
+    client.base.version = 0;
+    client.base.clientInfo = info;
+    client.decideDestinationWithResponse = downloadDecideDestination;
+    client.didFinish = downloadDidFinish;
+    client.didFailWithError = downloadDidFail;
+    WKDownloadSetClient(download, &client.base);
+}
+
+// ---------------------------------------------------------------------------
+// Menu, zoom, developer tools
+
+void BrowserWindow::showMenu(int x, int y)
+{
+    enum { NewTab = 1, NewWindow, ReopenTab, ZoomIn, ZoomOut, ZoomReset, DevTools, Downloads, WhatsNew, About };
+
+    HMENU menu = CreatePopupMenu();
+    AppendMenuW(menu, MF_STRING, NewTab, L"New tab\tCtrl+T");
+    AppendMenuW(menu, MF_STRING, NewWindow, L"New window\tCtrl+N");
+    AppendMenuW(menu, MF_STRING | (m_closedURLs.empty() ? MF_GRAYED : 0), ReopenTab, L"Reopen closed tab\tCtrl+Shift+T");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, ZoomIn, L"Zoom in\tCtrl++");
+    AppendMenuW(menu, MF_STRING, ZoomOut, L"Zoom out\tCtrl+-");
+    AppendMenuW(menu, MF_STRING, ZoomReset, L"Reset zoom\tCtrl+0");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, Downloads, L"Open Downloads folder");
+    AppendMenuW(menu, MF_STRING | (WKPageGetInspector ? 0 : MF_GRAYED), DevTools, L"Developer tools\tF12");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, WhatsNew, L"What's new");
+    AppendMenuW(menu, MF_STRING, About, L"About Prism");
+
+    double scale = scaleFactor();
+    POINT point = { static_cast<LONG>(x * scale), static_cast<LONG>(y * scale) };
+    ClientToScreen(m_toolbarHwnd, &point);
+    int choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTALIGN | TPM_TOPALIGN | TPM_NONOTIFY,
+        point.x, point.y, 0, m_hwnd, nullptr);
+    DestroyMenu(menu);
+
+    switch (choice) {
+    case NewTab: newTab(L"prism://newtab", true); break;
+    case NewWindow: BrowserWindow::open({ }); break;
+    case ReopenTab: reopenClosedTab(); break;
+    case ZoomIn: zoom(1.1); break;
+    case ZoomOut: zoom(1 / 1.1); break;
+    case ZoomReset: zoom(0); break;
+    case DevTools: showDevTools(); break;
+    case Downloads: handleToolbarCommand(L"openDownloads", L""); break;
+    case WhatsNew: newTab(L"prism://whatsnew", true); break;
+    case About: {
+        std::wstring text = L"Prism " PRISM_VERSION_WSTRING L"\n\n"
+            L"A private, independent web browser built on WebKit.\n"
+            L"No telemetry. No tracking. No accounts.\n\n"
+            L"Licensed under the Mozilla Public License 2.0.";
+        MessageBoxW(m_hwnd, text.c_str(), L"About Prism", MB_OK | MB_ICONINFORMATION);
+        break;
+    }
+    }
+}
+
+void BrowserWindow::zoom(double factor)
+{
+    Tab* tab = activeTab();
+    if (!tab)
+        return;
+    double current = WKPageGetPageZoomFactor(tab->page);
+    double next = factor == 0 ? 1.0 : std::clamp(current * factor, 0.3, 5.0);
+    // Snap to 100% when we pass it, so zooming back and forth lands exactly there.
+    if (std::abs(next - 1.0) < 0.04)
+        next = 1.0;
+    WKPageSetPageZoomFactor(tab->page, next);
+    showToast(L"Zoom " + std::to_wstring(static_cast<int>(std::lround(next * 100))) + L"%");
+    pushState();
+}
+
+void BrowserWindow::showDevTools()
+{
+    Tab* tab = activeTab();
+    if (!tab || !WKPageGetInspector || !WKInspectorShow)
+        return;
+    if (auto inspector = WKPageGetInspector(tab->page))
+        WKInspectorShow(inspector);
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard shortcuts
+
+bool BrowserWindow::handleShortcut(const MSG& msg)
+{
+    if (msg.message == WM_XBUTTONUP) {
+        Tab* tab = activeTab();
+        if (!tab)
+            return false;
+        if (GET_XBUTTON_WPARAM(msg.wParam) == XBUTTON1)
+            WKPageGoBack(tab->page);
+        else
+            WKPageGoForward(tab->page);
+        return true;
+    }
+    if (msg.message != WM_KEYDOWN && msg.message != WM_SYSKEYDOWN)
+        return false;
+
+    bool ctrl = GetKeyState(VK_CONTROL) < 0;
+    bool shift = GetKeyState(VK_SHIFT) < 0;
+    bool alt = GetKeyState(VK_MENU) < 0;
+    UINT key = static_cast<UINT>(msg.wParam);
+    Tab* tab = activeTab();
+
+    if (ctrl && !alt) {
+        switch (key) {
+        case 'T':
+            if (shift) reopenClosedTab();
+            else newTab(L"prism://newtab", true);
+            return true;
+        case 'N':
+            if (shift) return false;
+            BrowserWindow::open({ });
+            return true;
+        case 'W':
+        case VK_F4:
+            if (tab) closeTab(tab->id);
+            return true;
+        case VK_TAB:
+            selectAdjacentTab(shift ? -1 : 1);
+            return true;
+        case VK_NEXT:
+            selectAdjacentTab(1);
+            return true;
+        case VK_PRIOR:
+            selectAdjacentTab(-1);
+            return true;
+        case 'L':
+            focusAddressBar();
+            return true;
+        case 'R':
+            if (tab) WKPageReload(tab->page);
+            return true;
+        case VK_OEM_PLUS:
+        case VK_ADD:
+            zoom(1.1);
+            return true;
+        case VK_OEM_MINUS:
+        case VK_SUBTRACT:
+            zoom(1 / 1.1);
+            return true;
+        case '0':
+        case VK_NUMPAD0:
+            zoom(0);
+            return true;
+        case 'I':
+            if (!shift) return false;
+            showDevTools();
+            return true;
+        }
+        if (key >= '1' && key <= '9' && !m_tabs.empty()) {
+            size_t index = key == '9' ? m_tabs.size() - 1 : std::min<size_t>(key - '1', m_tabs.size() - 1);
+            selectTab(m_tabs[index]->id);
+            return true;
+        }
+        return false;
+    }
+
+    if (alt && !ctrl) {
+        switch (key) {
+        case VK_LEFT:
+            if (tab) WKPageGoBack(tab->page);
+            return true;
+        case VK_RIGHT:
+            if (tab) WKPageGoForward(tab->page);
+            return true;
+        case 'D':
+            focusAddressBar();
+            return true;
+        case VK_HOME:
+            if (tab) navigate(tab, L"prism://newtab");
+            return true;
+        }
+        return false;
+    }
+
+    switch (key) {
+    case VK_F5:
+        if (tab) WKPageReload(tab->page);
+        return true;
+    case VK_F6:
+        focusAddressBar();
+        return true;
+    case VK_F12:
+        showDevTools();
+        return true;
+    case VK_BROWSER_BACK:
+        if (tab) WKPageGoBack(tab->page);
+        return true;
+    case VK_BROWSER_FORWARD:
+        if (tab) WKPageGoForward(tab->page);
+        return true;
+    }
+    return false;
+}

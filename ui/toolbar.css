@@ -1,0 +1,334 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+/* Theme variables. Every color in the interface comes from here, so a
+   theme is just a different set of values. */
+:root,
+:root[data-theme="dark"] {
+  --toolbar-height: 76px; /* must match kToolbarCSSHeight in BrowserWindow.cpp */
+  --tabstrip-height: 36px;
+  --frame: #1c1c20;
+  --tab-hover: #26262c;
+  --tab-active: #2e2e36;
+  --text: #ececf1;
+  --text-dim: #9a9aa8;
+  --field: #16161a;
+  --field-border: #3a3a44;
+  --field-focus: #8b7cf6;
+  --button-hover: rgba(255, 255, 255, 0.08);
+  --button-active: rgba(255, 255, 255, 0.14);
+  --accent: #8b7cf6;
+  --accent-text: #ffffff;
+  --shield: #3ddc84;
+  --toast-bg: #ececf1;
+  --toast-text: #16161a;
+}
+
+:root[data-theme="light"] {
+  --frame: #e9e9ee;
+  --tab-hover: #f2f2f6;
+  --tab-active: #ffffff;
+  --text: #1a1a22;
+  --text-dim: #5d5d6b;
+  --field: #ffffff;
+  --field-border: #c9c9d3;
+  --field-focus: #6d5ce8;
+  --button-hover: rgba(0, 0, 0, 0.06);
+  --button-active: rgba(0, 0, 0, 0.11);
+  --accent: #6d5ce8;
+  --shield: #1a9c55;
+  --toast-bg: #1a1a22;
+  --toast-text: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  height: var(--toolbar-height);
+  overflow: hidden;
+  background: var(--frame);
+  color: var(--text);
+  font: 13px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border: 0;
+  background: none;
+  padding: 0;
+}
+
+.icon {
+  flex: none;
+  width: 32px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+}
+
+.icon.small {
+  width: 26px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.icon:hover {
+  background: var(--button-hover);
+}
+
+.icon:active {
+  background: var(--button-active);
+}
+
+.icon:disabled {
+  opacity: 0.35;
+  background: none;
+}
+
+.icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon svg.filled {
+  fill: currentColor;
+  stroke: none;
+}
+
+/* ---- Tab strip --------------------------------------------------------- */
+
+#tabstrip {
+  height: var(--tabstrip-height);
+  display: flex;
+  align-items: flex-end;
+  padding: 0 6px;
+  gap: 2px;
+}
+
+#tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  width: 220px;
+  min-width: 48px;
+  flex: 0 1 220px;
+  padding: 0 6px 0 10px;
+  border-radius: 9px 9px 0 0;
+  color: var(--text-dim);
+}
+
+.tab:hover {
+  background: var(--tab-hover);
+}
+
+.tab.active {
+  background: var(--tab-active);
+  color: var(--text);
+}
+
+.tab .badge {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  background: var(--button-active);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+  text-transform: uppercase;
+}
+
+.tab.loading .badge {
+  background: none;
+  border: 2px solid var(--button-active);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  font-size: 0;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.tab .title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab .close {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  opacity: 0;
+}
+
+.tab:hover .close,
+.tab.active .close {
+  opacity: 1;
+}
+
+.tab .close svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* Narrow tabs: just the badge (and close button on the active one). */
+.tab.narrow .title {
+  display: none;
+}
+
+.tab.narrow:not(.active) .close {
+  display: none;
+}
+
+#newtab {
+  margin-bottom: 2px;
+}
+
+/* ---- Navigation bar ---------------------------------------------------- */
+
+#navbar {
+  position: relative;
+  height: calc(var(--toolbar-height) - var(--tabstrip-height));
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  background: var(--tab-active);
+}
+
+#reload .stop {
+  display: none;
+}
+
+#reload.loading .stop {
+  display: block;
+}
+
+#reload.loading .reload {
+  display: none;
+}
+
+#addressform {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  margin: 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  background: var(--field);
+  border: 1px solid var(--field-border);
+  border-radius: 15px;
+}
+
+#addressform:focus-within {
+  border-color: var(--field-focus);
+  box-shadow: 0 0 0 1px var(--field-focus);
+}
+
+#shield {
+  color: var(--shield);
+}
+
+#address {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  padding: 0 6px 0 2px;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+#address::placeholder {
+  color: var(--text-dim);
+}
+
+#address::selection {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+#toast {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  max-width: 70%;
+  transform: translateY(-50%) scale(0.96);
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: var(--toast-bg);
+  color: var(--toast-text);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+#toast.visible {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+  pointer-events: auto;
+}
+
+#toast.clickable {
+  cursor: pointer;
+}
+
+#progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 0;
+  background: var(--accent);
+  opacity: 0;
+  transition: width 0.2s ease-out, opacity 0.3s;
+}
+
+#progress.visible {
+  opacity: 1;
+}

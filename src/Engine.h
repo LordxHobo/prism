@@ -1,0 +1,36 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#pragma once
+
+#include "WebKitApi.h"
+
+// Shared WebKit state for the whole app: one browsing context, one set of
+// preferences and one on-disk profile, used by every window and tab.
+namespace engine {
+
+bool initialize(std::wstring& error);
+
+WKPageConfigurationRef pageConfiguration();
+
+// Applies per-page privacy settings (user agent, scale). Call on every new page.
+void configurePage(WKPageRef, double scaleFactor);
+
+// Internal pages live in the "ui" folder next to Prism.exe and are shown in
+// the address bar as prism://<name>.
+std::wstring uiDirectoryURL();                   // file:///.../ui/
+std::wstring internalPageURL(const std::wstring& name, const std::wstring& query = L"");
+void loadInternalPage(WKPageRef, const std::wstring& name, const std::wstring& query = L"");
+bool isInternalURL(const std::wstring& url);
+// True if `url` is the internal page `name` (e.g. "newtab"), ignoring query.
+bool isInternalPage(const std::wstring& url, const std::wstring& name);
+
+// Internal pages are told which theme to use (?theme=dark|light).
+void setDarkTheme(bool);
+bool darkTheme();
+
+// The search engine used for address-bar searches. %s is replaced by the query.
+std::wstring searchURLTemplate();
+
+} // namespace engine

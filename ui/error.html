@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Problem loading page</title>
+<script src="pages.js"></script>
+<link rel="stylesheet" href="pages.css">
+<style>
+  main { padding-top: 14vh; }
+  .icon { font-size: 44px; line-height: 1; margin-bottom: 18px; }
+  .url { word-break: break-all; }
+  details { margin-top: 28px; font-size: 13px; }
+  summary { cursor: pointer; color: var(--text-dim); }
+  .actions { margin-top: 24px; display: flex; gap: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="icon" id="icon" aria-hidden="true">&#x26A0;&#xFE0F;</div>
+  <h1 id="heading">Can't reach this page</h1>
+  <p class="dim" id="summary"></p>
+  <ul class="notes dim" id="tips"></ul>
+  <div class="actions">
+    <button class="button" id="retry">Try again</button>
+  </div>
+  <details>
+    <summary>Technical details</summary>
+    <p class="dim" id="details"></p>
+  </details>
+</main>
+<script>
+'use strict';
+const params = new URLSearchParams(location.search);
+const kind = params.get('kind') || 'network';
+const url = params.get('url') || '';
+const message = params.get('message') || '';
+const code = params.get('code') || '';
+
+let host = url;
+try { host = new URL(url).host || url; } catch (e) { /* keep as-is */ }
+
+const $ = (id) => document.getElementById(id);
+const tips = [];
+
+if (kind === 'crash') {
+  document.title = 'Page crashed';
+  $('icon').textContent = '\u{1F4A5}';
+  $('heading').textContent = 'This page crashed';
+  $('summary').textContent = 'Something went wrong while showing this page. Your other tabs are fine.';
+  tips.push('Reload the page to try again.');
+  tips.push('If it keeps happening, the page may not work with Prism yet.');
+  $('details').textContent = 'Web process ended (reason ' + code + ').';
+} else {
+  document.title = host ? 'Can’t reach ' + host : 'Can’t reach this page';
+  $('heading').textContent = host ? 'Can’t reach ' + host : 'Can’t reach this page';
+  $('summary').textContent = message || 'The page didn’t load.';
+  tips.push('Check the address for typos.');
+  tips.push('Check your internet connection.');
+  tips.push('If you use a VPN or firewall, make sure it allows Prism.');
+  $('details').textContent = (message ? message + ' ' : '') + '(error ' + code + ')' + (url ? ' — ' + url : '');
+}
+
+for (const tip of tips) {
+  const item = document.createElement('li');
+  item.textContent = tip;
+  $('tips').appendChild(item);
+}
+
+$('retry').addEventListener('click', () => {
+  if (url) location.replace(url);
+  else history.back();
+});
+</script>
+</body>
+</html>
