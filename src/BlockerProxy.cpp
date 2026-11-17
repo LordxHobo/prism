@@ -241,7 +241,7 @@ void handleClient(SOCKET rawClient)
     }
 
     if (isBlocked(host)) {
-        recordBlocked();
+        recordBlocked(host);
         return refuse(client.get(), "403 Blocked by Prism");
     }
 

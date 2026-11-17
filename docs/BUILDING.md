@@ -17,6 +17,7 @@ Push to `main` (or run the **Build** workflow by hand from the Actions tab). Whe
 
 - **Visual Studio 2022 or newer**, or the free **Build Tools for Visual Studio**, with the **Desktop development with C++** workload. It includes CMake and Ninja. Download: <https://visualstudio.microsoft.com/downloads/> (the Build Tools are under "Tools for Visual Studio").
 - **Git**.
+- For Prism Shields (the ad blocker): **Rust** (<https://rustup.rs>, the default install) and **Node.js** (<https://nodejs.org>, LTS). Without them Prism still builds, but Shields is off (no Rust) or can't fix sites like YouTube (no Node.js).
 - About **1 GB** of free disk space.
 - The [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe), which you probably already have.
 
@@ -31,7 +32,7 @@ dist\Prism.exe
 ```
 
 - `fetch-webkit.ps1` downloads the WebKit version pinned in `webkit.lock` into `dist\`. The first time, when there's no `webkit.lock` yet, it picks the newest successful WebKit build and **creates** `webkit.lock`. Commit that file so every build uses the same WebKit.
-- `build.cmd` finds Visual Studio, compiles `Prism.exe` into `dist\` and copies `ui\` next to it.
+- `build.cmd` finds Visual Studio, compiles `Prism.exe` into `dist\` and copies `ui\` next to it. Then it runs `scripts\build-shields.ps1`, which builds `prism_shields.dll` (the first Rust build takes a few minutes) and bundles uBlock Origin's scriptlets into `dist\shields\` (it downloads uBlock Origin's source once, into `.cache\`).
 
 After changing Prism's code or anything in `ui\`, run `scripts\build.cmd` again and restart Prism.
 
@@ -64,11 +65,11 @@ Everything goes in `%LOCALAPPDATA%\Prism`:
 | --- | --- |
 | `Profile\` | Cookies, cache, site storage. Delete it to clear all browsing data. |
 | `prism.ini` | Settings. |
-
 | `session.txt` | Your open tabs, for "Continue where you left off". |
 | `Extensions\` | Installed extensions, unpacked. |
 | `ExtensionData\` | Extensions' saved settings (`chrome.storage`). |
 | `extensions.json` | Which extensions are installed and turned on. |
+| `Shields\` | Prism Shields' filter lists (`lists\`) and your own filters (`custom-filters.txt`). |
 
 Change settings at `prism://settings` (or press Ctrl+,).
 

@@ -345,6 +345,7 @@ typedef struct WKDownloadClientV0 {
     X(WKFrameIsMainFrame, bool, (WKFrameRef)) \
     X(WKFrameCopyURL, WKURLRef, (WKFrameRef)) \
     X(WKNavigationActionCopyRequest, WKURLRequestRef, (WKNavigationActionRef)) \
+    X(WKNavigationActionCopyTargetFrameInfo, WKFrameInfoRef, (WKNavigationActionRef)) \
     X(WKNavigationResponseCanShowMIMEType, bool, (WKNavigationResponseRef)) \
     X(WKNavigationResponseCopyFrameInfo, WKFrameInfoRef, (WKNavigationResponseRef)) \
     X(WKNavigationResponseCopyResponse, WKURLResponseRef, (WKNavigationResponseRef)) \

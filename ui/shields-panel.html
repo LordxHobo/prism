@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Prism Shields</title>
+<script src="pages.js"></script>
+<link rel="stylesheet" href="pages.css">
+<link rel="stylesheet" href="shields-panel.css">
+</head>
+<body>
+<div class="panel" id="panel">
+  <header>
+    <svg class="logo" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5l5 2v4c0 3.2-2.1 5.6-5 7-2.9-1.4-5-3.8-5-7v-4z"/><path d="M5.8 8l1.6 1.6L10.4 6.4"/></svg>
+    <div>
+      <div class="title">Prism Shields</div>
+      <div class="site" id="site"></div>
+    </div>
+  </header>
+
+  <section class="siteToggle" id="siteSection">
+    <div>
+      <div class="big" id="siteState">On for this site</div>
+      <div class="dim small" id="siteHint">Ads, trackers and annoyances are blocked.</div>
+    </div>
+    <label class="switch" title="Shields for this site">
+      <input type="checkbox" id="siteSwitch" aria-label="Shields for this site">
+      <span></span>
+    </label>
+  </section>
+
+  <p class="notice dim small" id="notice" hidden></p>
+
+  <section class="stats">
+    <div><b id="blocked">0</b><span class="dim small">blocked since Prism started</span></div>
+    <div><b id="domains">0</b><span class="dim small">ad and tracker domains known</span></div>
+  </section>
+
+  <section class="recent">
+    <h2>Recently blocked, all tabs</h2>
+    <ul id="recent"></ul>
+    <p class="dim small" id="recentEmpty">Nothing blocked yet.</p>
+    <p class="dim small hint">Something broken? Allow a domain here, or turn Shields off for this site.</p>
+  </section>
+
+  <footer>
+    <label class="global"><input type="checkbox" id="globalSwitch"> Shields on everywhere</label>
+    <a href="#" id="settings">Shields settings</a>
+  </footer>
+</div>
+<script src="shields-panel.js"></script>
+</body>
+</html>

@@ -166,6 +166,9 @@ function updateTabWidths() {
 
 window.addEventListener('resize', updateTabWidths);
 
+let shieldsOn = false;
+let lastBlocked = 0;
+
 function renderNavigation() {
   const tab = activeTab();
   elements.back.disabled = !tab || !tab.canBack;
@@ -175,6 +178,11 @@ function renderNavigation() {
 
   if (!editing)
     elements.address.value = tab ? displayURL(tab.url) : '';
+
+  // The shield is grey where Prism Shields is off (or on Prism's own pages).
+  shieldsOn = !!(tab && tab.shields);
+  elements.shield.classList.toggle('off', !shieldsOn);
+  prism.stats(lastBlocked);
 
   // "Add to Prism" on Chrome Web Store / Firefox Add-ons extension pages.
   elements.addExtension.hidden = !(tab && tab.store);
@@ -205,11 +213,12 @@ window.prism = {
     prism.stats(state.blocked || 0);
   },
 
-  // How many ads/trackers the extensions' filter lists blocked.
+  // How many ads and trackers were blocked (Prism Shields and extensions).
   stats(blocked) {
-    elements.shield.title = 'Protected: trackers limited, third-party cookies blocked'
-      + (blocked ? '. ' + blocked.toLocaleString() + ' ads and trackers blocked.' : '.')
-      + ' Click for privacy settings.';
+    lastBlocked = blocked;
+    const count = blocked ? ' ' + blocked.toLocaleString() + ' ads and trackers blocked so far.' : '';
+    elements.shield.title = (shieldsOn ? 'Prism Shields is on for this site.' : 'Prism Shields is off for this site.')
+      + count + ' Click for Shields.';
   },
 
   toast(text) {
@@ -253,7 +262,12 @@ elements.menu.addEventListener('click', () => {
   send('menu', Math.round(rect.right) + ',' + Math.round(rect.bottom));
 });
 
-elements.shield.addEventListener('click', () => send('settings'));
+elements.shield.addEventListener('click', () => {
+  const rect = elements.shield.getBoundingClientRect();
+  // The panel's top-right corner goes under the shield's right edge...
+  // except the shield is on the left, so anchor the panel's left edge there.
+  send('shields', Math.round(rect.left + 340) + ',' + Math.round(rect.bottom + 4));
+});
 elements.addExtension.addEventListener('click', () => send('addExtension'));
 elements.extensions.addEventListener('click', () => send('extensions'));
 

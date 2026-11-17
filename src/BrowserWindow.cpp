@@ -8,6 +8,8 @@
 #include "Blocker.h"
 #include "Engine.h"
 #include "Extensions.h"
+#include "Shields.h"
+#include "ShieldsPanel.h"
 #include "Settings.h"
 #include "Util.h"
 #include "Version.h"
@@ -519,6 +521,32 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
             openInternalPage(L"extensions");
             evaluateInInternalPages(L"extensions", "window.prismExtensionsEvent && prismExtensionsEvent({\"type\":\"checkPending\"});");
         }
+    } else if (command == L"shields") {
+        if (!tab)
+            return;
+        int x = 0, y = 0;
+        swscanf_s(argument.c_str(), L"%d,%d", &x, &y);
+        double scale = scaleFactor();
+        POINT anchor = { static_cast<LONG>(x * scale), static_cast<LONG>(y * scale) };
+        ClientToScreen(m_toolbarHwnd, &anchor);
+        HWND hwnd = m_hwnd;
+        int tabId = tab->id;
+        shieldspanel::Callbacks callbacks;
+        callbacks.reloadTab = [hwnd, tabId] {
+            auto* window = BrowserWindow::fromHWND(hwnd);
+            if (!window)
+                return;
+            for (auto& candidate : window->m_tabs) {
+                if (candidate->id == tabId)
+                    WKPageReload(candidate->page);
+            }
+            window->pushState();
+        };
+        callbacks.openSettings = [hwnd] {
+            if (auto* window = BrowserWindow::fromHWND(hwnd))
+                window->openInternalPage(L"settings", L"shields");
+        };
+        shieldspanel::toggle(m_hwnd, anchor, scale, tab->url, std::move(callbacks));
     } else if (command == L"focusContent") {
         focusContent();
     }
@@ -561,6 +589,7 @@ void BrowserWindow::pushState()
         json += ",\"canForward\":" + std::string(WKPageCanGoForward(tab->page) ? "true" : "false");
         json += ",\"zoom\":" + std::string(zoom);
         json += ",\"store\":" + std::string(extensions::isStoreURL(tab->url) ? "true" : "false");
+        json += ",\"shields\":" + std::string(shields::isActiveFor(tab->url) ? "true" : "false");
         json += "}";
     }
     json += "]}";
@@ -779,6 +808,12 @@ void BrowserWindow::navigate(Tab* tab, const std::wstring& url)
 {
     if (url.rfind(L"prism://", 0) == 0) {
         std::wstring name = lower(url.substr(8));
+        // prism://settings#shields opens Settings at its Shields section.
+        std::wstring section;
+        if (size_t hash = name.find(L'#'); hash != std::wstring::npos) {
+            section = name.substr(hash + 1);
+            name = name.substr(0, hash);
+        }
         while (!name.empty() && name.back() == L'/')
             name.pop_back();
         if (!isKnownInternalPage(name))
@@ -786,6 +821,8 @@ void BrowserWindow::navigate(Tab* tab, const std::wstring& url)
         std::wstring query;
         if (name == L"newtab")
             query = L"search=" + util::urlEncode(engine::searchURLTemplate());
+        else if (!section.empty())
+            query = L"section=" + util::urlEncode(section);
         tab->url = engine::internalPageURL(name, query);
         engine::loadInternalPage(tab->page, name, query);
     } else {
@@ -938,6 +975,12 @@ void BrowserWindow::settingsChanged()
     }
 }
 
+void BrowserWindow::refreshToolbars()
+{
+    for (auto* window : s_windows)
+        window->pushState();
+}
+
 void BrowserWindow::evaluateInInternalPages(const std::wstring& name, const std::string& script)
 {
     for (auto* window : s_windows) {
@@ -948,22 +991,27 @@ void BrowserWindow::evaluateInInternalPages(const std::wstring& name, const std:
     }
 }
 
-void BrowserWindow::openInternalPage(const std::wstring& name)
+void BrowserWindow::openInternalPage(const std::wstring& name, const std::wstring& section)
 {
     for (auto& tab : m_tabs) {
         if (engine::isInternalPage(tab->url, name)) {
             selectTab(tab->id);
+            if (!section.empty()) {
+                std::string script = "window.prismShowSection && prismShowSection(" + util::jsonString(section) + ");";
+                WKPageEvaluateJavaScriptInMainFrame(tab->page, stringUTF8(script).get(), nullptr, nullptr);
+            }
             return;
         }
     }
+    std::wstring target = L"prism://" + name + (section.empty() ? L"" : L"#" + section);
     Tab* active = activeTab();
     // Reuse an empty new tab instead of opening another one.
     if (active && engine::isInternalPage(active->url, L"newtab")) {
-        navigate(active, L"prism://" + name);
+        navigate(active, target);
         focusContent();
         return;
     }
-    newTab(L"prism://" + name, true);
+    newTab(target, true);
 }
 
 static std::wstring pickFolder(HWND owner, const std::wstring& start)
@@ -1109,14 +1157,29 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
         std::wstring frameURL = toWide(Ref<WKURLRef>::adopt(WKFrameCopyURL(frame)).get());
         bool isSettings = engine::isInternalPage(frameURL, L"settings");
         bool isExtensions = engine::isInternalPage(frameURL, L"extensions");
+        // The "blocked" page can allow the site it's showing, and nothing else.
+        if (engine::isInternalPage(frameURL, L"error") && message.rfind(L"prism:allowSite\n", 0) == 0) {
+            std::wstring site = message.substr(16);
+            std::string blockedBy;
+            bool allowed = blocker::isBlocked(util::toUTF8(site), &blockedBy) && blockedBy == "Prism Shields";
+            if (allowed)
+                shields::handleCommand(L"allowDomain", site);
+            WKPageRunJavaScriptPromptResultListenerCall(listener, stringUTF8(allowed ? "true" : "false").get());
+            return;
+        }
         if (isSettings || isExtensions) {
             std::wstring body = message.substr(6);
             size_t newline = body.find(L'\n');
             std::wstring command = body.substr(0, newline);
             std::wstring argument = newline == std::wstring::npos ? L"" : body.substr(newline + 1);
-            std::string answer = isSettings
-                ? tab->window->handleSettingsCommand(command, argument)
-                : extensions::handleCommand(command, argument, tab->window->m_hwnd);
+            std::string answer;
+            if (isSettings && command.rfind(L"shields.", 0) == 0) {
+                answer = shields::handleCommand(command.substr(8), argument);
+                refreshToolbars();
+            } else if (isSettings)
+                answer = tab->window->handleSettingsCommand(command, argument);
+            else
+                answer = extensions::handleCommand(command, argument, tab->window->m_hwnd);
             WKPageRunJavaScriptPromptResultListenerCall(listener, stringUTF8(answer).get());
             return;
         }
@@ -1141,6 +1204,16 @@ void BrowserWindow::decidePolicyForNavigationAction(WKPageRef, WKNavigationActio
     static const wchar_t* webSchemes[] = { L"http", L"https", L"file", L"about", L"data", L"blob", L"javascript", L"ws", L"wss" };
     for (auto* web : webSchemes) {
         if (scheme == web) {
+            // Prism Shields puts the site's filters in place before the page
+            // (or frame) starts loading. WebKit delivers them to the page's
+            // process ahead of the go-ahead below.
+            if (scheme == L"http" || scheme == L"https") {
+                auto frame = Ref<WKFrameInfoRef>::adopt(WKNavigationActionCopyTargetFrameInfo(action));
+                // No target frame means a new window: that's a top-level page too.
+                if (!frame || WKFrameInfoGetIsMainFrame(frame.get()))
+                    blocker::noteTopLevelSite(util::toUTF8(hostOf(target)));
+                shields::prepareNavigation(target);
+            }
             WKFramePolicyListenerUse(listener);
             return;
         }

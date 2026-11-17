@@ -161,6 +161,123 @@ function updateCurrentSection() {
 }
 window.addEventListener('scroll', updateCurrentSection, { passive: true });
 
+
+// ---- Shields ---------------------------------------------------------------------
+
+const LIST_GROUPS = [
+  ['ads', 'Ads'],
+  ['privacy', 'Privacy'],
+  ['malware', 'Malware protection'],
+  ['fixes', 'Fixes for broken sites'],
+  ['annoyances', 'Annoyances (cookie notices, popups, social widgets)'],
+];
+
+let shieldsCustomDirty = false;
+
+function formatSize(bytes) {
+  if (!bytes) return 'not downloaded';
+  return bytes >= 1024 * 1024 ? (bytes / (1024 * 1024)).toFixed(1) + ' MB' : Math.round(bytes / 1024) + ' KB';
+}
+
+function shieldsStatusText(state) {
+  if (!state.available) return state.message || 'Prism Shields isn’t available in this copy of Prism.';
+  if (!state.enabled) return 'Off. Ads and trackers aren’t blocked.';
+  if (state.status === 'downloading' || state.status === 'building' || state.status === 'starting')
+    return state.message || 'Getting filter lists ready…';
+  if (state.status === 'error') return state.message;
+  return 'On. ' + (state.message ? state.message : 'Blocking ads and trackers on every site.');
+}
+
+function fillEntries(list, items, emptyText, command) {
+  list.textContent = '';
+  if (!items.length) {
+    const none = document.createElement('li');
+    none.className = 'none';
+    none.textContent = emptyText;
+    list.appendChild(none);
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement('li');
+    const name = document.createElement('span');
+    name.textContent = item;
+    const remove = document.createElement('button');
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', () => renderShields(ask(command, item)));
+    row.append(name, remove);
+    list.appendChild(row);
+  }
+}
+
+function renderShields(state) {
+  if (!state) return;
+  $('shieldsEnabled').checked = !!state.enabled;
+  $('shieldsEnabled').disabled = !state.available;
+  $('shieldsStatus').textContent = shieldsStatusText(state);
+
+  const lists = $('shieldsLists');
+  lists.textContent = '';
+  for (const [group, title] of LIST_GROUPS) {
+    const inGroup = (state.lists || []).filter((list) => list.group === group);
+    if (!inGroup.length) continue;
+    const heading = document.createElement('h3');
+    heading.textContent = title;
+    lists.appendChild(heading);
+    for (const list of inGroup) {
+      const label = document.createElement('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = list.on;
+      box.disabled = !state.available;
+      box.addEventListener('change', () => renderShields(ask('shields.setList', list.id + '\n' + (box.checked ? '1' : '0'))));
+      const name = document.createElement('span');
+      name.textContent = list.name;
+      const size = document.createElement('span');
+      size.className = 'size';
+      size.textContent = list.on ? formatSize(list.size) : '';
+      label.append(box, name, size);
+      lists.appendChild(label);
+    }
+  }
+
+  $('shieldsUpdated').textContent = state.updated
+    ? 'Last checked ' + new Date(state.updated * 1000).toLocaleString() + '.'
+    : '';
+  const busy = state.status === 'downloading' || state.status === 'building' || state.status === 'starting';
+  $('shieldsUpdate').disabled = busy || !state.available || !state.enabled;
+  $('shieldsUpdate').textContent = busy ? 'Updating…' : 'Update now';
+  $('shieldsStats').textContent = state.domains
+    ? state.domains.toLocaleString() + ' ad and tracker domains · ' + (state.blocked || 0).toLocaleString() + ' blocked since Prism started'
+    : '';
+
+  if (!shieldsCustomDirty) $('shieldsCustom').value = state.custom || '';
+  fillEntries($('shieldsSites'), state.disabledSites || [], 'None. Shields is on everywhere.', 'shields.removeDisabledSite');
+  fillEntries($('shieldsAllowed'), state.allowedDomains || [], 'None.', 'shields.removeAllowedDomain');
+}
+
+$('shieldsEnabled').addEventListener('change', () => renderShields(ask('shields.setEnabled', $('shieldsEnabled').checked ? '1' : '0')));
+$('shieldsUpdate').addEventListener('click', () => renderShields(ask('shields.update')));
+$('shieldsCustom').addEventListener('input', () => {
+  shieldsCustomDirty = true;
+  $('shieldsCustomStatus').textContent = '';
+});
+$('shieldsCustomSave').addEventListener('click', () => {
+  shieldsCustomDirty = false;
+  renderShields(ask('shields.setCustom', $('shieldsCustom').value));
+  $('shieldsCustomStatus').textContent = 'Saved. Applies to pages you load from now on.';
+});
+
+// Live updates from Prism (download progress, finished updates).
+window.prismShieldsEvent = function (event) {
+  if (event && event.type === 'shields' && event.state) renderShields(event.state);
+};
+
+// prism://settings#shields (from the Shields panel and elsewhere).
+window.prismShowSection = function (id) {
+  const section = document.getElementById(id);
+  if (section) section.scrollIntoView({ block: 'start' });
+};
+
 // ---- Start ------------------------------------------------------------------
 
 const version = ask('version');
@@ -172,4 +289,7 @@ if (initial) {
 } else {
   document.body.insertAdjacentHTML('afterbegin', '<p class="card" style="margin:16px">Open this page in Prism to change settings.</p>');
 }
+renderShields(ask('shields.get'));
+const startSection = new URLSearchParams(location.search).get('section');
+if (startSection) requestAnimationFrame(() => window.prismShowSection(startSection));
 updateCurrentSection();

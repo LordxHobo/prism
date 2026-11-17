@@ -38,6 +38,7 @@ public:
 
     // Re-applies settings (theme, accent, tab size, ...) to every window.
     static void settingsChanged();
+    static void refreshToolbars();
 
     // Runs `script` in every open tab showing prism://<name>.
     static void evaluateInInternalPages(const std::wstring& name, const std::string& script);
@@ -60,7 +61,7 @@ public:
     void showToast(const std::wstring& text);
 
     // Opens prism://<name>, or switches to it if a tab already shows it.
-    void openInternalPage(const std::wstring& name);
+    void openInternalPage(const std::wstring& name, const std::wstring& section = L"");
 
 private:
     BrowserWindow() = default;

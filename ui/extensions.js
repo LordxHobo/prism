@@ -58,6 +58,20 @@ function install(input) {
   setStatus(/^https?:/i.test(input) ? 'Downloading…' : 'Reading the extension…');
 }
 
+function formatMB(bytes) {
+  const mb = bytes / (1024 * 1024);
+  return mb < 0.1 ? Math.max(1, Math.round(bytes / 1024)) + ' KB' : mb.toFixed(1) + ' MB';
+}
+
+function progressText(event) {
+  if (!event.received && !event.total) return event.step;
+  if (event.total) {
+    const percent = Math.min(100, Math.round((event.received / event.total) * 100));
+    return event.step + ': ' + formatMB(event.received) + ' of ' + formatMB(event.total) + ' (' + percent + '%)';
+  }
+  return event.step + ': ' + formatMB(event.received);
+}
+
 function supportItems(support) {
   const items = [];
   if (support.contentScripts) items.push([true, 'Changes pages it’s made for (content scripts)']);
@@ -165,7 +179,9 @@ document.addEventListener('keydown', (event) => {
 
 window.prismExtensionsEvent = function (event) {
   if (!event) return;
-  if (event.type === 'prepared' && event.job === currentJob) {
+  if (event.type === 'progress' && event.job === currentJob) {
+    setStatus(progressText(event));
+  } else if (event.type === 'prepared' && event.job === currentJob) {
     setBusy(false);
     setStatus('');
     showConfirm(event);
@@ -215,6 +231,14 @@ function render(data) {
     badge.className = 'badge ' + ext.support.level;
     badge.textContent = { full: 'Works', partial: 'Partly works', none: 'Not supported yet' }[ext.support.level];
     name.append(version, badge);
+    // Is this extension's ad blocking running right now?
+    if (ext.enabled && ext.support.blockingDomains) {
+      const blocking = document.createElement('span');
+      blocking.className = 'badge blocking' + (data.blockingActive ? '' : ' waiting');
+      blocking.textContent = data.blockingActive ? 'Blocking on' : 'Blocking starting…';
+      blocking.title = ext.support.blockingDomains.toLocaleString() + ' ad and tracker domains blocked in every tab';
+      name.appendChild(blocking);
+    }
     const description = document.createElement('p');
     description.className = 'extDescription';
     description.textContent = ext.description;

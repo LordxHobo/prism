@@ -44,7 +44,7 @@ std::wstring lastError(const wchar_t* step)
 
 } // namespace
 
-bool get(const std::wstring& url, std::string& body, std::wstring& error, size_t maxBytes)
+bool get(const std::wstring& url, std::string& body, std::wstring& error, size_t maxBytes, const Progress& progress)
 {
     body.clear();
 
@@ -104,6 +104,17 @@ bool get(const std::wstring& url, std::string& body, std::wstring& error, size_t
         return false;
     }
 
+    uint64_t total = 0;
+    {
+        wchar_t length[32] = { };
+        DWORD lengthSize = sizeof(length);
+        if (WinHttpQueryHeaders(request.value, WINHTTP_QUERY_CONTENT_LENGTH, WINHTTP_HEADER_NAME_BY_INDEX, length, &lengthSize, WINHTTP_NO_HEADER_INDEX))
+            total = _wcstoui64(length, nullptr, 10);
+    }
+    if (progress)
+        progress(0, total);
+    ULONGLONG lastReport = GetTickCount64();
+
     for (;;) {
         DWORD available = 0;
         if (!WinHttpQueryDataAvailable(request.value, &available)) {
@@ -124,7 +135,13 @@ bool get(const std::wstring& url, std::string& body, std::wstring& error, size_t
             return false;
         }
         body.resize(old + read);
+        if (progress && GetTickCount64() - lastReport >= 100) {
+            lastReport = GetTickCount64();
+            progress(body.size(), total);
+        }
     }
+    if (progress)
+        progress(body.size(), total ? total : body.size());
     return true;
 }
 

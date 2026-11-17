@@ -312,3 +312,22 @@ input[type="url"]:focus {
     max-width: 100%;
   }
 }
+
+/* ---- Shields ---- */
+.intro { margin: -4px 0 16px; }
+.lists { display: flex; flex-direction: column; gap: 4px; margin: 10px 0 4px; }
+.lists h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin: 10px 0 2px; }
+.lists label { display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; }
+.lists label .size { margin-left: auto; color: var(--text-dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+#shieldsCustom { width: 100%; box-sizing: border-box; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: 12px/1.5 ui-monospace, Consolas, monospace; resize: vertical; }
+#shieldsCustom:focus { outline: none; border-color: var(--accent); }
+.entries { list-style: none; margin: 8px 0 0; padding: 0; }
+.entries li { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.entries li:last-child { border-bottom: 0; }
+.entries li.none { color: var(--text-dim); border: 0; }
+.entries button { font: inherit; font-size: 12px; color: var(--accent); background: none; border: 1px solid var(--border); border-radius: 6px; padding: 2px 10px; cursor: pointer; }
+.credits { margin-top: 18px; }
+.credits a { color: var(--accent); }
+code { font: 12px ui-monospace, Consolas, monospace; background: var(--bg); padding: 1px 4px; border-radius: 4px; }
+.small { font-size: 12px; }
+.lists input, footer input { accent-color: var(--accent); }

@@ -4,8 +4,11 @@
 /dist/
 /package/
 
-# Downloaded WebKit builds
+# Downloaded WebKit builds and uBlock Origin's scriptlet sources
 /.cache/
+
+# Rust build output (Prism Shields)
+/shields/target/
 
 # Patch files (applied with git am)
 /patches/

@@ -7,6 +7,8 @@
 #include "WebKitApi.h"
 
 #include <functional>
+#include <string>
+#include <vector>
 
 // Shared WebKit state for the whole app: one browsing context, one set of
 // preferences and one on-disk profile, used by every window and tab.
@@ -20,9 +22,18 @@ bool initialize(std::wstring& error);
 // Where extension content scripts are registered (shared by all pages).
 WKUserContentControllerRef userContentController();
 
-// Sends WebKit's traffic through Prism's blocking proxy (extensions'
-// filter lists), or stops doing so.
-void setBlockingProxy(bool enabled);
+// Sends WebKit's traffic through Prism's blocking proxy while anything
+// (Prism Shields or an extension) has domains to block; call after changing
+// the blocker's lists.
+void updateBlockingProxy();
+bool blockingProxyActive();
+
+// User scripts, in named groups ("extensions", "shields"). setUserScripts
+// replaces a group (and re-registers everything); addUserScript appends one
+// script to a group without touching the others. Scripts apply to pages
+// loaded afterwards.
+void setUserScripts(const std::string& group, std::vector<std::string> sources);
+void addUserScript(const std::string& group, const std::string& source);
 
 // Applies the third-party cookie setting (call again after it changes).
 void applyCookiePolicy();

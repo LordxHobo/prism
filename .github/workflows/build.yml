@@ -3,7 +3,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 # Builds Prism on GitHub's Windows servers and packages a ready-to-run zip
-# (Prism.exe + interface + WebKit runtime). Download it from the run's
+# (Prism.exe + interface + WebKit runtime + Prism Shields). Download it from the run's
 # "Artifacts" section. Pushing a tag like v0.1.0 also publishes a Release.
 
 name: Build
@@ -36,6 +36,15 @@ jobs:
         with:
           arch: x64
 
+      - name: Cache the Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            shields/target
+          key: shields-${{ hashFiles('shields/Cargo.lock') }}
+
       - name: Build Prism
         shell: cmd
         run: |
@@ -65,6 +74,15 @@ jobs:
           } else {
             ./scripts/fetch-webkit.ps1
           }
+
+      # After the WebKit download, which clears out dist\.
+      - name: Build Prism Shields (adblock-rust + uBlock Origin's scriptlets)
+        shell: pwsh
+        run: |
+          rustup target add x86_64-pc-windows-msvc
+          ./scripts/build-shields.ps1
+          if (-not (Test-Path dist/prism_shields.dll)) { throw 'prism_shields.dll is missing' }
+          if (-not (Test-Path dist/shields/scriptlets.json)) { throw 'scriptlets.json is missing' }
 
       - name: Package
         shell: pwsh

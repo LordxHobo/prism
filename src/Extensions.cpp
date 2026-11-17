@@ -500,6 +500,7 @@ std::string listJSON()
     for (size_t i = 0; i < g_extensions.size(); ++i)
         json += (i ? "," : "") + extensionJSON(*g_extensions[i]);
     json += "],\"blocked\":" + std::to_string(blocker::blockedCount());
+    json += ",\"blockingActive\":" + std::string(engine::blockingProxyActive() ? "true" : "false");
     if (!g_pendingInstall.empty()) {
         json += ",\"pendingInstall\":" + json::quote(util::toUTF8(g_pendingInstall));
         g_pendingInstall.clear();
@@ -619,19 +620,14 @@ std::string buildUserScript(const Extension& ext)
 
 void rebuildUserScripts()
 {
-    WKUserContentControllerRef controller = engine::userContentController();
-    if (!controller)
-        return;
-    WKUserContentControllerRemoveAllUserScripts(controller);
-    if (g_runtimeSource.empty())
-        return;
-    for (auto& ext : g_extensions) {
-        if (!ext->enabled || ext->contentScripts.empty())
-            continue;
-        auto source = wk::stringUTF8(buildUserScript(*ext));
-        auto script = wk::Ref<WKUserScriptRef>::adopt(WKUserScriptCreateWithSource(source.get(), kWKInjectAtDocumentStart, false));
-        WKUserContentControllerAddUserScript(controller, script.get());
+    std::vector<std::string> sources;
+    if (!g_runtimeSource.empty()) {
+        for (auto& ext : g_extensions) {
+            if (ext->enabled && !ext->contentScripts.empty())
+                sources.push_back(buildUserScript(*ext));
+        }
     }
+    engine::setUserScripts("extensions", std::move(sources));
 }
 
 // ---------------------------------------------------------------------------
@@ -687,8 +683,8 @@ void rebuildBlocking()
                 auto found = counts.find(ext->id);
                 ext->blockingDomains = found == counts.end() ? 0 : found->second;
             }
-            blocker::setLists(lists);
-            engine::setBlockingProxy(!lists->empty());
+            blocker::setLists("extensions", lists);
+            engine::updateBlockingProxy();
             notifyList();
         });
     }).detach();
@@ -987,6 +983,17 @@ struct Prepared {
 };
 
 // Worker thread: get the extension into a staging folder and describe it.
+// Tells prism://extensions what an install is doing ("Downloading 1.2 of 3.4 MB").
+void reportProgress(int job, const std::string& step, uint64_t received = 0, uint64_t total = 0)
+{
+    std::string event = "{\"type\":\"progress\",\"job\":" + std::to_string(job) + ",\"step\":" + json::quote(step)
+        + ",\"received\":" + std::to_string(received) + ",\"total\":" + std::to_string(total) + "}";
+    util::postToMainThread([event] {
+        if (g_notify)
+            g_notify(event);
+    });
+}
+
 Prepared prepare(int job, std::wstring input)
 {
     Prepared result;
@@ -1011,7 +1018,9 @@ Prepared prepare(int job, std::wstring input)
         suggestedId = id;
         std::wstring url = L"https://clients2.google.com/service/update2/crx?response=redirect&prodversion=142.0.0.0&acceptformat=crx2,crx3&x=id%3D"
             + util::fromUTF8(id) + L"%26installsource%3Dondemand%26uc";
-        if (!http::get(url, package, httpError)) {
+        reportProgress(job, "Contacting the Chrome Web Store\u2026");
+        auto onProgress = [job](uint64_t received, uint64_t total) { reportProgress(job, "Downloading from the Chrome Web Store", received, total); };
+        if (!http::get(url, package, httpError, 256 * 1024 * 1024, onProgress)) {
             result.error = "Couldn't download from the Chrome Web Store: " + util::toUTF8(httpError);
             return result;
         }
@@ -1019,6 +1028,7 @@ Prepared prepare(int job, std::wstring input)
         result.source = "firefox";
         result.sourceURL = "https://addons.mozilla.org/firefox/addon/" + slug + "/";
         std::string apiBody;
+        reportProgress(job, "Looking it up on Firefox Add-ons\u2026");
         if (!http::get(L"https://addons.mozilla.org/api/v5/addons/addon/" + util::fromUTF8(slug) + L"/", apiBody, httpError, 4 * 1024 * 1024)) {
             result.error = "Couldn't find that add-on on Firefox Add-ons: " + util::toUTF8(httpError);
             return result;
@@ -1034,7 +1044,8 @@ Prepared prepare(int job, std::wstring input)
             return result;
         }
         suggestedId = "amo-" + safeId(slug);
-        if (!http::get(util::fromUTF8(fileURL), package, httpError)) {
+        auto onProgress = [job](uint64_t received, uint64_t total) { reportProgress(job, "Downloading from Firefox Add-ons", received, total); };
+        if (!http::get(util::fromUTF8(fileURL), package, httpError, 256 * 1024 * 1024, onProgress)) {
             result.error = "Couldn't download from Firefox Add-ons: " + util::toUTF8(httpError);
             return result;
         }
@@ -1064,6 +1075,7 @@ Prepared prepare(int job, std::wstring input)
     }
 
     if (!package.empty()) {
+        reportProgress(job, "Unpacking\u2026");
         std::string zip;
         if (!zipFromPackage(package, zip, result.error))
             return result;
@@ -1092,6 +1104,7 @@ Prepared prepare(int job, std::wstring input)
         }
     }
 
+    reportProgress(job, "Checking what it can do\u2026");
     Extension ext;
     if (!loadExtension(result.staging, ext, result.error))
         return result;

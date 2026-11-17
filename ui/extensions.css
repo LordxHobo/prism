@@ -154,6 +154,9 @@ h3 {
 .badge.full { color: var(--good); border-color: currentColor; background: none; }
 .badge.partial { color: #ffb340; border-color: currentColor; background: none; }
 .badge.none { color: #ff6b6b; border-color: currentColor; background: none; }
+.badge.blocking { color: var(--accent); border-color: currentColor; background: none; }
+.badge.blocking::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
+.badge.blocking.waiting { color: var(--text-dim); }
 
 .extDescription {
   margin: 4px 0 0;

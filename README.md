@@ -4,10 +4,11 @@ A private, independent web browser for Windows, built on **WebKit** (the engine 
 
 - **No data collection.** No telemetry, analytics, crash reporting or accounts. Prism never contacts its developers.
 - **Private by default.** WebKit's tracking prevention, third-party cookie blocking, no DNS prefetching, no link-click pings, and popups only when you click.
+- **Prism Shields, a built-in ad and tracker blocker.** Brave's blocking engine with uBlock Origin's filter lists: ad and tracker domains, leftover ad boxes, and site-specific fixes (like YouTube's video ads). On everywhere, switchable per site.
 - **Extensions from both stores** *(early)*. Install Chrome Web Store and Firefox Add-ons extensions. Content scripts and filter-list ad blockers (like uBlock Origin Lite) work today; popups and background tasks are next.
 - **Customizable.** The whole interface is HTML and CSS (see [`ui/`](ui)), so themes and layouts are easy to change.
 
-> **Status: early development (v0.3).** Expect rough edges. Copy-protected (DRM) video such as Netflix or Disney+ can't play in any WebKit browser on Windows.
+> **Status: early development (v0.4).** Expect rough edges. Copy-protected (DRM) video such as Netflix or Disney+ can't play in any WebKit browser on Windows.
 
 ## Download
 
@@ -30,6 +31,7 @@ dist\Prism.exe
 | Part | What it does |
 | --- | --- |
 | `src/` | The Windows app (C++). It creates windows and tabs, and loads WebKit's `WebKit2.dll` at runtime through WebKit's C API. |
+| `shields/` | Prism Shields' engine: a small Rust library (`prism_shields.dll`) around Brave's [adblock-rust](https://github.com/brave/adblock-rust), plus the script that bundles uBlock Origin's scriptlets. |
 | `ui/` | The browser interface (tab strip, address bar) and Prism's own pages (`prism://newtab`, `prism://whatsnew`), drawn by WebKit itself. |
 | `scripts/` | Downloads the WebKit runtime and builds Prism. |
 | `webkit.lock` | The exact WebKit version Prism uses. |
@@ -39,11 +41,14 @@ dist\Prism.exe
 - [x] Tabs, address bar, downloads, privacy defaults (v0.1)
 - [x] Settings, session restore, clear browsing data (v0.2)
 - [x] Extensions, part 1: install, content scripts, storage, filter-list ad blocking (v0.3)
-- [ ] Extensions, part 2: toolbar buttons, popups, options, background tasks (v0.4)
-- [ ] Bookmarks and history
-- [ ] Themes, layouts and custom CSS
-- [ ] Fingerprinting protection
+- [x] Prism Shields, part 1: built-in ad and tracker blocker (v0.4)
+- [ ] Extensions, part 2: popups, background tasks, options pages (v0.5)
+- [ ] Bookmarks, history, find in page, printing, permission prompts (v0.6)
+- [ ] Customization, tab groups and vertical tabs (v0.7)
+- [ ] Privacy: fingerprinting protection, HTTPS-only, per-site settings, tracking-parameter removal (v0.8)
+- [ ] Prism's own WebKit build: full network filtering, extensions part 3 (v0.9)
+- [ ] Polish (v0.10), then 1.0 and Linux
 
 ## License
 
-[Mozilla Public License 2.0](LICENSE). WebKit is licensed separately under LGPL and BSD licenses.
+[Mozilla Public License 2.0](LICENSE). WebKit is licensed separately under LGPL and BSD licenses. adblock-rust is MPL-2.0. uBlock Origin's scriptlets, which Prism ships as a separate data file (`shields\scriptlets.json`), are GPLv3; filter lists are downloaded from their authors and keep their own licenses.

@@ -6,6 +6,7 @@
 
 #include "Blocker.h"
 #include "Extensions.h"
+#include "Shields.h"
 #include "Settings.h"
 #include "Util.h"
 
@@ -13,6 +14,7 @@
 #include <cwctype>
 #include <filesystem>
 #include <functional>
+#include <map>
 
 using namespace wk;
 
@@ -178,6 +180,8 @@ bool initialize(std::wstring& error)
     s_userContent = Ref<WKUserContentControllerRef>::adopt(WKUserContentControllerCreate());
     WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismExtension").get(),
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { extensions::handleScriptMessage(message, reply); }, nullptr);
+    WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismShields").get(),
+        [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { shields::handleScriptMessage(message, reply); }, nullptr);
     WKPageConfigurationSetUserContentController(s_pageConfiguration.get(), s_userContent.get());
     return true;
 }
@@ -187,24 +191,65 @@ WKUserContentControllerRef userContentController()
     return s_userContent.get();
 }
 
-void setBlockingProxy(bool enabled)
+void updateBlockingProxy()
 {
     if (!s_dataStore || !WKWebsiteDataStoreEnableCustomNetworkProxySettings || !WKWebsiteDataStoreDisableNetworkProxySettings)
         return;
-    if (enabled) {
+    bool wanted = blocker::hasAnyLists();
+    if (wanted && !s_proxyEnabled) {
         uint16_t port = blocker::startProxy();
         if (!port)
-            return;
-        if (s_proxyEnabled)
             return;
         // Local addresses (your router, local dev servers) skip the proxy.
         WKWebsiteDataStoreEnableCustomNetworkProxySettings(s_dataStore.get(),
             url(L"http://127.0.0.1:" + std::to_wstring(port)).get(), stringUTF8("localhost,127.0.0.1,::1").get());
         s_proxyEnabled = true;
-    } else if (s_proxyEnabled) {
+    } else if (!wanted && s_proxyEnabled) {
         WKWebsiteDataStoreDisableNetworkProxySettings(s_dataStore.get());
         s_proxyEnabled = false;
     }
+}
+
+bool blockingProxyActive()
+{
+    return s_proxyEnabled;
+}
+
+// ---- User scripts ----------------------------------------------------------
+
+static std::map<std::string, std::vector<std::string>> s_userScripts;
+
+static void registerUserScript(const std::string& source)
+{
+    auto script = Ref<WKUserScriptRef>::adopt(WKUserScriptCreateWithSource(stringUTF8(source).get(), kWKInjectAtDocumentStart, false));
+    WKUserContentControllerAddUserScript(s_userContent.get(), script.get());
+}
+
+void setUserScripts(const std::string& group, std::vector<std::string> sources)
+{
+    if (!s_userContent)
+        return;
+    s_userScripts[group] = std::move(sources);
+    WKUserContentControllerRemoveAllUserScripts(s_userContent.get());
+    // Shields first, so its scriptlets run before extensions' scripts.
+    for (const char* name : { "shields", "extensions" }) {
+        for (auto& source : s_userScripts[name])
+            registerUserScript(source);
+    }
+    for (auto& [name, sources] : s_userScripts) {
+        if (name == "shields" || name == "extensions")
+            continue;
+        for (auto& source : sources)
+            registerUserScript(source);
+    }
+}
+
+void addUserScript(const std::string& group, const std::string& source)
+{
+    if (!s_userContent)
+        return;
+    s_userScripts[group].push_back(source);
+    registerUserScript(source);
 }
 
 WKPageConfigurationRef pageConfiguration()

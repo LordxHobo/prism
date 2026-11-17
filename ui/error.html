@@ -51,7 +51,19 @@ if (kind === 'blocked') {
   $('icon').textContent = '\u{1F6E1}\uFE0F';
   $('heading').textContent = host + ' is blocked';
   $('summary').textContent = owner + ' blocks this site because it\u2019s on one of its ad, tracker or malware lists.';
-  tips.push('If you trust this site, turn off the filter list that blocks it (Extensions page \u2192 Details), or turn the extension off.');
+  if (owner === 'Prism Shields') {
+    tips.push('If you trust this site, allow it: Prism Shields won\u2019t block it again. You can undo this in Settings \u2192 Shields.');
+    const allow = document.createElement('button');
+    allow.className = 'button secondary';
+    allow.textContent = 'Allow ' + host;
+    allow.addEventListener('click', () => {
+      const hostname = (() => { try { return new URL(url).hostname; } catch (e) { return host; } })();
+      if (window.prompt('prism:allowSite\n' + hostname) === 'true') location.href = url;
+    });
+    $('retry').after(allow);
+  } else {
+    tips.push('If you trust this site, turn off the filter list that blocks it (Extensions page \u2192 Details), or turn the extension off.');
+  }
   $('retry').textContent = 'Go back';
   $('retry').addEventListener('click', (event) => { event.stopImmediatePropagation(); history.back(); }, true);
   $('details').textContent = 'Blocked by ' + owner + ' \u2014 ' + url;

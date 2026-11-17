@@ -8,6 +8,7 @@
 #include "Engine.h"
 #include "Extensions.h"
 #include "Settings.h"
+#include "Shields.h"
 #include "Util.h"
 #include "Version.h"
 
@@ -36,6 +37,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     // Extensions page are forwarded to any tab showing it.
     extensions::initialize([](const std::string& event) {
         BrowserWindow::evaluateInInternalPages(L"extensions", "window.prismExtensionsEvent && prismExtensionsEvent(" + event + ");");
+    });
+    // Prism Shields loads its filter lists in the background; pages opened
+    // before it's ready simply aren't filtered yet.
+    shields::initialize([](const std::string& event) {
+        BrowserWindow::evaluateInInternalPages(L"settings", "window.prismShieldsEvent && prismShieldsEvent(" + event + ");");
+        BrowserWindow::refreshToolbars();
     });
 
     if (!BrowserWindow::registerWindowClass(instance)) {

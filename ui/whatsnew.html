@@ -22,30 +22,36 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.3.0</span>
+      <span class="version">Version 0.4.0</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Extensions are here (early)</h2>
-    <p>Install extensions from the <b>Chrome Web Store</b> and <b>Firefox Add-ons</b>: paste a link on the <a href="prism://extensions">Extensions page</a>, or press <b>Add to Prism</b> in the address bar on a store page. For ad blocking, try uBlock Origin Lite.</p>
+    <h2 style="margin-top:0">Meet Prism Shields</h2>
+    <p>Prism now blocks ads, trackers and malware on its own, with the same filter lists as uBlock Origin and Brave's blocking engine. It's on everywhere, no extension needed. Click the <b>shield</b> in the address bar to see what it blocked, or to turn it off for a site.</p>
   </div>
 
-  <h2>New in 0.3</h2>
+  <h2>New in 0.4</h2>
   <ul class="notes">
-    <li><b>Extensions page</b> (<a href="prism://extensions">prism://extensions</a>, <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>E</kbd>, or the puzzle-piece button): install from a store link, a <code>.crx</code>/<code>.xpi</code>/<code>.zip</code> file, or an unpacked folder. Turn extensions on or off, or remove them.</li>
-    <li><b>Permissions check</b> before every install, in plain language, plus what the extension can already do in Prism.</li>
-    <li><b>Content scripts work:</b> extensions that change pages run on the sites they're made for, with saved settings (<code>storage</code>) and translations.</li>
-    <li><b>Ad and tracker blocking</b> from filter-list extensions like uBlock Origin Lite. Prism blocks ad, tracker and malware domains before any connection is made, and you can turn individual filter lists on or off.</li>
-    <li><b>Blocked-site page:</b> if you open a blocked site (like an ad link), Prism tells you which extension blocked it.</li>
-    <li>The shield in the address bar shows how many ads and trackers were blocked.</li>
+    <li><b>Prism Shields:</b> ad and tracker domains are refused before Prism connects to them, leftover ad boxes are hidden, and site-specific fixes from uBlock Origin defuse ads served from a site's own servers (YouTube's video ads, for example).</li>
+    <li><b>Ads from a site's own servers</b> (like the side banners on hltv.org) are found by matching their images and frames against the filter lists, then hidden.</li>
+    <li><b>Shields panel</b> on the address-bar shield: Shields on or off for this site, how much was blocked, and recently blocked domains with an <b>Allow</b> button for when something breaks. The shield turns grey on sites where Shields is off.</li>
+    <li><b>Settings &rarr; Shields</b> (<a href="prism://settings#shields">open</a>): pick filter lists (cookie notices and other annoyances are optional), update them now, add your own filters, and manage sites and domains you've allowed.</li>
+    <li><b>Allow from the blocked page:</b> if Shields blocks a site you opened yourself, you can allow it right there.</li>
+    <li><b>Extensions page:</b> installs now show each step and the download progress, and extensions that block ads show <b>Blocking on</b>.</li>
   </ul>
 
   <h2>Good to know</h2>
   <ul class="notes dim">
-    <li>Toolbar buttons, popups, options pages and background tasks of extensions come in 0.4, so some extensions only partly work for now. Each one's card shows what works.</li>
-    <li>Ad blocking works per domain for now. Ads served from the same domain as the video or page (like YouTube's own ads) aren't blocked yet.</li>
-    <li>After adding or turning on an extension, reload open tabs to use it there.</li>
+    <li>Filter lists download the first time Prism starts (about 6 MB) and update every 4 days. Pages opened before they're ready aren't filtered yet.</li>
+    <li>Turning Shields off for a site stops hiding ads and site fixes there. Ad and tracker domains stay blocked everywhere until Prism has its own WebKit build (0.9); use <b>Allow</b> in the panel if a site needs one.</li>
+    <li>Changes to Shields apply to pages you load afterwards. The panel reloads the tab for you.</li>
+    <li>Extension popups, options pages and background tasks are next, in 0.5.</li>
+  </ul>
+
+  <h2>Earlier: 0.3</h2>
+  <ul class="notes">
+    <li><b>Extensions</b> from the Chrome Web Store and Firefox Add-ons (<a href="prism://extensions">prism://extensions</a>, <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>E</kbd>), with a permissions check before every install. Content scripts, saved settings and filter-list ad blocking work.</li>
   </ul>
 
   <h2>Earlier: 0.2</h2>

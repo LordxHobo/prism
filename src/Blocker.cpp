@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cctype>
 #include <iterator>
+#include <map>
 #include <mutex>
 
 namespace blocker {
@@ -91,53 +92,138 @@ size_t collectDomains(const json::Value& rules, std::vector<std::string>& blocke
 }
 
 static std::mutex s_listsLock;
-static std::shared_ptr<const Lists> s_lists;
+static std::map<std::string, std::shared_ptr<const Lists>> s_sources;
+static std::unordered_set<std::string> s_userAllowed;
 static std::atomic<uint64_t> s_blocked { 0 };
 
-void setLists(std::shared_ptr<const Lists> lists)
+// Recently blocked hosts, newest at the back.
+static std::mutex s_recentLock;
+static std::vector<std::pair<std::string, uint32_t>> s_recent;
+
+void setLists(const std::string& source, std::shared_ptr<const Lists> lists)
 {
     std::lock_guard<std::mutex> lock(s_listsLock);
-    s_lists = std::move(lists);
+    if (lists && !lists->empty())
+        s_sources[source] = std::move(lists);
+    else
+        s_sources.erase(source);
 }
 
-static std::shared_ptr<const Lists> currentLists()
+bool hasAnyLists()
 {
     std::lock_guard<std::mutex> lock(s_listsLock);
-    return s_lists;
+    return !s_sources.empty();
 }
 
-bool isBlocked(const std::string& rawHost, std::string* owner)
+void setUserAllowed(std::unordered_set<std::string> allowed)
 {
-    auto lists = currentLists();
-    if (!lists || lists->empty())
-        return false;
+    std::lock_guard<std::mutex> lock(s_listsLock);
+    s_userAllowed = std::move(allowed);
+}
 
+static std::vector<std::string> s_topLevelSites; // most recent last, guarded by s_listsLock
+
+static std::string normalizeHost(const std::string& rawHost)
+{
     std::string host = rawHost;
     std::transform(host.begin(), host.end(), host.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     while (!host.empty() && host.back() == '.')
         host.pop_back();
+    return host;
+}
 
-    // Check "a.b.example.com", then "b.example.com", "example.com", "com".
-    // An allow entry for the host or any parent wins over a block.
-    const std::string* blockedBy = nullptr;
+void noteTopLevelSite(const std::string& rawHost)
+{
+    std::string host = normalizeHost(rawHost);
+    if (host.empty())
+        return;
+    std::lock_guard<std::mutex> lock(s_listsLock);
+    s_topLevelSites.erase(std::remove(s_topLevelSites.begin(), s_topLevelSites.end(), host), s_topLevelSites.end());
+    s_topLevelSites.push_back(host);
+    if (s_topLevelSites.size() > 48)
+        s_topLevelSites.erase(s_topLevelSites.begin());
+}
+
+// Is a site on `domain` (or one of its subdomains) open in a tab?
+static bool isOpenSite(const std::vector<std::string>& sites, const std::string& domain)
+{
+    for (auto& site : sites) {
+        if (site == domain || (site.size() > domain.size() && site.compare(site.size() - domain.size() - 1, std::string::npos, "." + domain) == 0))
+            return true;
+    }
+    return false;
+}
+
+// Calls `visit` with the host and each parent domain:
+// "a.b.example.com", "b.example.com", "example.com", "com".
+template<typename Visit>
+static void forEachSuffix(const std::string& host, Visit visit)
+{
     size_t pos = 0;
     for (;;) {
-        std::string suffix = host.substr(pos);
-        if (lists->allowed.count(suffix))
-            return false;
-        if (!blockedBy) {
-            auto found = lists->blocked.find(suffix);
-            if (found != lists->blocked.end() && found->second < lists->owners.size())
-                blockedBy = &lists->owners[found->second];
-        }
+        if (!visit(host.substr(pos)))
+            return;
         size_t dot = host.find('.', pos);
         if (dot == std::string::npos)
-            break;
+            return;
         pos = dot + 1;
     }
-    if (blockedBy && owner)
-        *owner = *blockedBy;
-    return blockedBy != nullptr;
+}
+
+bool isBlocked(const std::string& rawHost, std::string* owner)
+{
+    std::map<std::string, std::shared_ptr<const Lists>> sources;
+    std::vector<std::string> openSites;
+    bool userAllowed = false;
+    std::string host = normalizeHost(rawHost);
+    {
+        std::lock_guard<std::mutex> lock(s_listsLock);
+        if (s_sources.empty())
+            return false;
+        sources = s_sources;
+        openSites = s_topLevelSites;
+        forEachSuffix(host, [&](const std::string& suffix) {
+            userAllowed = userAllowed || s_userAllowed.count(suffix);
+            return !userAllowed;
+        });
+    }
+    if (userAllowed)
+        return false;
+
+    // Each source decides on its own (its allow rules only cancel its own
+    // blocks); blocked if any source blocks.
+    for (auto& [name, lists] : sources) {
+        bool allowed = false;
+        const std::string* blockedBy = nullptr;
+        forEachSuffix(host, [&](const std::string& suffix) {
+            if (lists->allowed.count(suffix)) {
+                allowed = true;
+                return false;
+            }
+            if (!blockedBy) {
+                auto found = lists->blocked.find(suffix);
+                if (found != lists->blocked.end() && found->second < lists->owners.size()
+                    && !(lists->thirdPartyOnly.count(suffix) && isOpenSite(openSites, suffix)))
+                    blockedBy = &lists->owners[found->second];
+            }
+            return true;
+        });
+        if (!allowed && blockedBy) {
+            if (owner)
+                *owner = *blockedBy;
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<std::pair<std::string, uint32_t>> recentBlocked(size_t max)
+{
+    std::lock_guard<std::mutex> lock(s_recentLock);
+    std::vector<std::pair<std::string, uint32_t>> out;
+    for (auto it = s_recent.rbegin(); it != s_recent.rend() && out.size() < max; ++it)
+        out.push_back(*it);
+    return out;
 }
 
 uint64_t blockedCount()
@@ -145,9 +231,22 @@ uint64_t blockedCount()
     return s_blocked.load();
 }
 
-void recordBlocked()
+void recordBlocked(const std::string& rawHost)
 {
     ++s_blocked;
+    std::string host = normalizeHost(rawHost);
+    std::lock_guard<std::mutex> lock(s_recentLock);
+    uint32_t count = 1;
+    for (auto it = s_recent.begin(); it != s_recent.end(); ++it) {
+        if (it->first == host) {
+            count = it->second + 1;
+            s_recent.erase(it);
+            break;
+        }
+    }
+    s_recent.emplace_back(host, count);
+    if (s_recent.size() > 100)
+        s_recent.erase(s_recent.begin());
 }
 
 } // namespace blocker

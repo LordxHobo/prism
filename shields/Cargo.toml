@@ -1,0 +1,28 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+[package]
+name = "prism_shields"
+version = "0.4.0"
+edition = "2021"
+license = "MPL-2.0"
+description = "Prism Shields: a C API around Brave's adblock-rust engine for the Prism browser"
+publish = false
+
+[lib]
+# A DLL with a plain C API. Prism loads it at runtime, like WebKit.
+crate-type = ["cdylib"]
+
+[dependencies]
+# Brave's ad-blocking engine (MPL-2.0). Not "single-thread": Prism builds the
+# engine on a worker thread and then uses it on the UI thread.
+adblock = { version = "0.13.5", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

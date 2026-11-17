@@ -3,7 +3,7 @@ rem This Source Code Form is subject to the terms of the Mozilla Public
 rem License, v. 2.0. If a copy of the MPL was not distributed with this
 rem file, You can obtain one at https://mozilla.org/MPL/2.0/.
 rem
-rem Builds Prism.exe into dist\ using Visual Studio's C++ tools.
+rem Builds Prism.exe (and Prism Shields) into dist\ using Visual Studio's C++ tools.
 rem Run it from anywhere: scripts\build.cmd
 
 setlocal
@@ -28,6 +28,10 @@ call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release || exit /b 1
 cmake --build build || exit /b 1
+
+rem Prism Shields (the ad blocker): needs Rust, and Node.js for the scriptlets.
+rem Skipped with a warning if they aren't installed.
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-shields.ps1 || exit /b 1
 
 echo.
 echo Prism.exe is in dist\
