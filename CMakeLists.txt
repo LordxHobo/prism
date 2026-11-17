@@ -3,7 +3,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 cmake_minimum_required(VERSION 3.21)
-project(Prism VERSION 0.2.0 LANGUAGES CXX RC)
+project(Prism VERSION 0.3.0 LANGUAGES CXX RC)
 
 if(NOT WIN32)
     message(FATAL_ERROR "Prism currently builds for Windows only.")
@@ -23,6 +23,15 @@ add_executable(Prism WIN32
     src/Dialogs.h
     src/Engine.cpp
     src/Engine.h
+    src/Extensions.cpp
+    src/Extensions.h
+    src/Blocker.cpp
+    src/Blocker.h
+    src/BlockerProxy.cpp
+    src/Http.cpp
+    src/Http.h
+    src/Json.cpp
+    src/Json.h
     src/Settings.cpp
     src/Settings.h
     src/Util.cpp
@@ -45,7 +54,7 @@ endif()
 
 # Prism loads WebKit at runtime (see src/WebKitApi.h), so it only links
 # against Windows' own libraries.
-target_link_libraries(Prism PRIVATE user32 gdi32 shell32 shlwapi ole32 uuid dwmapi advapi32)
+target_link_libraries(Prism PRIVATE user32 gdi32 shell32 shlwapi ole32 uuid dwmapi advapi32 winhttp ws2_32)
 
 # Everything needed to run Prism ends up in dist/: Prism.exe, the ui folder,
 # and the WebKit runtime (put there by scripts/fetch-webkit.ps1).

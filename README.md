@@ -4,10 +4,10 @@ A private, independent web browser for Windows, built on **WebKit** (the engine 
 
 - **No data collection.** No telemetry, analytics, crash reporting or accounts. Prism never contacts its developers.
 - **Private by default.** WebKit's tracking prevention, third-party cookie blocking, no DNS prefetching, no link-click pings, and popups only when you click.
-- **Extensions from both stores** *(planned)*. Chrome Web Store and Firefox Add-ons extensions, starting with uBlock Origin and Bitwarden.
+- **Extensions from both stores** *(early)*. Install Chrome Web Store and Firefox Add-ons extensions. Content scripts and filter-list ad blockers (like uBlock Origin Lite) work today; popups and background tasks are next.
 - **Customizable.** The whole interface is HTML and CSS (see [`ui/`](ui)), so themes and layouts are easy to change.
 
-> **Status: early development (v0.2).** Expect rough edges. Copy-protected (DRM) video such as Netflix or Disney+ can't play in any WebKit browser on Windows.
+> **Status: early development (v0.3).** Expect rough edges. Copy-protected (DRM) video such as Netflix or Disney+ can't play in any WebKit browser on Windows.
 
 ## Download
 
@@ -38,7 +38,8 @@ dist\Prism.exe
 
 - [x] Tabs, address bar, downloads, privacy defaults (v0.1)
 - [x] Settings, session restore, clear browsing data (v0.2)
-- [ ] Chrome and Firefox extensions (WebExtensions API)
+- [x] Extensions, part 1: install, content scripts, storage, filter-list ad blocking (v0.3)
+- [ ] Extensions, part 2: toolbar buttons, popups, options, background tasks (v0.4)
 - [ ] Bookmarks and history
 - [ ] Themes, layouts and custom CSS
 - [ ] Fingerprinting protection

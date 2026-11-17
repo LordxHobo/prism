@@ -9,6 +9,7 @@
 #include <shlwapi.h>
 #include <vector>
 #include <cwchar>
+#include <memory>
 
 namespace util {
 
@@ -251,6 +252,69 @@ std::wstring readSetting(const wchar_t* key, const wchar_t* fallback)
 void writeSetting(const wchar_t* key, const std::wstring& value)
 {
     WritePrivateProfileStringW(L"Prism", key, value.c_str(), settingsFile().c_str());
+}
+
+namespace {
+
+constexpr UINT WM_PRISM_TASK = WM_APP + 50;
+HWND s_dispatcher = nullptr;
+
+LRESULT CALLBACK dispatcherProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    if (message == WM_PRISM_TASK) {
+        std::unique_ptr<std::function<void()>> task(reinterpret_cast<std::function<void()>*>(lParam));
+        if (task && *task)
+            (*task)();
+        return 0;
+    }
+    return DefWindowProcW(hwnd, message, wParam, lParam);
+}
+
+} // namespace
+
+void initMainThread()
+{
+    if (s_dispatcher)
+        return;
+    WNDCLASSEXW wc = { sizeof(wc) };
+    wc.lpfnWndProc = dispatcherProc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = L"PrismMainThreadDispatcher";
+    RegisterClassExW(&wc);
+    // A message-only window: never shown, just receives posted tasks.
+    s_dispatcher = CreateWindowExW(0, wc.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, wc.hInstance, nullptr);
+}
+
+void postToMainThread(std::function<void()> task)
+{
+    auto* heap = new std::function<void()>(std::move(task));
+    if (!s_dispatcher || !PostMessageW(s_dispatcher, WM_PRISM_TASK, 0, reinterpret_cast<LPARAM>(heap)))
+        delete heap;
+}
+
+std::string base64(const std::string& bytes)
+{
+    static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve((bytes.size() + 2) / 3 * 4);
+    size_t i = 0;
+    for (; i + 2 < bytes.size(); i += 3) {
+        unsigned n = (static_cast<unsigned char>(bytes[i]) << 16) | (static_cast<unsigned char>(bytes[i + 1]) << 8) | static_cast<unsigned char>(bytes[i + 2]);
+        out += table[(n >> 18) & 63];
+        out += table[(n >> 12) & 63];
+        out += table[(n >> 6) & 63];
+        out += table[n & 63];
+    }
+    if (i < bytes.size()) {
+        unsigned n = static_cast<unsigned char>(bytes[i]) << 16;
+        if (i + 1 < bytes.size())
+            n |= static_cast<unsigned char>(bytes[i + 1]) << 8;
+        out += table[(n >> 18) & 63];
+        out += table[(n >> 12) & 63];
+        out += i + 1 < bytes.size() ? table[(n >> 6) & 63] : '=';
+        out += '=';
+    }
+    return out;
 }
 
 } // namespace util

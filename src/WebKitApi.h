@@ -54,6 +54,17 @@ typedef const struct OpaqueWKPageRunJavaScriptAlertResultListener* WKPageRunJava
 typedef const struct OpaqueWKPageRunJavaScriptConfirmResultListener* WKPageRunJavaScriptConfirmResultListenerRef;
 typedef const struct OpaqueWKPageRunJavaScriptPromptResultListener* WKPageRunJavaScriptPromptResultListenerRef;
 typedef const struct OpaqueWKView* WKViewRef;
+typedef const struct OpaqueWKUserContentController* WKUserContentControllerRef;
+typedef const struct OpaqueWKUserScript* WKUserScriptRef;
+typedef const struct OpaqueWKScriptMessage* WKScriptMessageRef;
+typedef const struct OpaqueWKCompletionListener* WKCompletionListenerRef;
+
+// When a user script runs (WKUserScriptInjectionTime.h).
+enum _WKUserScriptInjectionTime {
+    kWKInjectAtDocumentStart,
+    kWKInjectAtDocumentEnd
+};
+typedef enum _WKUserScriptInjectionTime _WKUserScriptInjectionTime;
 
 typedef uint32_t WKHTTPCookieAcceptPolicy;
 enum {
@@ -66,6 +77,9 @@ enum {
 // ---- Callback types -------------------------------------------------------
 typedef void (*WKPageEvaluateJavaScriptFunction)(WKTypeRef, WKErrorRef, void*);
 typedef void (*WKHTTPCookieStoreSetHTTPCookieAcceptPolicyFunction)(void*);
+// Script message handler (WKUserContentControllerRef.h).
+typedef void (*WKScriptMessageHandlerCallback)(WKScriptMessageRef message, WKCompletionListenerRef reply, const void* context);
+
 // Completion callback used by the data-removal functions.
 typedef void (*WKCompletionFunction)(void*);
 
@@ -339,7 +353,17 @@ typedef struct WKDownloadClientV0 {
     X(WKErrorGetErrorCode, int, (WKErrorRef)) \
     X(WKErrorCopyLocalizedDescription, WKStringRef, (WKErrorRef)) \
     X(WKErrorCopyFailingURL, WKURLRef, (WKErrorRef)) \
-    X(WKDownloadSetClient, void, (WKDownloadRef, WKDownloadClientBase*))
+    X(WKDownloadSetClient, void, (WKDownloadRef, WKDownloadClientBase*)) \
+    X(WKGetTypeID, WKTypeID, (WKTypeRef)) \
+    X(WKStringGetTypeID, WKTypeID, (void)) \
+    X(WKUserContentControllerCreate, WKUserContentControllerRef, (void)) \
+    X(WKUserContentControllerAddUserScript, void, (WKUserContentControllerRef, WKUserScriptRef)) \
+    X(WKUserContentControllerRemoveAllUserScripts, void, (WKUserContentControllerRef)) \
+    X(WKUserContentControllerAddScriptMessageHandler, void, (WKUserContentControllerRef, WKStringRef, WKScriptMessageHandlerCallback, const void*)) \
+    X(WKUserScriptCreateWithSource, WKUserScriptRef, (WKStringRef, _WKUserScriptInjectionTime, bool)) \
+    X(WKPageConfigurationSetUserContentController, void, (WKPageConfigurationRef, WKUserContentControllerRef)) \
+    X(WKScriptMessageGetBody, WKTypeRef, (WKScriptMessageRef)) \
+    X(WKCompletionListenerComplete, void, (WKCompletionListenerRef, WKTypeRef))
 
 #define PRISM_WK_OPTIONAL(X) \
     X(WKWebsiteDataStoreConfigurationSetNetworkCacheDirectory, void, (WKWebsiteDataStoreConfigurationRef, WKStringRef)) \
@@ -360,6 +384,8 @@ typedef struct WKDownloadClientV0 {
     X(WKWebsiteDataStoreRemoveMemoryCaches, void, (WKWebsiteDataStoreRef, void*, WKCompletionFunction)) \
     X(WKWebsiteDataStoreRemoveAllFetchCaches, void, (WKWebsiteDataStoreRef, void*, WKCompletionFunction)) \
     X(WKWebsiteDataStoreStatisticsClearThroughWebsiteDataRemoval, void, (WKWebsiteDataStoreRef, void*, WKCompletionFunction)) \
+    X(WKWebsiteDataStoreEnableCustomNetworkProxySettings, void, (WKWebsiteDataStoreRef, WKURLRef, WKStringRef)) \
+    X(WKWebsiteDataStoreDisableNetworkProxySettings, void, (WKWebsiteDataStoreRef)) \
     X(WKPreferencesSetDNSPrefetchingEnabled, void, (WKPreferencesRef, bool)) \
     X(WKPreferencesSetHyperlinkAuditingEnabled, void, (WKPreferencesRef, bool)) \
     X(WKPreferencesSetDeveloperExtrasEnabled, void, (WKPreferencesRef, bool)) \

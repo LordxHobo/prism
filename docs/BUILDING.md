@@ -66,6 +66,9 @@ Everything goes in `%LOCALAPPDATA%\Prism`:
 | `prism.ini` | Settings. |
 
 | `session.txt` | Your open tabs, for "Continue where you left off". |
+| `Extensions\` | Installed extensions, unpacked. |
+| `ExtensionData\` | Extensions' saved settings (`chrome.storage`). |
+| `extensions.json` | Which extensions are installed and turned on. |
 
 Change settings at `prism://settings` (or press Ctrl+,).
 
@@ -73,4 +76,6 @@ Change settings at `prism://settings` (or press Ctrl+,).
 
 - **"Prism couldn't load the WebKit engine"**: run `fetch-webkit.ps1` and install the Visual C++ Redistributable.
 - **"This WebKit build is missing functions Prism needs"**: the WebKit build doesn't match this version of Prism. Run `fetch-webkit.ps1` without `-Update` to get the pinned version.
+- **Pages stop loading after installing an ad blocker**: Prism routes traffic through its built-in filter (on 127.0.0.1) when a filter-list extension is on. Turn the extension off on the Extensions page, and tell us what happened.
+- **Installing an extension fails with "tar.exe is missing"**: Prism unpacks extensions with Windows' built-in `tar.exe`, which needs Windows 10 version 1803 or newer.
 - **The window opens but stays blank**: WebKit's helper programs (`WebKitWebProcess.exe`, `WebKitNetworkProcess.exe`) must be in `dist\` next to `Prism.exe`, and your antivirus must allow them.

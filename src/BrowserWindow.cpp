@@ -5,7 +5,9 @@
 #include "BrowserWindow.h"
 
 #include "Dialogs.h"
+#include "Blocker.h"
 #include "Engine.h"
+#include "Extensions.h"
 #include "Settings.h"
 #include "Util.h"
 #include "Version.h"
@@ -26,6 +28,7 @@ namespace {
 constexpr wchar_t kWindowClass[] = L"PrismBrowserWindow";
 constexpr UINT WM_PRISM_CLOSE_TAB = WM_APP + 1;
 constexpr UINT_PTR kSessionTimer = 1;
+constexpr UINT_PTR kStatsTimer = 2;
 // Must match --toolbar-height in ui/toolbar.css (normal and compact).
 constexpr int kToolbarCSSHeight = 76;
 constexpr int kCompactToolbarCSSHeight = 66;
@@ -81,7 +84,7 @@ bool systemUsesDarkTheme()
 // Internal prism:// pages that may be opened from the address bar.
 bool isKnownInternalPage(const std::wstring& name)
 {
-    return name == L"newtab" || name == L"whatsnew" || name == L"settings";
+    return name == L"newtab" || name == L"whatsnew" || name == L"settings" || name == L"extensions";
 }
 
 struct DownloadInfo {
@@ -289,7 +292,17 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_TIMER:
         if (wParam == kSessionTimer) {
             KillTimer(m_hwnd, kSessionTimer);
+    KillTimer(m_hwnd, kStatsTimer);
             saveSession();
+            return 0;
+        }
+        if (wParam == kStatsTimer) {
+            // Keep the shield's "blocked" count fresh.
+            uint64_t blocked = blocker::blockedCount();
+            if (blocked != m_lastBlockedCount) {
+                m_lastBlockedCount = blocked;
+                runToolbarScript("window.prism && prism.stats(" + std::to_string(blocked) + ");");
+            }
             return 0;
         }
         break;
@@ -428,6 +441,7 @@ void BrowserWindow::createToolbar()
 
     engine::loadInternalPage(m_toolbarPage, L"toolbar");
     layout();
+    SetTimer(m_hwnd, kStatsTimer, 2000, nullptr);
 }
 
 void BrowserWindow::toolbarDecidePolicyForNavigationAction(WKPageRef, WKNavigationActionRef action, WKFramePolicyListenerRef listener, WKTypeRef, const void*)
@@ -495,6 +509,16 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
         ShellExecuteW(m_hwnd, L"open", settings::downloadDirectory().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     } else if (command == L"settings") {
         openInternalPage(L"settings");
+    } else if (command == L"extensions") {
+        openInternalPage(L"extensions");
+    } else if (command == L"addExtension") {
+        // "Add to Prism" on a store page: open the Extensions page, which
+        // picks the link up and starts the install.
+        if (tab && extensions::isStoreURL(tab->url)) {
+            extensions::queueInstall(tab->url);
+            openInternalPage(L"extensions");
+            evaluateInInternalPages(L"extensions", "window.prismExtensionsEvent && prismExtensionsEvent({\"type\":\"checkPending\"});");
+        }
     } else if (command == L"focusContent") {
         focusContent();
     }
@@ -517,6 +541,7 @@ void BrowserWindow::pushState()
     json += ",\"search\":" + util::jsonString(engine::searchURLTemplate());
     json += ",\"accent\":" + util::jsonString(settings::accent());
     json += ",\"compact\":" + std::string(settings::compactTabs() ? "true" : "false");
+    json += ",\"blocked\":" + std::to_string(blocker::blockedCount());
     json += ",\"active\":" + std::to_string(m_activeTabId);
     json += ",\"tabs\":[";
     for (size_t i = 0; i < m_tabs.size(); ++i) {
@@ -535,6 +560,7 @@ void BrowserWindow::pushState()
         json += ",\"canBack\":" + std::string(WKPageCanGoBack(tab->page) ? "true" : "false");
         json += ",\"canForward\":" + std::string(WKPageCanGoForward(tab->page) ? "true" : "false");
         json += ",\"zoom\":" + std::string(zoom);
+        json += ",\"store\":" + std::string(extensions::isStoreURL(tab->url) ? "true" : "false");
         json += "}";
     }
     json += "]}";
@@ -811,7 +837,7 @@ std::wstring BrowserWindow::sessionURL(const Tab* tab)
         return { };
     if (!engine::isInternalURL(url))
         return url;
-    for (auto* name : { L"newtab", L"whatsnew", L"settings" }) {
+    for (auto* name : { L"newtab", L"whatsnew", L"settings", L"extensions" }) {
         if (engine::isInternalPage(url, name))
             return std::wstring(L"prism://") + name;
     }
@@ -909,6 +935,16 @@ void BrowserWindow::settingsChanged()
         window->updateTheme();
         window->layout();
         window->pushState();
+    }
+}
+
+void BrowserWindow::evaluateInInternalPages(const std::wstring& name, const std::string& script)
+{
+    for (auto* window : s_windows) {
+        for (auto& tab : window->m_tabs) {
+            if (engine::isInternalPage(tab->url, name))
+                WKPageEvaluateJavaScriptInMainFrame(tab->page, stringUTF8(script).get(), nullptr, nullptr);
+        }
     }
 }
 
@@ -1071,12 +1107,16 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
     // gets an answer, so websites can't read or change settings.
     if (message.rfind(L"prism:", 0) == 0 && frame && WKFrameIsMainFrame(frame)) {
         std::wstring frameURL = toWide(Ref<WKURLRef>::adopt(WKFrameCopyURL(frame)).get());
-        if (engine::isInternalPage(frameURL, L"settings")) {
+        bool isSettings = engine::isInternalPage(frameURL, L"settings");
+        bool isExtensions = engine::isInternalPage(frameURL, L"extensions");
+        if (isSettings || isExtensions) {
             std::wstring body = message.substr(6);
             size_t newline = body.find(L'\n');
             std::wstring command = body.substr(0, newline);
             std::wstring argument = newline == std::wstring::npos ? L"" : body.substr(newline + 1);
-            std::string answer = tab->window->handleSettingsCommand(command, argument);
+            std::string answer = isSettings
+                ? tab->window->handleSettingsCommand(command, argument)
+                : extensions::handleCommand(command, argument, tab->window->m_hwnd);
             WKPageRunJavaScriptPromptResultListenerCall(listener, stringUTF8(answer).get());
             return;
         }
@@ -1147,6 +1187,14 @@ void BrowserWindow::didFailProvisionalNavigation(WKPageRef, WKNavigationRef, WKE
     std::wstring description = toWide(Ref<WKStringRef>::adopt(WKErrorCopyLocalizedDescription(error)).get());
     std::wstring query = L"kind=network&url=" + util::urlEncode(failingURL)
         + L"&message=" + util::urlEncode(description) + L"&code=" + std::to_wstring(code);
+
+    // A page on an extension's blocklist (e.g. clicking an ad): say so.
+    std::string owner;
+    std::wstring failingHost = hostOf(failingURL);
+    if (!failingHost.empty() && failingHost[0] != L'[')
+        failingHost = failingHost.substr(0, failingHost.find(L':'));
+    if (blocker::isBlocked(util::toUTF8(failingHost), &owner))
+        query = L"kind=blocked&url=" + util::urlEncode(failingURL) + L"&owner=" + util::urlEncode(util::fromUTF8(owner));
     tab->url = failingURL;
     engine::loadInternalPage(tab->page, L"error", query);
     tab->window->tabChanged(tab);
@@ -1199,7 +1247,7 @@ void BrowserWindow::startDownload(WKDownloadRef download)
 
 void BrowserWindow::showMenu(int x, int y)
 {
-    enum { NewTab = 1, NewWindow, ReopenTab, ZoomIn, ZoomOut, ZoomReset, DevTools, Downloads, Settings, WhatsNew, About };
+    enum { NewTab = 1, NewWindow, ReopenTab, ZoomIn, ZoomOut, ZoomReset, DevTools, Downloads, Extensions, Settings, WhatsNew, About };
 
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, NewTab, L"New tab\tCtrl+T");
@@ -1213,6 +1261,7 @@ void BrowserWindow::showMenu(int x, int y)
     AppendMenuW(menu, MF_STRING, Downloads, L"Open Downloads folder");
     AppendMenuW(menu, MF_STRING | (WKPageGetInspector ? 0 : MF_GRAYED), DevTools, L"Developer tools\tF12");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, Extensions, L"Extensions\tCtrl+Shift+E");
     AppendMenuW(menu, MF_STRING, Settings, L"Settings\tCtrl+,");
     AppendMenuW(menu, MF_STRING, WhatsNew, L"What's new");
     AppendMenuW(menu, MF_STRING, About, L"About Prism");
@@ -1233,6 +1282,7 @@ void BrowserWindow::showMenu(int x, int y)
     case ZoomReset: zoom(0); break;
     case DevTools: showDevTools(); break;
     case Downloads: handleToolbarCommand(L"openDownloads", L""); break;
+    case Extensions: openInternalPage(L"extensions"); break;
     case Settings: openInternalPage(L"settings"); break;
     case WhatsNew: openInternalPage(L"whatsnew"); break;
     case About: {
@@ -1326,6 +1376,10 @@ bool BrowserWindow::handleShortcut(const MSG& msg)
         case VK_OEM_PLUS:
         case VK_ADD:
             zoom(1.1);
+            return true;
+        case 'E':
+            if (!shift) return false;
+            openInternalPage(L"extensions");
             return true;
         case VK_OEM_COMMA:
             openInternalPage(L"settings");

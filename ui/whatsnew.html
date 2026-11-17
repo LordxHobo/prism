@@ -22,25 +22,35 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.2.0</span>
+      <span class="version">Version 0.3.0</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Settings are here</h2>
-    <p>Open them from the <b>&#x22EF;</b> menu, with <kbd>Ctrl</kbd> <kbd>,</kbd>, or by clicking the green shield in the address bar.</p>
+    <h2 style="margin-top:0">Extensions are here (early)</h2>
+    <p>Install extensions from the <b>Chrome Web Store</b> and <b>Firefox Add-ons</b>: paste a link on the <a href="prism://extensions">Extensions page</a>, or press <b>Add to Prism</b> in the address bar on a store page. For ad blocking, try uBlock Origin Lite.</p>
   </div>
 
-  <h2>New in 0.2</h2>
+  <h2>New in 0.3</h2>
   <ul class="notes">
-    <li><b>Settings page</b> (<a href="prism://settings">prism://settings</a>) with General, Appearance, Privacy and About sections. Changes apply immediately.</li>
-    <li><b>Search engine choice:</b> DuckDuckGo, Startpage, Brave Search, Ecosia, Google, Bing, or your own.</li>
-    <li><b>Continue where you left off:</b> reopen your windows and tabs when Prism starts.</li>
-    <li><b>Download folder</b> of your choice.</li>
-    <li><b>Theme, accent color and compact tabs.</b> Pick System, Dark or Light, one of eight accent colors, and a slimmer tab strip.</li>
-    <li><b>Third-party cookies:</b> Standard or Strict blocking.</li>
-    <li><b>Clear browsing data</b> now, or automatically every time Prism closes.</li>
-    <li>Opening What's new or Settings switches to the tab if it's already open.</li>
+    <li><b>Extensions page</b> (<a href="prism://extensions">prism://extensions</a>, <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>E</kbd>, or the puzzle-piece button): install from a store link, a <code>.crx</code>/<code>.xpi</code>/<code>.zip</code> file, or an unpacked folder. Turn extensions on or off, or remove them.</li>
+    <li><b>Permissions check</b> before every install, in plain language, plus what the extension can already do in Prism.</li>
+    <li><b>Content scripts work:</b> extensions that change pages run on the sites they're made for, with saved settings (<code>storage</code>) and translations.</li>
+    <li><b>Ad and tracker blocking</b> from filter-list extensions like uBlock Origin Lite. Prism blocks ad, tracker and malware domains before any connection is made, and you can turn individual filter lists on or off.</li>
+    <li><b>Blocked-site page:</b> if you open a blocked site (like an ad link), Prism tells you which extension blocked it.</li>
+    <li>The shield in the address bar shows how many ads and trackers were blocked.</li>
+  </ul>
+
+  <h2>Good to know</h2>
+  <ul class="notes dim">
+    <li>Toolbar buttons, popups, options pages and background tasks of extensions come in 0.4, so some extensions only partly work for now. Each one's card shows what works.</li>
+    <li>Ad blocking works per domain for now. Ads served from the same domain as the video or page (like YouTube's own ads) aren't blocked yet.</li>
+    <li>After adding or turning on an extension, reload open tabs to use it there.</li>
+  </ul>
+
+  <h2>Earlier: 0.2</h2>
+  <ul class="notes">
+    <li><b>Settings page</b> with search engine choice, "Continue where you left off", download folder, theme, accent color, compact tabs, cookie blocking level, and clearing browsing data.</li>
   </ul>
 
   <h2>Earlier: 0.1, the first build</h2>
@@ -65,13 +75,14 @@
     <tr><td><kbd>Ctrl</kbd> <kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd></td><td>Zoom in / out / reset</td></tr>
     <tr><td><kbd>Ctrl</kbd> <kbd>N</kbd></td><td>New window</td></tr>
     <tr><td><kbd>Ctrl</kbd> <kbd>,</kbd></td><td>Settings</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>E</kbd></td><td>Extensions</td></tr>
   </table>
 
   <h2>Coming next</h2>
   <ul class="notes dim">
-    <li>Extensions from the Chrome Web Store and Firefox Add-ons, starting with uBlock Origin and Bitwarden.</li>
-    <li>Bookmarks and history.</li>
-    <li>More customization: custom themes, layouts and custom CSS.</li>
+    <li><b>0.4:</b> extension toolbar buttons, popups, options pages and background tasks (Bitwarden, Dark Reader).</li>
+    <li><b>0.5:</b> bookmarks, history, find in page, printing, permission prompts.</li>
+    <li><b>0.6:</b> tab groups (Chrome and Vivaldi style), vertical tabs, custom themes and CSS.</li>
   </ul>
 </main>
 </body>

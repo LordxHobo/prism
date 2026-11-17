@@ -299,6 +299,24 @@ button {
   color: var(--accent-text);
 }
 
+#addExtension {
+  flex: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 999px;
+  padding: 3px 12px;
+  margin-right: 2px;
+  cursor: pointer;
+}
+
+#addExtension:hover {
+  filter: brightness(1.1);
+}
+
 #toast {
   position: absolute;
   right: 6px;

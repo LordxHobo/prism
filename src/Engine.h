@@ -17,6 +17,13 @@ void deleteProfileIfRequested();
 
 bool initialize(std::wstring& error);
 
+// Where extension content scripts are registered (shared by all pages).
+WKUserContentControllerRef userContentController();
+
+// Sends WebKit's traffic through Prism's blocking proxy (extensions'
+// filter lists), or stops doing so.
+void setBlockingProxy(bool enabled);
+
 // Applies the third-party cookie setting (call again after it changes).
 void applyCookiePolicy();
 

@@ -4,6 +4,8 @@
 
 #include "Engine.h"
 
+#include "Blocker.h"
+#include "Extensions.h"
 #include "Settings.h"
 #include "Util.h"
 
@@ -20,6 +22,8 @@ static Ref<WKContextRef> s_context;
 static Ref<WKPreferencesRef> s_preferences;
 static Ref<WKWebsiteDataStoreRef> s_dataStore;
 static Ref<WKPageConfigurationRef> s_pageConfiguration;
+static Ref<WKUserContentControllerRef> s_userContent;
+static bool s_proxyEnabled = false;
 static std::wstring s_uiDirectory;
 static std::wstring s_uiDirectoryURL;
 static bool s_darkTheme = true;
@@ -169,7 +173,38 @@ bool initialize(std::wstring& error)
     WKPageConfigurationSetContext(s_pageConfiguration.get(), s_context.get());
     WKPageConfigurationSetPreferences(s_pageConfiguration.get(), s_preferences.get());
     WKPageConfigurationSetWebsiteDataStore(s_pageConfiguration.get(), s_dataStore.get());
+
+    // Extension content scripts and their messages to Prism.
+    s_userContent = Ref<WKUserContentControllerRef>::adopt(WKUserContentControllerCreate());
+    WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismExtension").get(),
+        [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { extensions::handleScriptMessage(message, reply); }, nullptr);
+    WKPageConfigurationSetUserContentController(s_pageConfiguration.get(), s_userContent.get());
     return true;
+}
+
+WKUserContentControllerRef userContentController()
+{
+    return s_userContent.get();
+}
+
+void setBlockingProxy(bool enabled)
+{
+    if (!s_dataStore || !WKWebsiteDataStoreEnableCustomNetworkProxySettings || !WKWebsiteDataStoreDisableNetworkProxySettings)
+        return;
+    if (enabled) {
+        uint16_t port = blocker::startProxy();
+        if (!port)
+            return;
+        if (s_proxyEnabled)
+            return;
+        // Local addresses (your router, local dev servers) skip the proxy.
+        WKWebsiteDataStoreEnableCustomNetworkProxySettings(s_dataStore.get(),
+            url(L"http://127.0.0.1:" + std::to_wstring(port)).get(), stringUTF8("localhost,127.0.0.1,::1").get());
+        s_proxyEnabled = true;
+    } else if (s_proxyEnabled) {
+        WKWebsiteDataStoreDisableNetworkProxySettings(s_dataStore.get());
+        s_proxyEnabled = false;
+    }
 }
 
 WKPageConfigurationRef pageConfiguration()

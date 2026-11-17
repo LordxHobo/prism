@@ -5,6 +5,7 @@
 #pragma once
 
 #include <windows.h>
+#include <functional>
 #include <string>
 
 namespace util {
@@ -48,5 +49,13 @@ std::string readFile(const std::wstring& path);
 // Simple key/value settings stored in %LOCALAPPDATA%\Prism\prism.ini.
 std::wstring readSetting(const wchar_t* key, const wchar_t* fallback = L"");
 void writeSetting(const wchar_t* key, const std::wstring& value);
+
+// Runs `task` on the main (UI) thread. Safe to call from any thread.
+// initMainThread() must be called once at startup, on the main thread.
+void initMainThread();
+void postToMainThread(std::function<void()> task);
+
+// Encodes bytes as base64 (for data: URLs).
+std::string base64(const std::string& bytes);
 
 } // namespace util

@@ -6,6 +6,7 @@
 
 #include "BrowserWindow.h"
 #include "Engine.h"
+#include "Extensions.h"
 #include "Settings.h"
 #include "Util.h"
 #include "Version.h"
@@ -20,6 +21,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     // current directory (protects against DLL planting).
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     OleInitialize(nullptr);
+    util::initMainThread();
 
     engine::deleteProfileIfRequested();
 
@@ -29,6 +31,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         OleUninitialize();
         return 1;
     }
+
+    // Extensions: content scripts and filter lists. Events for the
+    // Extensions page are forwarded to any tab showing it.
+    extensions::initialize([](const std::string& event) {
+        BrowserWindow::evaluateInInternalPages(L"extensions", "window.prismExtensionsEvent && prismExtensionsEvent(" + event + ");");
+    });
 
     if (!BrowserWindow::registerWindowClass(instance)) {
         MessageBoxW(nullptr, L"Couldn't create Prism's window.", L"Prism can't start", MB_OK | MB_ICONERROR);

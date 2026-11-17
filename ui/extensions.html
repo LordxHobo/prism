@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Extensions</title>
+<script src="pages.js"></script>
+<link rel="stylesheet" href="pages.css">
+<link rel="stylesheet" href="extensions.css">
+</head>
+<body>
+<main>
+  <header class="top">
+    <div>
+      <h1>Extensions</h1>
+      <p class="dim">From the Chrome Web Store and Firefox Add-ons. <span id="blockedStat"></span></p>
+    </div>
+  </header>
+
+  <section class="card install">
+    <h2>Add an extension</h2>
+    <form id="installForm" autocomplete="off">
+      <input id="installInput" type="text" spellcheck="false" placeholder="Paste a link from chromewebstore.google.com or addons.mozilla.org">
+      <button class="button" type="submit" id="installButton">Add</button>
+    </form>
+    <div class="buttons">
+      <button class="button secondary" id="fromFile">Install from file…</button>
+      <button class="button secondary" id="fromFolder">Load unpacked folder…</button>
+      <a class="link" href="https://chromewebstore.google.com/" id="openChrome">Browse the Chrome Web Store</a>
+      <a class="link" href="https://addons.mozilla.org/firefox/extensions/" id="openFirefox">Browse Firefox Add-ons</a>
+    </div>
+    <p class="status" id="installStatus" role="status" hidden></p>
+  </section>
+
+  <div class="notice dim">
+    <b>Early support.</b> In this version, extensions can change pages (content scripts), save settings, and block ads and trackers by domain.
+    Toolbar buttons, popups and background tasks are coming next. Each extension below shows what already works.
+  </div>
+
+  <section id="list" aria-live="polite"></section>
+  <p class="dim empty" id="empty" hidden>No extensions yet. Try <a href="#" id="tryUbol">uBlock Origin Lite</a> for ad blocking.</p>
+  <p class="dim reloadHint" id="reloadHint" hidden>Reload open tabs to apply changes to them.</p>
+</main>
+
+<div class="overlay" id="confirm" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="dialogHead">
+      <img id="confirmIcon" alt="">
+      <div>
+        <h2 id="confirmTitle"></h2>
+        <p class="dim" id="confirmSub"></p>
+      </div>
+    </div>
+    <p class="dim" id="confirmDescription"></p>
+    <h3>It will be able to:</h3>
+    <ul id="confirmPermissions"></ul>
+    <h3>In Prism right now:</h3>
+    <ul id="confirmSupport" class="support"></ul>
+    <p class="error" id="confirmError" hidden></p>
+    <div class="buttons end">
+      <button class="button secondary" id="confirmCancel">Cancel</button>
+      <button class="button" id="confirmOk">Add extension</button>
+    </div>
+  </div>
+</div>
+
+<script src="extensions.js"></script>
+</body>
+</html>

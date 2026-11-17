@@ -17,6 +17,8 @@ const elements = {
   form: $('addressform'),
   address: $('address'),
   shield: $('shield'),
+  addExtension: $('addExtension'),
+  extensions: $('extensions'),
   toast: $('toast'),
   menu: $('menu'),
   progress: $('progress'),
@@ -174,6 +176,9 @@ function renderNavigation() {
   if (!editing)
     elements.address.value = tab ? displayURL(tab.url) : '';
 
+  // "Add to Prism" on Chrome Web Store / Firefox Add-ons extension pages.
+  elements.addExtension.hidden = !(tab && tab.store);
+
   const loading = !!(tab && tab.loading);
   elements.progress.classList.toggle('visible', loading);
   elements.progress.style.width = loading ? Math.max(5, Math.round(tab.progress * 100)) + '%' : '0';
@@ -197,6 +202,14 @@ window.prism = {
       editing = false;
     renderTabs();
     renderNavigation();
+    prism.stats(state.blocked || 0);
+  },
+
+  // How many ads/trackers the extensions' filter lists blocked.
+  stats(blocked) {
+    elements.shield.title = 'Protected: trackers limited, third-party cookies blocked'
+      + (blocked ? '. ' + blocked.toLocaleString() + ' ads and trackers blocked.' : '.')
+      + ' Click for privacy settings.';
   },
 
   toast(text) {
@@ -241,6 +254,8 @@ elements.menu.addEventListener('click', () => {
 });
 
 elements.shield.addEventListener('click', () => send('settings'));
+elements.addExtension.addEventListener('click', () => send('addExtension'));
+elements.extensions.addEventListener('click', () => send('extensions'));
 
 // Double-clicking empty tab strip space opens a new tab.
 $('tabstrip').addEventListener('dblclick', (event) => {

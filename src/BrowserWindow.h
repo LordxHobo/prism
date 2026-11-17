@@ -38,6 +38,9 @@ public:
 
     // Re-applies settings (theme, accent, tab size, ...) to every window.
     static void settingsChanged();
+
+    // Runs `script` in every open tab showing prism://<name>.
+    static void evaluateInInternalPages(const std::wstring& name, const std::string& script);
     static bool registerWindowClass(HINSTANCE);
     static BrowserWindow* fromHWND(HWND);
     static size_t windowCount();
@@ -123,4 +126,5 @@ private:
     bool m_darkTheme { true };
     std::vector<std::wstring> m_pendingStartURLs;
     int m_pendingActiveIndex { -1 };
+    uint64_t m_lastBlockedCount { 0 };
 };

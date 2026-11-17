@@ -45,7 +45,17 @@ try { host = new URL(url).host || url; } catch (e) { /* keep as-is */ }
 const $ = (id) => document.getElementById(id);
 const tips = [];
 
-if (kind === 'crash') {
+if (kind === 'blocked') {
+  const owner = params.get('owner') || 'an extension';
+  document.title = 'Blocked: ' + host;
+  $('icon').textContent = '\u{1F6E1}\uFE0F';
+  $('heading').textContent = host + ' is blocked';
+  $('summary').textContent = owner + ' blocks this site because it\u2019s on one of its ad, tracker or malware lists.';
+  tips.push('If you trust this site, turn off the filter list that blocks it (Extensions page \u2192 Details), or turn the extension off.');
+  $('retry').textContent = 'Go back';
+  $('retry').addEventListener('click', (event) => { event.stopImmediatePropagation(); history.back(); }, true);
+  $('details').textContent = 'Blocked by ' + owner + ' \u2014 ' + url;
+} else if (kind === 'crash') {
   document.title = 'Page crashed';
   $('icon').textContent = '\u{1F4A5}';
   $('heading').textContent = 'This page crashed';
