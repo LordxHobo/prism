@@ -176,9 +176,16 @@ bool initialize(std::wstring& error)
     applyCookiePolicy();
 
     s_preferences = createPreferences();
-    // Extension background pages run in hidden windows; WebKit would slow
-    // their timers down (and maybe pause them) like a hidden tab's.
+    // Extension pages (background, popups, options tabs) are files in the
+    // extension's folder. Like in Chrome, they may load each other (WebKit
+    // only loads JavaScript modules between files when this is allowed) and
+    // reach the websites the extension has permission for. Background pages
+    // run in hidden windows: WebKit would otherwise slow their timers down.
     s_backgroundPreferences = createPreferences();
+    if (WKPreferencesSetFileAccessFromFileURLsAllowed)
+        WKPreferencesSetFileAccessFromFileURLsAllowed(s_backgroundPreferences.get(), true);
+    if (WKPreferencesSetUniversalAccessFromFileURLsAllowed)
+        WKPreferencesSetUniversalAccessFromFileURLsAllowed(s_backgroundPreferences.get(), true);
     if (WKPreferencesSetHiddenPageDOMTimerThrottlingEnabled)
         WKPreferencesSetHiddenPageDOMTimerThrottlingEnabled(s_backgroundPreferences.get(), false);
     if (WKPreferencesSetPageVisibilityBasedProcessSuppressionEnabled)
@@ -209,7 +216,7 @@ bool initialize(std::wstring& error)
     return true;
 }
 
-WKPageConfigurationRef backgroundPageConfiguration()
+WKPageConfigurationRef extensionPageConfiguration()
 {
     return s_backgroundConfiguration.get();
 }

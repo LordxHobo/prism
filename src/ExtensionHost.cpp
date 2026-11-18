@@ -685,7 +685,7 @@ std::unique_ptr<HostView> createHost(const std::string& extId, Kind kind, HWND o
         return nullptr;
     SetWindowLongPtrW(host->hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(host.get()));
     RECT rect = { 0, 0, kind == Kind::Background ? 1024 : 10, kind == Kind::Background ? 768 : 10 };
-    WKPageConfigurationRef configuration = kind == Kind::Background ? engine::backgroundPageConfiguration() : engine::pageConfiguration();
+    WKPageConfigurationRef configuration = engine::extensionPageConfiguration();
     host->view = Ref<WKViewRef>::adopt(WKViewCreate(rect, configuration, host->hwnd));
     WKViewSetIsInWindow(host->view.get(), true);
     host->viewHwnd = WKViewGetWindow(host->view.get());

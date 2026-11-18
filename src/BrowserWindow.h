@@ -24,6 +24,7 @@ struct Tab {
     bool loading { false };
     double progress { 0 };
     bool crashed { false };
+    bool extensionPages { false }; // made with engine::extensionPageConfiguration()
     std::wstring savedURL; // what the session file has for this tab
 };
 

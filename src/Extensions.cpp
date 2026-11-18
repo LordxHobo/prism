@@ -397,8 +397,6 @@ bool loadExtension(const fs::path& dir, Extension& ext, std::string& error)
         ext.unsupported.push_back("Side panel");
     if (manifest.has("chrome_url_overrides") || manifest.has("devtools_page") || manifest.has("omnibox"))
         ext.unsupported.push_back("Replacing Prism pages, developer tools panels or address-bar keywords");
-    if (ext.serviceWorkerModule)
-        ext.unsupported.push_back("Background service worker written as a module (may not start)");
 
     ext.hasBackground = manifest.has("background");
     ext.hasPopup = !manifest["action"]["default_popup"].asString().empty()

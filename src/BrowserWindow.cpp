@@ -696,6 +696,13 @@ Tab* BrowserWindow::newTab(const std::wstring& url, bool select, WKPageConfigura
     tab->window = this;
     tab->id = ++s_nextTabId;
 
+    // Extension pages (options pages) get the extension configuration: it's
+    // fixed for the life of the tab.
+    if (!configuration && !extensions::resolveExtensionURL(url).empty()) {
+        configuration = engine::extensionPageConfiguration();
+        tab->extensionPages = true;
+    } else if (configuration == engine::extensionPageConfiguration())
+        tab->extensionPages = true;
     RECT rect = { };
     tab->view = Ref<WKViewRef>::adopt(WKViewCreate(rect, configuration ? configuration : engine::pageConfiguration(), m_hwnd));
     WKViewSetIsInWindow(tab->view.get(), true);
@@ -863,6 +870,18 @@ void BrowserWindow::navigate(Tab* tab, const std::wstring& url)
             target = extensions::resolveExtensionURL(url);
             if (target.empty())
                 target = engine::internalPageURL(L"error", L"kind=network&url=" + util::urlEncode(url) + L"&message=" + util::urlEncode(L"There's no installed (and turned on) extension with this address."));
+        }
+        // Extension pages need an extension tab (see newTab); other files
+        // must never load in one.
+        bool extensionPage = !extensions::resolveExtensionURL(target).empty();
+        if (extensionPage != tab->extensionPages && (extensionPage || schemeOf(target) == L"file") && !engine::isInternalURL(target)) {
+            bool replace = tab->url.empty() || engine::isInternalPage(tab->url, L"newtab");
+            int oldId = tab->id;
+            Tab* fresh = newTab(target, true);
+            moveTab(fresh->id, indexOf(tab) + 1);
+            if (replace)
+                PostMessageW(m_hwnd, WM_PRISM_CLOSE_TAB, static_cast<WPARAM>(oldId), 0);
+            return;
         }
         tab->url = target;
         WKPageLoadURL(tab->page, wk::url(target).get());
@@ -1241,6 +1260,28 @@ void BrowserWindow::decidePolicyForNavigationAction(WKPageRef, WKNavigationActio
     std::wstring scheme = schemeOf(target);
 
     static const wchar_t* webSchemes[] = { L"http", L"https", L"file", L"about", L"data", L"blob", L"javascript", L"ws", L"wss" };
+    // Extension pages only in extension tabs, and other files never there:
+    // the main frame moves to a tab of the right kind instead.
+    if (scheme == L"file" && !engine::isInternalURL(target)) {
+        auto frame = Ref<WKFrameInfoRef>::adopt(WKNavigationActionCopyTargetFrameInfo(action));
+        bool mainFrame = !frame || WKFrameInfoGetIsMainFrame(frame.get());
+        bool extensionPage = !extensions::resolveExtensionURL(target).empty();
+        if (extensionPage != tab->extensionPages) {
+            WKFramePolicyListenerIgnore(listener);
+            if (mainFrame) {
+                BrowserWindow* window = tab->window;
+                int index = window->indexOf(tab) + 1;
+                util::postToMainThread([hwnd = window->m_hwnd, target, index] {
+                    if (BrowserWindow* again = BrowserWindow::fromHWND(hwnd)) {
+                        Tab* fresh = again->newTab(target, true);
+                        again->moveTab(fresh->id, index);
+                    }
+                });
+            }
+            return;
+        }
+    }
+
     for (auto* web : webSchemes) {
         if (scheme == web) {
             // Prism Shields puts the site's filters in place before the page

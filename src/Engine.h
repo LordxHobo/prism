@@ -41,9 +41,12 @@ void applyCookiePolicy();
 // Deletes browsing data; `done` runs on the main thread when finished.
 void clearBrowsingData(bool cookiesAndSiteData, bool cache, std::function<void()> done);
 
-// For extension background pages: like pageConfiguration(), but WebKit
-// doesn't slow down their timers while they're hidden.
-WKPageConfigurationRef backgroundPageConfiguration();
+// For extension pages (background, popups, options tabs): like
+// pageConfiguration(), but their files may load each other (JavaScript
+// modules), they may reach other sites (like Chrome's extension origins),
+// and WebKit doesn't slow down their timers while they're hidden. Never use
+// it for pages that aren't an extension's.
+WKPageConfigurationRef extensionPageConfiguration();
 WKPageConfigurationRef pageConfiguration();
 
 // Applies per-page privacy settings (user agent, scale). Call on every new page.

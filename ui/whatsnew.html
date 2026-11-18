@@ -22,7 +22,7 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.5.0</span>
+      <span class="version">Version 0.5.1</span>
     </div>
   </header>
 
@@ -30,6 +30,12 @@
     <h2 style="margin-top:0">Extensions, for real this time</h2>
     <p>Extensions now run all their parts: the background part that works behind the scenes, their <b>toolbar button and popup</b>, and their <b>options page</b>. Dark Reader, uBlock Origin Lite's popup and similar extensions should work like in Chrome or Firefox.</p>
   </div>
+
+  <h2>Fixed in 0.5.1</h2>
+  <ul class="notes">
+    <li><b>Extension popups that stayed empty</b> (like uBlock Origin Lite's, which only showed the word “cogs”) now work. Extensions built from JavaScript modules couldn't load their own scripts; their background part didn't start either.</li>
+    <li>Extension options pages always open in a tab made for extension pages. Other files on your PC never open in one.</li>
+  </ul>
 
   <h2>New in 0.5</h2>
   <ul class="notes">
