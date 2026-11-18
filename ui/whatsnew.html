@@ -22,7 +22,7 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.5.2</span>
+      <span class="version">Version 0.5.3</span>
     </div>
   </header>
 
@@ -30,6 +30,12 @@
     <h2 style="margin-top:0">Extensions, for real this time</h2>
     <p>Extensions now run all their parts: the background part that works behind the scenes, their <b>toolbar button and popup</b>, and their <b>options page</b>. Dark Reader, uBlock Origin Lite's popup and similar extensions should work like in Chrome or Firefox.</p>
   </div>
+
+  <h2>New in 0.5.3</h2>
+  <ul class="notes">
+    <li><b>Extensions built on uBlock Origin</b> (like AdNauseam) start properly: Prism now has the <code>chrome.privacy</code> API they read at startup (it reports Prism's own settings) and a few constants they check.</li>
+    <li><b>Errors on the Extensions page:</b> when an extension's background part, popup or options page hits an error, its card shows a red “errors” badge, and <b>Details</b> lists what went wrong. A screenshot of that is the quickest way to get something fixed.</li>
+  </ul>
 
   <h2>Fixed in 0.5.2</h2>
   <ul class="notes">

@@ -232,6 +232,13 @@ function render(data) {
     badge.className = 'badge ' + ext.support.level;
     badge.textContent = { full: 'Works', partial: 'Partly works', none: 'Not supported yet' }[ext.support.level];
     name.append(version, badge);
+    if (ext.errors && ext.errors.length) {
+      const errors = document.createElement('span');
+      errors.className = 'badge none';
+      errors.textContent = ext.errors.length === 1 ? '1 error' : ext.errors.length + ' errors';
+      errors.title = 'See Details';
+      name.appendChild(errors);
+    }
     // Is this extension's ad blocking running right now?
     if (ext.enabled && ext.support.blockingDomains) {
       const blocking = document.createElement('span');
@@ -296,6 +303,35 @@ function render(data) {
     supportList.className = 'support';
     fillList(supportList, supportItems(ext.support));
     details.append(supportTitle, supportList);
+
+    if (ext.errors && ext.errors.length) {
+      const title = document.createElement('h3');
+      title.textContent = 'Errors';
+      const list = document.createElement('ul');
+      list.className = 'errors';
+      for (const entry of ext.errors.slice().reverse()) {
+        const item = document.createElement('li');
+        const where = document.createElement('span');
+        where.className = 'dim';
+        const when = new Date(entry.time * 1000).toLocaleTimeString();
+        where.textContent = when + ' · ' + { background: 'Background', popup: 'Popup', tab: 'Page' }[entry.where] + (entry.source ? ' · ' + entry.source : '') + (entry.count > 1 ? ' · ×' + entry.count : '');
+        const message = document.createElement('pre');
+        message.textContent = entry.message;
+        item.append(where, message);
+        list.appendChild(item);
+      }
+      const clear = document.createElement('button');
+      clear.className = 'button secondary small';
+      clear.textContent = 'Clear errors';
+      clear.addEventListener('click', () => {
+        const result = ask('clearErrors', ext.id);
+        if (result) render(result);
+      });
+      const hint = document.createElement('p');
+      hint.className = 'dim';
+      hint.textContent = 'Something in this extension doesn’t work? These errors show what went wrong; a screenshot of them helps fix it.';
+      details.append(title, hint, list, clear);
+    }
 
     if (ext.rulesets.length) {
       const title = document.createElement('h3');

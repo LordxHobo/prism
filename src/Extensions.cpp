@@ -14,6 +14,7 @@
 #include "Util.h"
 
 #include <algorithm>
+#include <ctime>
 #include <atomic>
 #include <cctype>
 #include <cstdlib>
@@ -545,6 +546,13 @@ std::string extensionJSON(const Extension& ext)
     json += ",\"icon\":" + json::quote(ext.iconDataURL);
     json += ",\"permissions\":" + stringArrayJSON(describePermissions(ext));
     json += ",\"support\":" + supportJSON(ext);
+    json += ",\"errors\":[";
+    for (size_t i = 0; i < ext.errors.size(); ++i) {
+        auto& entry = ext.errors[i];
+        json += std::string(i ? "," : "") + "{\"where\":" + json::quote(entry.where) + ",\"message\":" + json::quote(entry.message)
+            + ",\"source\":" + json::quote(entry.source) + ",\"time\":" + std::to_string(entry.time) + ",\"count\":" + std::to_string(entry.count) + "}";
+    }
+    json += "]";
     json += ",\"rulesets\":[";
     for (size_t i = 0; i < ext.rulesets.size(); ++i) {
         auto& ruleset = ext.rulesets[i];
@@ -1465,6 +1473,12 @@ std::string handleCommand(const std::wstring& command, const std::wstring& argum
         return listJSON();
     }
 
+    if (command == L"clearErrors") {
+        if (Extension* ext = findExtension(argUTF8(0)))
+            ext->errors.clear();
+        return listJSON();
+    }
+
     if (command == L"openOptions") {
         int windowId = -1;
         if (BrowserWindow* window = BrowserWindow::fromHWND(owner))
@@ -1670,6 +1684,27 @@ std::string injectionScript(const Extension& ext, const std::string& code)
     config += ",\"injected\":true";
     config += ",\"entries\":[{\"matches\":[\"<all_urls>\"],\"excludeMatches\":[],\"includeGlobs\":[],\"excludeGlobs\":[],\"allFrames\":false,\"runAt\":\"document_start\",\"css\":\"\"}]}";
     return g_runtimeSource + "(" + config + ", [function (chrome, browser) {\n" + code + "\n}])";
+}
+
+void logError(Extension& ext, const std::string& where, const std::string& message, const std::string& source)
+{
+    // The same error again only counts up.
+    for (auto& entry : ext.errors) {
+        if (entry.message == message && entry.source == source && entry.where == where) {
+            ++entry.count;
+            entry.time = static_cast<long long>(time(nullptr));
+            return;
+        }
+    }
+    ext.errors.push_back({ where, message, source, static_cast<long long>(time(nullptr)), 1 });
+    if (ext.errors.size() > 30)
+        ext.errors.erase(ext.errors.begin());
+    // An extension stuck in an error loop shouldn't keep redrawing the page.
+    static ULONGLONG lastNotify = 0;
+    if (GetTickCount64() - lastNotify > 1000) {
+        lastNotify = GetTickCount64();
+        notifyList();
+    }
 }
 
 void contentScriptsChanged()

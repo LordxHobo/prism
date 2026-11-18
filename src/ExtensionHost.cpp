@@ -1967,6 +1967,11 @@ void handlePageMessage(WKScriptMessageRef message, WKCompletionListenerRef liste
             + ",\"windowId\":" + std::to_string(windowId) + "}"));
         return;
     }
+    if (op == "log") {
+        internal::logError(*ext, kindName(kind), parsed["message"].asString(), parsed["source"].asString());
+        complete(listener, ok());
+        return;
+    }
     if (op == "popup.resize") {
         if (g_popup && g_popup->page == page)
             placePopup(*g_popup, static_cast<int>(parsed["width"].asNumber(360)), static_cast<int>(parsed["height"].asNumber(420)));

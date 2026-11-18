@@ -67,6 +67,8 @@ struct Extension {
     std::string optionsPage;
     std::vector<std::string> webAccessible; // "web_accessible_resources" paths
     std::vector<std::string> unsupported; // features Prism can't do yet, in plain words
+    struct LoggedError { std::string where, message, source; long long time { 0 }; int count { 1 }; };
+    std::vector<LoggedError> errors;      // this session only
 
     bool rulesetEnabled(const Ruleset& ruleset) const
     {
@@ -109,6 +111,9 @@ void revoke(Extension&, const std::vector<std::string>& items);
 // A script that runs `code` in a page like a content script (with the
 // chrome.* API), for tabs.executeScript / scripting.executeScript files.
 std::string injectionScript(const Extension&, const std::string& code);
+
+// Errors from the extension's pages, for the Extensions page (the last 30).
+void logError(Extension&, const std::string& where, const std::string& message, const std::string& source);
 
 // Re-reads every extension page script and the content scripts.
 void contentScriptsChanged();

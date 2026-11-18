@@ -97,6 +97,25 @@
   const resolved = (value) => withCallback(() => value);
   const notYet = (what) => withCallback(() => Promise.reject(new Error(what + " isn't supported in Prism yet.")));
 
+  // ---- Errors: shown on Prism's Extensions page ----------------------------------------------
+  const report = (message, source) => {
+    try {
+      call('log', { message: String(message).slice(0, 2000), source: String(source || location.pathname).slice(0, 300) }).catch(() => {});
+    } catch (error) { /* never let reporting break the page */ }
+  };
+  window.addEventListener('error', (event) => {
+    report(event.message || (event.error && event.error.message) || 'Error', (event.filename || '').replace(base, '/') + (event.lineno ? ':' + event.lineno : ''));
+  });
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason;
+    report('Unhandled promise rejection: ' + ((reason && (reason.stack || reason.message)) || reason), location.pathname);
+  });
+  const consoleError = console.error.bind(console);
+  console.error = (...args) => {
+    consoleError(...args);
+    report(args.map((arg) => (arg && arg.stack) || (typeof arg === 'object' ? (() => { try { return JSON.stringify(arg); } catch (e) { return String(arg); } })() : String(arg))).join(' '), location.pathname);
+  };
+
   // ---- Messages, ports and events from Prism -----------------------------------------
   let context = { ctx: 0, kind: 'unknown', tabId: -1, windowId: -1 };
   const ports = new Map();
@@ -285,7 +304,7 @@
     setUninstallURL: resolved(undefined),
     requestUpdateCheck: resolved({ status: 'no_update' }),
     getPlatformInfo: resolved({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' }),
-    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.5.2', buildID: '0' }),
+    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.5.3', buildID: '0' }),
     getContexts: resolved([]),
     getBackgroundPage: notYet('Reaching the background page directly'),
     getPackageDirectoryEntry: notYet('getPackageDirectoryEntry'),
@@ -331,6 +350,7 @@
       setAccessLevel: resolved(undefined),
       onChanged: areaChanged.event,
       QUOTA_BYTES: area === 'sync' ? 102400 : 10485760,
+      ...(area === 'sync' ? { QUOTA_BYTES_PER_ITEM: 8192, MAX_ITEMS: 512, MAX_WRITE_OPERATIONS_PER_HOUR: 1800, MAX_WRITE_OPERATIONS_PER_MINUTE: 120, MAX_SUSTAINED_WRITE_OPERATIONS_PER_MINUTE: 1000000 } : {}),
     };
   }
 
@@ -690,6 +710,14 @@
     onHeadersReceived: webRequestEvent(), onAuthRequired: webRequestEvent(), onResponseStarted: webRequestEvent(),
     onBeforeRedirect: webRequestEvent(), onCompleted: webRequestEvent(), onErrorOccurred: webRequestEvent(),
     handlerBehaviorChanged: resolved(undefined), MAX_HANDLER_BEHAVIOR_CHANGED_CALLS_PER_10_MINUTES: 20,
+    ResourceType: {
+      MAIN_FRAME: 'main_frame', SUB_FRAME: 'sub_frame', STYLESHEET: 'stylesheet', SCRIPT: 'script', IMAGE: 'image',
+      FONT: 'font', OBJECT: 'object', XMLHTTPREQUEST: 'xmlhttprequest', PING: 'ping', CSP_REPORT: 'csp_report',
+      MEDIA: 'media', WEBSOCKET: 'websocket', WEBTRANSPORT: 'webtransport', WEBBUNDLE: 'webbundle', OTHER: 'other',
+    },
+    OnBeforeRequestOptions: { BLOCKING: 'blocking', REQUEST_BODY: 'requestBody', EXTRA_HEADERS: 'extraHeaders' },
+    OnBeforeSendHeadersOptions: { REQUEST_HEADERS: 'requestHeaders', BLOCKING: 'blocking', EXTRA_HEADERS: 'extraHeaders' },
+    OnHeadersReceivedOptions: { BLOCKING: 'blocking', RESPONSE_HEADERS: 'responseHeaders', EXTRA_HEADERS: 'extraHeaders' },
   };
   const webNavigation = {
     onBeforeNavigate: quiet(), onCommitted: quiet(), onDOMContentLoaded: quiet(), onCompleted: quiet(), onErrorOccurred: quiet(),
@@ -698,13 +726,45 @@
   };
 
   const idle = { queryState: resolved('active'), setDetectionInterval: () => {}, onStateChanged: quiet() };
+
+  // chrome.privacy: Prism's own privacy settings, shown read-only (Prism
+  // already turns off network prediction and hyperlink auditing).
+  const setting = (value) => ({
+    get: withCallback(() => ({ value, levelOfControl: 'not_controllable' })),
+    set: resolved(undefined),
+    clear: resolved(undefined),
+    onChange: quiet(),
+  });
+  const privacy = {
+    network: {
+      networkPredictionEnabled: setting(false),
+      webRTCIPHandlingPolicy: setting('default'),
+      webRTCMultipleRoutesEnabled: setting(true),
+      webRTCNonProxiedUdpEnabled: setting(true),
+    },
+    services: {
+      alternateErrorPagesEnabled: setting(false), autofillAddressEnabled: setting(false), autofillCreditCardEnabled: setting(false),
+      passwordSavingEnabled: setting(false), safeBrowsingEnabled: setting(false), searchSuggestEnabled: setting(false),
+      spellingServiceEnabled: setting(false), translationServiceEnabled: setting(false),
+    },
+    websites: {
+      hyperlinkAuditingEnabled: setting(false), referrersEnabled: setting(true), thirdPartyCookiesAllowed: setting(false),
+      doNotTrackEnabled: setting(false), protectedContentEnabled: setting(false),
+    },
+    IPHandlingPolicy: { DEFAULT: 'default', DEFAULT_PUBLIC_AND_PRIVATE_INTERFACES: 'default_public_and_private_interfaces',
+      DEFAULT_PUBLIC_INTERFACE_ONLY: 'default_public_interface_only', DISABLE_NON_PROXIED_UDP: 'disable_non_proxied_udp' },
+  };
+  const dns = { resolve: notYet('dns.resolve') };
   const offscreen = { createDocument: notYet('Offscreen documents'), closeDocument: resolved(undefined), hasDocument: resolved(false), Reason: {} };
 
   // ---- Putting it together -------------------------------------------------------------------------
   const api = {
     runtime, storage, i18n, tabs, windows: windowsApi, scripting, alarms, permissions, declarativeNetRequest,
     contextMenus: menus, menus, commands, notifications, extension, management, webRequest, webNavigation, idle, offscreen,
+    privacy,
   };
+  // Firefox-only APIs only for Firefox extensions (others check for them).
+  if (manifest.browser_specific_settings || manifest.applications) api.dns = dns;
   // MV3 has "action"; MV2 "browserAction" and "pageAction". Offer whichever
   // the manifest uses (and "action" either way, as Firefox does).
   api.action = action;
