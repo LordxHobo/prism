@@ -24,6 +24,26 @@ static Ref<WKContextRef> s_context;
 static Ref<WKPreferencesRef> s_preferences;
 static Ref<WKWebsiteDataStoreRef> s_dataStore;
 static Ref<WKPageConfigurationRef> s_pageConfiguration;
+static Ref<WKPreferencesRef> s_backgroundPreferences;
+static Ref<WKPageConfigurationRef> s_backgroundConfiguration;
+
+static Ref<WKPreferencesRef> createPreferences()
+{
+    auto preferences = Ref<WKPreferencesRef>::adopt(WKPreferencesCreate());
+    // No DNS prefetching: don't look up links you never clicked.
+    if (WKPreferencesSetDNSPrefetchingEnabled)
+        WKPreferencesSetDNSPrefetchingEnabled(preferences.get(), false);
+    // No <a ping>: links can't silently report your clicks to third parties.
+    if (WKPreferencesSetHyperlinkAuditingEnabled)
+        WKPreferencesSetHyperlinkAuditingEnabled(preferences.get(), false);
+    // Popups only open when you click something.
+    if (WKPreferencesSetJavaScriptCanOpenWindowsAutomatically)
+        WKPreferencesSetJavaScriptCanOpenWindowsAutomatically(preferences.get(), false);
+    // Developer tools (F12).
+    if (WKPreferencesSetDeveloperExtrasEnabled)
+        WKPreferencesSetDeveloperExtrasEnabled(preferences.get(), true);
+    return preferences;
+}
 static Ref<WKUserContentControllerRef> s_userContent;
 static bool s_proxyEnabled = false;
 static std::wstring s_uiDirectory;
@@ -155,19 +175,14 @@ bool initialize(std::wstring& error)
 
     applyCookiePolicy();
 
-    s_preferences = Ref<WKPreferencesRef>::adopt(WKPreferencesCreate());
-    // No DNS prefetching: don't look up links you never clicked.
-    if (WKPreferencesSetDNSPrefetchingEnabled)
-        WKPreferencesSetDNSPrefetchingEnabled(s_preferences.get(), false);
-    // No <a ping>: links can't silently report your clicks to third parties.
-    if (WKPreferencesSetHyperlinkAuditingEnabled)
-        WKPreferencesSetHyperlinkAuditingEnabled(s_preferences.get(), false);
-    // Popups only open when you click something.
-    if (WKPreferencesSetJavaScriptCanOpenWindowsAutomatically)
-        WKPreferencesSetJavaScriptCanOpenWindowsAutomatically(s_preferences.get(), false);
-    // Developer tools (F12).
-    if (WKPreferencesSetDeveloperExtrasEnabled)
-        WKPreferencesSetDeveloperExtrasEnabled(s_preferences.get(), true);
+    s_preferences = createPreferences();
+    // Extension background pages run in hidden windows; WebKit would slow
+    // their timers down (and maybe pause them) like a hidden tab's.
+    s_backgroundPreferences = createPreferences();
+    if (WKPreferencesSetHiddenPageDOMTimerThrottlingEnabled)
+        WKPreferencesSetHiddenPageDOMTimerThrottlingEnabled(s_backgroundPreferences.get(), false);
+    if (WKPreferencesSetPageVisibilityBasedProcessSuppressionEnabled)
+        WKPreferencesSetPageVisibilityBasedProcessSuppressionEnabled(s_backgroundPreferences.get(), false);
 
     s_context = Ref<WKContextRef>::adopt(WKContextCreateWithConfiguration(nullptr));
 
@@ -182,8 +197,21 @@ bool initialize(std::wstring& error)
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { extensions::handleScriptMessage(message, reply); }, nullptr);
     WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismShields").get(),
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { shields::handleScriptMessage(message, reply); }, nullptr);
+    WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismExtensionPage").get(),
+        [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { extensions::handlePageMessage(message, reply); }, nullptr);
     WKPageConfigurationSetUserContentController(s_pageConfiguration.get(), s_userContent.get());
+
+    s_backgroundConfiguration = Ref<WKPageConfigurationRef>::adopt(WKPageConfigurationCreate());
+    WKPageConfigurationSetContext(s_backgroundConfiguration.get(), s_context.get());
+    WKPageConfigurationSetPreferences(s_backgroundConfiguration.get(), s_backgroundPreferences.get());
+    WKPageConfigurationSetWebsiteDataStore(s_backgroundConfiguration.get(), s_dataStore.get());
+    WKPageConfigurationSetUserContentController(s_backgroundConfiguration.get(), s_userContent.get());
     return true;
+}
+
+WKPageConfigurationRef backgroundPageConfiguration()
+{
+    return s_backgroundConfiguration.get();
 }
 
 WKUserContentControllerRef userContentController()

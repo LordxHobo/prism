@@ -3,8 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Extensions.h"
+#include "ExtensionsInternal.h"
 
 #include "Blocker.h"
+#include "BrowserWindow.h"
 #include "Engine.h"
 #include "Http.h"
 #include "Json.h"
@@ -32,47 +34,7 @@ using namespace wk;
 namespace {
 
 // ---------------------------------------------------------------------------
-// Data
-
-struct ContentScript {
-    std::vector<std::string> matches, excludeMatches, includeGlobs, excludeGlobs, js, css;
-    std::string runAt { "document_idle" };
-    bool allFrames { false };
-};
-
-struct Ruleset {
-    std::string id, name, path;
-    bool enabledByDefault { false };
-};
-
-struct Extension {
-    std::string id;          // folder name and the ID scripts see
-    std::string name, version, description, homepage;
-    int manifestVersion { 2 };
-    std::string source;      // chrome, firefox, file, folder
-    std::string sourceURL;
-    bool enabled { true };
-    std::map<std::string, bool> rulesetChoices; // user's on/off per ruleset
-    std::vector<ContentScript> contentScripts;
-    std::vector<Ruleset> rulesets;
-    std::vector<std::string> permissions, hosts;
-    bool hasBackground { false }, hasPopup { false }, hasOptions { false };
-    bool unlimitedStorage { false };
-    std::string iconDataURL;
-    std::string geckoId;
-    std::string manifestJSON;  // re-serialized, safe to embed in scripts
-    std::string messagesJSON;  // the chosen locale's messages, re-serialized
-    std::string uiLanguage;
-    std::string token;         // proves messages come from this extension
-    size_t blockingDomains { 0 };
-    fs::path dir;
-
-    bool rulesetEnabled(const Ruleset& ruleset) const
-    {
-        auto found = rulesetChoices.find(ruleset.id);
-        return found != rulesetChoices.end() ? found->second : ruleset.enabledByDefault;
-    }
-};
+// Data (Extension and friends are in ExtensionsInternal.h)
 
 struct Job {
     std::string extensionId, source, sourceURL;
@@ -243,6 +205,22 @@ std::string loadIcon(const fs::path& dir, const json::Value& icons)
     return "data:" + mimeTypeFor(file) + ";base64," + util::base64(bytes);
 }
 
+// The icon file closest to 32 px (toolbar buttons are 16 px at 2x).
+std::string bestIconPath(const json::Value& icons)
+{
+    std::string best;
+    int bestScore = 1 << 30;
+    for (auto& member : icons.members()) {
+        int size = atoi(member.first.c_str());
+        int score = size >= 32 ? size - 32 : (32 - size) * 4;
+        if (member.second.isString() && safeRelativePath(member.second.asString()) && score < bestScore) {
+            bestScore = score;
+            best = member.second.asString();
+        }
+    }
+    return best;
+}
+
 bool isHostPermission(const std::string& permission)
 {
     return permission == "<all_urls>" || permission.find("://") != std::string::npos;
@@ -340,6 +318,88 @@ bool loadExtension(const fs::path& dir, Extension& ext, std::string& error)
         ext.contentScripts.push_back(std::move(script));
     }
 
+    ext.optionalPermissions.clear();
+    ext.optionalHosts.clear();
+    for (auto& permission : stringList(manifest["optional_permissions"])) {
+        if (isHostPermission(permission))
+            addUnique(ext.optionalHosts, permission);
+        else
+            addUnique(ext.optionalPermissions, permission);
+    }
+    for (auto& host : stringList(manifest["optional_host_permissions"]))
+        addUnique(ext.optionalHosts, host);
+    for (auto& item : ext.granted) {
+        if (std::find(ext.optionalPermissions.begin(), ext.optionalPermissions.end(), item) != ext.optionalPermissions.end())
+            addUnique(ext.permissions, item);
+        else if (std::find(ext.optionalHosts.begin(), ext.optionalHosts.end(), item) != ext.optionalHosts.end())
+            addUnique(ext.hosts, item);
+    }
+
+    // Background part.
+    const json::Value& background = manifest["background"];
+    ext.backgroundPage = background["page"].asString();
+    ext.backgroundScripts = stringList(background["scripts"]);
+    ext.serviceWorker = background["service_worker"].asString();
+    ext.serviceWorkerModule = background["type"].asString() == "module";
+    if (!ext.backgroundPage.empty() && !safeRelativePath(ext.backgroundPage))
+        ext.backgroundPage.clear();
+
+    // Toolbar button.
+    const char* actionKey = manifest.has("action") ? "action" : manifest.has("browser_action") ? "browser_action" : manifest.has("page_action") ? "page_action" : nullptr;
+    ext.hasAction = actionKey != nullptr;
+    ext.actionTitle.clear();
+    ext.actionPopup.clear();
+    ext.actionIcon.clear();
+    if (actionKey) {
+        const json::Value& action = manifest[actionKey];
+        ext.actionTitle = resolveMessage(action["default_title"].asString(), messages);
+        ext.actionPopup = action["default_popup"].asString();
+        const json::Value& icon = action["default_icon"];
+        ext.actionIcon = icon.isString() ? icon.asString() : bestIconPath(icon);
+    }
+    if (ext.actionIcon.empty())
+        ext.actionIcon = bestIconPath(manifest["icons"]);
+    if (ext.actionTitle.empty())
+        ext.actionTitle = ext.name;
+
+    ext.optionsPage = manifest["options_ui"]["page"].asString();
+    if (ext.optionsPage.empty())
+        ext.optionsPage = manifest["options_page"].asString();
+
+    // What Prism can't do yet, in plain words (shown on the Extensions page).
+    ext.unsupported.clear();
+    auto needs = [&](const char* permission) {
+        return std::find(ext.permissions.begin(), ext.permissions.end(), permission) != ext.permissions.end();
+    };
+    if (needs("webRequestBlocking"))
+        ext.unsupported.push_back("Blocking or changing requests with webRequest");
+    if (needs("contextMenus") || needs("menus"))
+        ext.unsupported.push_back("Right-click menu items");
+    if (needs("offscreen"))
+        ext.unsupported.push_back("Offscreen documents");
+    if (needs("cookies"))
+        ext.unsupported.push_back("Reading and changing cookies");
+    if (needs("downloads"))
+        ext.unsupported.push_back("Managing downloads");
+    if (needs("history") || needs("bookmarks") || needs("topSites"))
+        ext.unsupported.push_back("Bookmarks and history (coming in 0.6)");
+    if (needs("notifications"))
+        ext.unsupported.push_back("Desktop notifications");
+    if (needs("nativeMessaging"))
+        ext.unsupported.push_back("Talking to apps on your PC");
+    if (needs("identity"))
+        ext.unsupported.push_back("Signing in with Google or Firefox accounts");
+    if (needs("proxy") || needs("privacy") || needs("webNavigation") || needs("debugger"))
+        ext.unsupported.push_back("Some browser-level APIs (proxy, privacy, webNavigation, debugger)");
+    if (manifest.has("commands"))
+        ext.unsupported.push_back("Keyboard shortcuts");
+    if (manifest.has("side_panel") || manifest.has("sidebar_action"))
+        ext.unsupported.push_back("Side panel");
+    if (manifest.has("chrome_url_overrides") || manifest.has("devtools_page") || manifest.has("omnibox"))
+        ext.unsupported.push_back("Replacing Prism pages, developer tools panels or address-bar keywords");
+    if (ext.serviceWorkerModule)
+        ext.unsupported.push_back("Background service worker written as a module (may not start)");
+
     ext.hasBackground = manifest.has("background");
     ext.hasPopup = !manifest["action"]["default_popup"].asString().empty()
         || !manifest["browser_action"]["default_popup"].asString().empty()
@@ -433,22 +493,25 @@ std::vector<std::string> describePermissions(const Extension& ext)
 }
 
 // What works in Prism today, for the Extensions page.
+std::string stringArrayJSON(const std::vector<std::string>& list);
+
 std::string supportJSON(const Extension& ext)
 {
     size_t enabledRulesets = 0;
     for (auto& ruleset : ext.rulesets)
         enabledRulesets += ext.rulesetEnabled(ruleset) ? 1 : 0;
-    bool something = !ext.contentScripts.empty() || !ext.rulesets.empty();
-    bool missing = ext.hasBackground || ext.hasPopup || ext.hasOptions;
-    std::string level = !something ? "none" : missing ? "partial" : "full";
+    bool something = !ext.contentScripts.empty() || !ext.rulesets.empty() || ext.hasBackground || ext.hasAction || ext.hasOptions;
+    std::string level = !something ? "none" : !ext.unsupported.empty() ? "partial" : "full";
     std::string json = "{\"level\":\"" + level + "\"";
     json += ",\"contentScripts\":" + std::to_string(ext.contentScripts.size());
     json += ",\"rulesets\":" + std::to_string(ext.rulesets.size());
     json += ",\"rulesetsEnabled\":" + std::to_string(enabledRulesets);
     json += ",\"blockingDomains\":" + std::to_string(ext.blockingDomains);
     json += std::string(",\"background\":") + (ext.hasBackground ? "true" : "false");
-    json += std::string(",\"popup\":") + (ext.hasPopup ? "true" : "false");
-    json += std::string(",\"options\":") + (ext.hasOptions ? "true" : "false");
+    json += std::string(",\"popup\":") + (!ext.actionPopup.empty() ? "true" : "false");
+    json += std::string(",\"action\":") + (ext.hasAction ? "true" : "false");
+    json += std::string(",\"options\":") + (!ext.optionsPage.empty() ? "true" : "false");
+    json += ",\"unsupported\":" + stringArrayJSON(ext.unsupported);
     json += "}";
     return json;
 }
@@ -527,6 +590,7 @@ void saveRegistry()
             + ",\"enabled\":" + (ext.enabled ? "true" : "false")
             + ",\"source\":" + json::quote(ext.source)
             + ",\"sourceURL\":" + json::quote(ext.sourceURL)
+            + ",\"granted\":" + stringArrayJSON(ext.granted)
             + ",\"rulesets\":{";
         bool first = true;
         for (auto& [id, on] : ext.rulesetChoices) {
@@ -553,6 +617,7 @@ void loadRegistry()
         ext->sourceURL = entry["sourceURL"].asString();
         for (auto& member : entry["rulesets"].members())
             ext->rulesetChoices[member.first] = member.second.asBool();
+        ext->granted = stringList(entry["granted"]);
         std::string error;
         if (!loadExtension(extensionsRoot() / util::fromUTF8(ext->id), *ext, error))
             continue; // folder missing or broken: skip it
@@ -593,6 +658,7 @@ std::string buildUserScript(const Extension& ext)
     config += ",\"name\":" + json::quote(ext.name);
     config += ",\"token\":" + json::quote(ext.token);
     config += ",\"uiLanguage\":" + json::quote(ext.uiLanguage);
+    config += ",\"base\":" + json::quote(internal::baseURL(ext));
     config += ",\"manifest\":" + ext.manifestJSON;
     config += ",\"messages\":" + ext.messagesJSON;
     config += ",\"entries\":[";
@@ -694,6 +760,7 @@ void applyAll()
 {
     rebuildUserScripts();
     rebuildBlocking();
+    host::extensionsChanged();
 }
 
 // ---------------------------------------------------------------------------
@@ -1176,6 +1243,7 @@ std::string confirmInstall(int job)
     g_jobs.erase(found);
 
     fs::path target = extensionsRoot() / util::fromUTF8(details.extensionId);
+    host::stop(details.extensionId);
     std::error_code error;
     fs::remove_all(target, error);
     error.clear();
@@ -1186,6 +1254,7 @@ std::string confirmInstall(int job)
     }
 
     Extension* existing = findExtension(details.extensionId);
+    std::string previousVersion = existing ? existing->version : "";
     auto ext = std::make_unique<Extension>();
     ext->id = details.extensionId;
     ext->source = details.source;
@@ -1193,6 +1262,8 @@ std::string confirmInstall(int job)
     ext->enabled = existing ? existing->enabled : true;
     if (existing)
         ext->rulesetChoices = existing->rulesetChoices;
+    if (existing)
+        ext->granted = existing->granted;
     std::string loadError;
     if (!loadExtension(target, *ext, loadError))
         return "{\"error\":" + json::quote(loadError) + "}";
@@ -1207,6 +1278,7 @@ std::string confirmInstall(int job)
         g_extensions.push_back(std::move(ext));
     saveRegistry();
     applyAll();
+    host::installed(details.extensionId, existing != nullptr, previousVersion);
     return listJSON();
 }
 
@@ -1286,12 +1358,18 @@ void handleScriptMessage(WKScriptMessageRef message, WKCompletionListenerRef lis
     }
 
     std::string op = parsed["op"].asString();
+    if (op.rfind("storage.", 0) != 0) {
+        // Messaging, ports and waiting for messages (ExtensionHost.cpp).
+        host::handleContentMessage(*ext, message, text, parsed, listener);
+        return;
+    }
     std::string error;
-    std::string result;
-    if (op.rfind("storage.", 0) == 0)
-        result = storageOperation(*ext, op, text, parsed, error);
-    else
-        error = "Unsupported operation";
+    std::string result = storageOperation(*ext, op, text, parsed, error);
+    if (error.empty() && op != "storage.get" && op != "storage.bytes") {
+        json::Value changed;
+        if (json::parse(result, changed))
+            host::storageChanged(*ext, parsed["area"].asString(), rawOf(result, changed["changes"]), static_cast<int>(parsed["ctx"].asNumber(0)));
+    }
     if (!error.empty())
         reply(listener, "{\"ok\":false,\"error\":" + json::quote(error) + "}");
     else
@@ -1367,6 +1445,7 @@ std::string handleCommand(const std::wstring& command, const std::wstring& argum
             L"Remove extension", MB_OKCANCEL | MB_ICONQUESTION | MB_DEFBUTTON2);
         if (answer != IDOK)
             return listJSON();
+        host::stop(id);
         g_extensions.erase(std::remove_if(g_extensions.begin(), g_extensions.end(), [&](auto& e) { return e->id == id; }), g_extensions.end());
         g_storage.erase(id);
         saveRegistry();
@@ -1374,7 +1453,16 @@ std::string handleCommand(const std::wstring& command, const std::wstring& argum
         std::error_code ignored;
         fs::remove_all(extensionsRoot() / util::fromUTF8(id), ignored);
         fs::remove_all(extensionData(id), ignored);
+        host::removed(id);
         return listJSON();
+    }
+
+    if (command == L"openOptions") {
+        int windowId = -1;
+        if (BrowserWindow* window = BrowserWindow::fromHWND(owner))
+            windowId = window->id();
+        openOptionsPage(argUTF8(0), windowId);
+        return "true";
     }
 
     if (command == L"queueInstall") {
@@ -1384,6 +1472,173 @@ std::string handleCommand(const std::wstring& command, const std::wstring& argum
 
     return "null";
 }
+
+// ---------------------------------------------------------------------------
+// For ExtensionHost.cpp (ExtensionsInternal.h)
+
+bool Extension::hasPermission(const std::string& permission) const
+{
+    return std::find(permissions.begin(), permissions.end(), permission) != permissions.end();
+}
+
+namespace internal {
+
+std::vector<Extension*> enabledExtensions()
+{
+    std::vector<Extension*> out;
+    for (auto& ext : g_extensions) {
+        if (ext->enabled)
+            out.push_back(ext.get());
+    }
+    return out;
+}
+
+Extension* find(const std::string& id)
+{
+    return findExtension(id);
+}
+
+Extension* findEnabled(const std::string& id)
+{
+    Extension* ext = findExtension(id);
+    return ext && ext->enabled ? ext : nullptr;
+}
+
+std::string baseURL(const Extension& ext)
+{
+    std::string url = util::toUTF8(util::fileURLFromPath(ext.dir.wstring()));
+    if (url.empty() || url.back() != '/')
+        url += '/';
+    return url;
+}
+
+// "%20" -> " ", and lower case: Windows paths are case-insensitive, and
+// WebKit and Windows escape file URLs differently.
+static std::string normalizeFileURL(const std::string& url)
+{
+    std::string out;
+    for (size_t i = 0; i < url.size(); ++i) {
+        if (url[i] == '%' && i + 2 < url.size() && isxdigit(static_cast<unsigned char>(url[i + 1])) && isxdigit(static_cast<unsigned char>(url[i + 2]))) {
+            out += static_cast<char>(strtol(url.substr(i + 1, 2).c_str(), nullptr, 16));
+            i += 2;
+        } else
+            out += url[i] == '\\' ? '/' : url[i];
+    }
+    return lowerASCII(out);
+}
+
+Extension* extensionForURL(const std::string& url, std::string* path)
+{
+    std::string id, rest;
+    for (const char* scheme : { "chrome-extension://", "moz-extension://" }) {
+        if (url.rfind(scheme, 0) == 0) {
+            std::string tail = url.substr(strlen(scheme));
+            size_t slash = tail.find('/');
+            id = tail.substr(0, slash);
+            rest = slash == std::string::npos ? "" : tail.substr(slash + 1);
+            for (auto& ext : g_extensions) {
+                // Firefox extensions know themselves by their gecko ID's UUID;
+                // accept the Prism ID either way.
+                if (ext->id == id) {
+                    if (path)
+                        *path = rest;
+                    return ext.get();
+                }
+            }
+            return nullptr;
+        }
+    }
+    if (url.rfind("file:", 0) != 0)
+        return nullptr;
+    std::string normalized = normalizeFileURL(url);
+    std::string root = normalizeFileURL(util::toUTF8(util::fileURLFromPath(extensionsRoot().wstring())));
+    if (!root.empty() && root.back() != '/')
+        root += '/';
+    if (normalized.rfind(root, 0) != 0)
+        return nullptr;
+    std::string tail = normalized.substr(root.size());
+    size_t slash = tail.find('/');
+    id = tail.substr(0, slash);
+    for (auto& ext : g_extensions) {
+        if (lowerASCII(ext->id) == id) {
+            if (path) {
+                // Lower case, but Windows file names aren't case-sensitive.
+                std::string rest = slash == std::string::npos ? "" : tail.substr(slash + 1);
+                *path = rest.substr(0, rest.find_first_of("?#"));
+            }
+            return ext.get();
+        }
+    }
+    return nullptr;
+}
+
+fs::path resolve(const Extension& ext, const std::string& relative)
+{
+    std::string clean = relative.substr(0, relative.find_first_of("?#"));
+    while (!clean.empty() && clean[0] == '/')
+        clean.erase(0, 1);
+    return resolveFile(ext.dir, clean);
+}
+
+std::string storage(Extension& ext, const std::string& op, const std::string& text, const json::Value& message, std::string& error)
+{
+    return storageOperation(ext, op, text, message, error);
+}
+
+void setRulesetEnabled(Extension& ext, const std::string& rulesetId, bool enabled)
+{
+    ext.rulesetChoices[rulesetId] = enabled;
+    saveRegistry();
+    rebuildBlocking();
+    notifyList();
+}
+
+void grant(Extension& ext, const std::vector<std::string>& items)
+{
+    for (auto& item : items) {
+        addUnique(ext.granted, item);
+        if (std::find(ext.optionalHosts.begin(), ext.optionalHosts.end(), item) != ext.optionalHosts.end())
+            addUnique(ext.hosts, item);
+        else
+            addUnique(ext.permissions, item);
+    }
+    saveRegistry();
+    notifyList();
+}
+
+void revoke(Extension& ext, const std::vector<std::string>& items)
+{
+    for (auto& item : items) {
+        ext.granted.erase(std::remove(ext.granted.begin(), ext.granted.end(), item), ext.granted.end());
+        ext.permissions.erase(std::remove(ext.permissions.begin(), ext.permissions.end(), item), ext.permissions.end());
+        ext.hosts.erase(std::remove(ext.hosts.begin(), ext.hosts.end(), item), ext.hosts.end());
+    }
+    saveRegistry();
+    notifyList();
+}
+
+std::string injectionScript(const Extension& ext, const std::string& code)
+{
+    if (g_runtimeSource.empty())
+        return "undefined";
+    std::string config = "{\"id\":" + json::quote(ext.id);
+    config += ",\"name\":" + json::quote(ext.name);
+    config += ",\"token\":" + json::quote(ext.token);
+    config += ",\"uiLanguage\":" + json::quote(ext.uiLanguage);
+    config += ",\"base\":" + json::quote(baseURL(ext));
+    config += ",\"manifest\":" + ext.manifestJSON;
+    config += ",\"messages\":" + ext.messagesJSON;
+    config += ",\"injected\":true";
+    config += ",\"entries\":[{\"matches\":[\"<all_urls>\"],\"excludeMatches\":[],\"includeGlobs\":[],\"excludeGlobs\":[],\"allFrames\":false,\"runAt\":\"document_start\",\"css\":\"\"}]}";
+    return g_runtimeSource + "(" + config + ", [function (chrome, browser) {\n" + code + "\n}])";
+}
+
+void contentScriptsChanged()
+{
+    rebuildUserScripts();
+}
+
+} // namespace internal
 
 bool isStoreURL(const std::wstring& url)
 {

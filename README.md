@@ -5,10 +5,10 @@ A private, independent web browser for Windows, built on **WebKit** (the engine 
 - **No data collection.** No telemetry, analytics, crash reporting or accounts. Prism never contacts its developers.
 - **Private by default.** WebKit's tracking prevention, third-party cookie blocking, no DNS prefetching, no link-click pings, and popups only when you click.
 - **Prism Shields, a built-in ad and tracker blocker.** Brave's blocking engine with uBlock Origin's filter lists: ad and tracker domains, leftover ad boxes, and site-specific fixes (like YouTube's video ads). On everywhere, switchable per site.
-- **Extensions from both stores** *(early)*. Install Chrome Web Store and Firefox Add-ons extensions. Content scripts and filter-list ad blockers (like uBlock Origin Lite) work today; popups and background tasks are next.
+- **Extensions from both stores**, with toolbar buttons, popups, background tasks and options pages. Install from the Chrome Web Store or Firefox Add-ons; the Extensions page shows what each one can and can't do in Prism yet.
 - **Customizable.** The whole interface is HTML and CSS (see [`ui/`](ui)), so themes and layouts are easy to change.
 
-> **Status: early development (v0.4).** Expect rough edges. Copy-protected (DRM) video such as Netflix or Disney+ can't play in any WebKit browser on Windows.
+> **Status: early development (v0.5).** Expect rough edges. Copy-protected (DRM) video such as Netflix or Disney+ can't play in any WebKit browser on Windows.
 
 ## Download
 
@@ -42,7 +42,7 @@ dist\Prism.exe
 - [x] Settings, session restore, clear browsing data (v0.2)
 - [x] Extensions, part 1: install, content scripts, storage, filter-list ad blocking (v0.3)
 - [x] Prism Shields, part 1: built-in ad and tracker blocker (v0.4)
-- [ ] Extensions, part 2: popups, background tasks, options pages (v0.5)
+- [x] Extensions, part 2: popups, background tasks, options pages, messaging (v0.5)
 - [ ] Bookmarks, history, find in page, printing, permission prompts (v0.6)
 - [ ] Customization, tab groups and vertical tabs (v0.7)
 - [ ] Privacy: fingerprinting protection, HTTPS-only, per-site settings, tracking-parameter removal (v0.8)

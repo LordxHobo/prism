@@ -11,6 +11,7 @@
 #include <vector>
 
 class BrowserWindow;
+namespace tabs { struct Info; }
 
 struct Tab {
     BrowserWindow* window { };
@@ -47,6 +48,7 @@ public:
     static size_t windowCount();
 
     HWND hwnd() const { return m_hwnd; }
+    int id() const { return m_id; }
 
     // Keyboard shortcuts work no matter which part of the window has focus.
     // Returns true when the key was used by Prism.
@@ -62,6 +64,14 @@ public:
 
     // Opens prism://<name>, or switches to it if a tab already shows it.
     void openInternalPage(const std::wstring& name, const std::wstring& section = L"");
+
+    // For the extension tab APIs (Tabs.h).
+    static const std::vector<BrowserWindow*>& all();
+    const std::vector<std::unique_ptr<Tab>>& tabList() const { return m_tabs; }
+    int activeTabId() const { return m_activeTabId; }
+    void moveTab(int id, int index);
+    void anchorForExtension(int buttonRight, int buttonBottom, POINT& screen) const;
+    double scale() const { return scaleFactor(); }
 
 private:
     BrowserWindow() = default;
@@ -117,6 +127,7 @@ private:
     void startDownload(WKDownloadRef);
 
     HWND m_hwnd { };
+    int m_id { 0 };
     wk::Ref<WKViewRef> m_toolbarView;
     WKPageRef m_toolbarPage { };
     HWND m_toolbarHwnd { };

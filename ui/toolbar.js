@@ -19,6 +19,7 @@ const elements = {
   shield: $('shield'),
   addExtension: $('addExtension'),
   extensions: $('extensions'),
+  actions: $('actions'),
   toast: $('toast'),
   menu: $('menu'),
   progress: $('progress'),
@@ -56,6 +57,7 @@ function queryParam(url, name) {
 
 // What the address bar shows for a URL.
 function displayURL(url) {
+  if (/^chrome-extension:\/\//.test(url || '')) return url;
   const page = internalPageName(url);
   if (page === 'newtab') return '';
   if (page === 'error') return queryParam(url, 'url');
@@ -169,6 +171,59 @@ window.addEventListener('resize', updateTabWidths);
 let shieldsOn = false;
 let lastBlocked = 0;
 
+// ---- Extension buttons ----------------------------------------------------
+// One per extension with a toolbar button: its icon, a badge (text set by
+// the extension) and its title as a tooltip. Click: popup or onClicked;
+// right-click: Options / Manage extension.
+
+function renderActions() {
+  const list = (state && state.actions) || [];
+  const container = elements.actions;
+  const existing = new Map();
+  for (const button of container.children) existing.set(button.dataset.id, button);
+  const wanted = new Set(list.map((action) => action.id));
+  for (const [id, button] of existing) if (!wanted.has(id)) button.remove();
+
+  list.forEach((action, index) => {
+    let button = existing.get(action.id);
+    if (!button) {
+      button = document.createElement('button');
+      button.className = 'icon action';
+      button.dataset.id = action.id;
+      const img = document.createElement('img');
+      img.alt = '';
+      img.draggable = false;
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      button.append(img, badge);
+      button.addEventListener('click', () => {
+        const rect = button.getBoundingClientRect();
+        send('extensionAction', button.dataset.id + '\n' + Math.round(rect.right) + ',' + Math.round(rect.bottom + 4));
+      });
+      button.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        const rect = button.getBoundingClientRect();
+        send('extensionMenu', button.dataset.id + '\n' + Math.round(rect.left) + ',' + Math.round(rect.bottom + 4));
+      });
+    }
+    if (container.children[index] !== button) container.insertBefore(button, container.children[index] || null);
+    const img = button.firstChild;
+    if (action.icon && img.getAttribute('src') !== action.icon) img.src = action.icon;
+    img.hidden = !action.icon;
+    button.title = action.title || action.name;
+    button.setAttribute('aria-label', action.title || action.name);
+    button.disabled = false;
+    button.classList.toggle('dimmed', !action.enabled);
+    button.classList.toggle('open', !!action.open);
+    const badge = button.lastChild;
+    const text = String(action.badge || '').slice(0, 4);
+    badge.textContent = text;
+    badge.hidden = !text;
+    badge.style.background = action.badgeColor || '#d93025';
+    badge.style.color = action.badgeTextColor || '#ffffff';
+  });
+}
+
 function renderNavigation() {
   const tab = activeTab();
   elements.back.disabled = !tab || !tab.canBack;
@@ -210,6 +265,7 @@ window.prism = {
       editing = false;
     renderTabs();
     renderNavigation();
+    renderActions();
     prism.stats(state.blocked || 0);
   },
 

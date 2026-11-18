@@ -10,6 +10,7 @@
 #include "Extensions.h"
 #include "Shields.h"
 #include "ShieldsPanel.h"
+#include "Tabs.h"
 #include "Settings.h"
 #include "Util.h"
 #include "Version.h"
@@ -38,6 +39,8 @@ bool s_sessionDirty = false;
 
 std::vector<BrowserWindow*> s_windows;
 int s_nextTabId = 0;
+int s_nextWindowId = 0;
+int s_lastFocusedWindowId = -1;
 
 Tab* tabFromClientInfo(const void* clientInfo)
 {
@@ -220,7 +223,10 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message) {
     case WM_CREATE: {
+        m_id = ++s_nextWindowId;
+        s_lastFocusedWindowId = m_id;
         s_windows.push_back(this);
+        extensions::windowCreated(m_id);
         updateTheme();
         createToolbar();
         auto urls = std::move(m_pendingStartURLs);
@@ -269,8 +275,13 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     case WM_ACTIVATE:
-        if (LOWORD(wParam) != WA_INACTIVE)
+        if (LOWORD(wParam) != WA_INACTIVE) {
             focusContent();
+            if (s_lastFocusedWindowId != m_id) {
+                s_lastFocusedWindowId = m_id;
+                extensions::windowFocused(m_id);
+            }
+        }
         return 0;
     case WM_APPCOMMAND:
         switch (GET_APPCOMMAND_LPARAM(lParam)) {
@@ -294,7 +305,6 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_TIMER:
         if (wParam == kSessionTimer) {
             KillTimer(m_hwnd, kSessionTimer);
-    KillTimer(m_hwnd, kStatsTimer);
             saveSession();
             return 0;
         }
@@ -342,6 +352,10 @@ void BrowserWindow::onDestroy()
         detachClients(tab->page);
     m_toolbarReady = false;
     KillTimer(m_hwnd, kSessionTimer);
+    KillTimer(m_hwnd, kStatsTimer);
+    for (auto& tab : m_tabs)
+        extensions::tabRemoved(tab->id, m_id, true);
+    extensions::windowRemoved(m_id);
 
     // Closing the last window quits Prism: remember its tabs for next time.
     // Closing one of several windows forgets that window's tabs.
@@ -547,6 +561,17 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
                 window->openInternalPage(L"settings", L"shields");
         };
         shieldspanel::toggle(m_hwnd, anchor, scale, tab->url, std::move(callbacks));
+    } else if (command == L"extensionAction" || command == L"extensionMenu") {
+        // "<extension id>\n<x>,<y>" (the button's bottom right, CSS pixels)
+        size_t newline = argument.find(L'\n');
+        std::string id = util::toUTF8(argument.substr(0, newline));
+        int x = 0, y = 0;
+        if (newline != std::wstring::npos)
+            swscanf_s(argument.c_str() + newline + 1, L"%d,%d", &x, &y);
+        if (command == L"extensionAction")
+            extensions::actionClicked(m_hwnd, tab ? tab->id : -1, id, x, y);
+        else
+            extensions::showActionMenu(m_hwnd, id, x, y);
     } else if (command == L"focusContent") {
         focusContent();
     }
@@ -571,6 +596,7 @@ void BrowserWindow::pushState()
     json += ",\"compact\":" + std::string(settings::compactTabs() ? "true" : "false");
     json += ",\"blocked\":" + std::to_string(blocker::blockedCount());
     json += ",\"active\":" + std::to_string(m_activeTabId);
+    json += ",\"actions\":" + extensions::actionsJSON(m_activeTabId);
     json += ",\"tabs\":[";
     for (size_t i = 0; i < m_tabs.size(); ++i) {
         Tab* tab = m_tabs[i].get();
@@ -582,7 +608,7 @@ void BrowserWindow::pushState()
         snprintf(zoom, sizeof(zoom), "%.3f", WKPageGetPageZoomFactor(tab->page));
         json += "{\"id\":" + std::to_string(tab->id);
         json += ",\"title\":" + util::jsonString(tab->title);
-        json += ",\"url\":" + util::jsonString(tab->url);
+        json += ",\"url\":" + util::jsonString(extensions::displayURL(tab->url));
         json += ",\"loading\":" + std::string(tab->loading ? "true" : "false");
         json += ",\"progress\":" + std::string(progress);
         json += ",\"canBack\":" + std::string(WKPageCanGoBack(tab->page) ? "true" : "false");
@@ -688,6 +714,7 @@ Tab* BrowserWindow::newTab(const std::wstring& url, bool select, WKPageConfigura
     else
         m_tabs.push_back(std::move(tab));
 
+    extensions::tabCreated(raw->id);
     if (!url.empty())
         navigate(raw, url);
     if (select)
@@ -749,6 +776,8 @@ void BrowserWindow::selectTab(int id)
     updateTitle();
     pushState();
     scheduleSessionSave();
+    if (!previous || previous != next)
+        extensions::tabActivated(id, m_id);
 }
 
 void BrowserWindow::selectAdjacentTab(int delta)
@@ -774,6 +803,7 @@ void BrowserWindow::closeTab(int id)
     }
 
     bool wasActive = tab->id == m_activeTabId;
+    extensions::tabRemoved(tab->id, m_id, m_tabs.size() == 1);
     detachClients(tab->page);
     scheduleSessionSave();
     // Destroying the view's window makes WebKit close the page and its process.
@@ -826,8 +856,16 @@ void BrowserWindow::navigate(Tab* tab, const std::wstring& url)
         tab->url = engine::internalPageURL(name, query);
         engine::loadInternalPage(tab->page, name, query);
     } else {
-        tab->url = url;
-        WKPageLoadURL(tab->page, wk::url(url).get());
+        // chrome-extension://<id>/page.html -> the page's file.
+        std::wstring target = url;
+        std::wstring scheme = schemeOf(url);
+        if (scheme == L"chrome-extension" || scheme == L"moz-extension") {
+            target = extensions::resolveExtensionURL(url);
+            if (target.empty())
+                target = engine::internalPageURL(L"error", L"kind=network&url=" + util::urlEncode(url) + L"&message=" + util::urlEncode(L"There's no installed (and turned on) extension with this address."));
+        }
+        tab->url = target;
+        WKPageLoadURL(tab->page, wk::url(target).get());
     }
     tabChanged(tab);
 }
@@ -846,6 +884,7 @@ void BrowserWindow::tabStateChanged(const void* clientInfo)
 
 void BrowserWindow::tabChanged(Tab* tab)
 {
+    extensions::tabUpdated(tab->id);
     if (tab->id == m_activeTabId)
         updateTitle();
     pushState();
@@ -1225,6 +1264,14 @@ void BrowserWindow::decidePolicyForNavigationAction(WKPageRef, WKNavigationActio
         tab->window->navigate(tab, target);
         return;
     }
+    if (scheme == L"chrome-extension" || scheme == L"moz-extension") {
+        // Only an extension's own pages may link to its pages (websites
+        // can't open them).
+        std::wstring resolved = extensions::resolveExtensionURL(target);
+        if (!resolved.empty() && extensions::displayURL(tab->url) != tab->url && hostOf(extensions::displayURL(tab->url)) == hostOf(target))
+            tab->window->navigate(tab, resolved);
+        return;
+    }
     if (scheme.empty())
         return;
 
@@ -1515,3 +1562,240 @@ bool BrowserWindow::handleShortcut(const MSG& msg)
     }
     return false;
 }
+
+// ---------------------------------------------------------------------------
+// Windows and tabs for the extension APIs (Tabs.h)
+
+const std::vector<BrowserWindow*>& BrowserWindow::all()
+{
+    return s_windows;
+}
+
+void BrowserWindow::moveTab(int id, int index)
+{
+    Tab* tab = findTab(id);
+    if (!tab)
+        return;
+    int from = indexOf(tab);
+    int count = static_cast<int>(m_tabs.size());
+    if (index < 0 || index >= count)
+        index = count - 1;
+    if (from == index)
+        return;
+    auto owned = std::move(m_tabs[from]);
+    m_tabs.erase(m_tabs.begin() + from);
+    m_tabs.insert(m_tabs.begin() + index, std::move(owned));
+    pushState();
+    scheduleSessionSave();
+}
+
+// Extension toolbar buttons report their position in CSS pixels; popups open
+// under them, right-aligned.
+void BrowserWindow::anchorForExtension(int buttonRight, int buttonBottom, POINT& screen) const
+{
+    double scale = scaleFactor();
+    screen = { static_cast<LONG>(buttonRight * scale), static_cast<LONG>(buttonBottom * scale) };
+    ClientToScreen(m_toolbarHwnd, &screen);
+}
+
+namespace tabs {
+
+static Info infoFor(const BrowserWindow* window, const Tab* tab, int index)
+{
+    Info info;
+    info.id = tab->id;
+    info.windowId = window->id();
+    info.index = index;
+    info.active = tab->id == window->activeTabId();
+    info.loading = tab->loading;
+    info.url = tab->url;
+    info.title = tab->title;
+    info.page = tab->page;
+    return info;
+}
+
+static BrowserWindow* windowById(int windowId)
+{
+    if (windowId < 0)
+        windowId = lastFocusedWindow();
+    for (auto* window : BrowserWindow::all()) {
+        if (window->id() == windowId)
+            return window;
+    }
+    return nullptr;
+}
+
+static Tab* tabById(int tabId)
+{
+    for (auto* window : BrowserWindow::all()) {
+        for (auto& tab : window->tabList()) {
+            if (tab->id == tabId)
+                return tab.get();
+        }
+    }
+    return nullptr;
+}
+
+std::vector<WindowInfo> windows()
+{
+    std::vector<WindowInfo> out;
+    for (auto* window : BrowserWindow::all()) {
+        WindowInfo info;
+        info.id = window->id();
+        info.focused = window->id() == s_lastFocusedWindowId;
+        GetWindowRect(window->hwnd(), &info.bounds);
+        info.state = IsIconic(window->hwnd()) ? 1 : IsZoomed(window->hwnd()) ? 2 : 0;
+        int index = 0;
+        for (auto& tab : window->tabList())
+            info.tabs.push_back(infoFor(window, tab.get(), index++));
+        out.push_back(std::move(info));
+    }
+    return out;
+}
+
+bool find(int tabId, Info& out)
+{
+    for (auto* window : BrowserWindow::all()) {
+        int index = 0;
+        for (auto& tab : window->tabList()) {
+            if (tab->id == tabId) {
+                out = infoFor(window, tab.get(), index);
+                return true;
+            }
+            ++index;
+        }
+    }
+    return false;
+}
+
+bool findByPage(WKPageRef page, Info& out)
+{
+    for (auto* window : BrowserWindow::all()) {
+        int index = 0;
+        for (auto& tab : window->tabList()) {
+            if (tab->page == page) {
+                out = infoFor(window, tab.get(), index);
+                return true;
+            }
+            ++index;
+        }
+    }
+    return false;
+}
+
+int lastFocusedWindow()
+{
+    for (auto* window : BrowserWindow::all()) {
+        if (window->id() == s_lastFocusedWindowId)
+            return window->id();
+    }
+    return BrowserWindow::all().empty() ? -1 : BrowserWindow::all().back()->id();
+}
+
+int create(int windowId, const std::wstring& url, bool active, int index)
+{
+    BrowserWindow* window = windowById(windowId);
+    if (!window)
+        return -1;
+    Tab* tab = window->newTab(url.empty() ? L"prism://newtab" : url, active);
+    if (index >= 0)
+        window->moveTab(tab->id, index);
+    return tab->id;
+}
+
+int createWindow(const std::vector<std::wstring>& urls, bool focused)
+{
+    HWND previous = GetForegroundWindow();
+    BrowserWindow* window = BrowserWindow::open(urls);
+    if (!window)
+        return -1;
+    if (!focused && previous)
+        SetForegroundWindow(previous);
+    return window->id();
+}
+
+bool navigate(int tabId, const std::wstring& url)
+{
+    Tab* tab = tabById(tabId);
+    if (!tab)
+        return false;
+    tab->window->navigate(tab, url);
+    return true;
+}
+
+bool activate(int tabId)
+{
+    Tab* tab = tabById(tabId);
+    if (!tab)
+        return false;
+    tab->window->selectTab(tabId);
+    return true;
+}
+
+bool close(int tabId)
+{
+    Tab* tab = tabById(tabId);
+    if (!tab)
+        return false;
+    // Not from inside a WebKit callback: post it.
+    PostMessageW(tab->window->hwnd(), WM_PRISM_CLOSE_TAB, static_cast<WPARAM>(tabId), 0);
+    return true;
+}
+
+bool reload(int tabId, bool bypassCache)
+{
+    Tab* tab = tabById(tabId);
+    if (!tab)
+        return false;
+    if (bypassCache)
+        WKPageReloadFromOrigin(tab->page);
+    else
+        WKPageReload(tab->page);
+    return true;
+}
+
+bool goBack(int tabId)
+{
+    Tab* tab = tabById(tabId);
+    if (!tab || !WKPageCanGoBack(tab->page))
+        return false;
+    WKPageGoBack(tab->page);
+    return true;
+}
+
+bool goForward(int tabId)
+{
+    Tab* tab = tabById(tabId);
+    if (!tab || !WKPageCanGoForward(tab->page))
+        return false;
+    WKPageGoForward(tab->page);
+    return true;
+}
+
+bool focusWindow(int windowId)
+{
+    BrowserWindow* window = windowById(windowId);
+    if (!window)
+        return false;
+    if (IsIconic(window->hwnd()))
+        ShowWindow(window->hwnd(), SW_RESTORE);
+    SetForegroundWindow(window->hwnd());
+    return true;
+}
+
+bool closeWindow(int windowId)
+{
+    BrowserWindow* window = windowById(windowId);
+    if (!window)
+        return false;
+    PostMessageW(window->hwnd(), WM_CLOSE, 0, 0);
+    return true;
+}
+
+HWND windowHandle(int windowId)
+{
+    BrowserWindow* window = windowById(windowId);
+    return window ? window->hwnd() : nullptr;
+}
+
+} // namespace tabs

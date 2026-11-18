@@ -321,6 +321,7 @@ typedef struct WKDownloadClientV0 {
     X(WKPageLoadFile, void, (WKPageRef, WKURLRef, WKURLRef)) \
     X(WKPageStopLoading, void, (WKPageRef)) \
     X(WKPageReload, void, (WKPageRef)) \
+    X(WKPageReloadFromOrigin, void, (WKPageRef)) \
     X(WKPageClose, void, (WKPageRef)) \
     X(WKPageGoBack, void, (WKPageRef)) \
     X(WKPageGoForward, void, (WKPageRef)) \
@@ -342,6 +343,7 @@ typedef struct WKDownloadClientV0 {
     X(WKFramePolicyListenerIgnore, void, (WKFramePolicyListenerRef)) \
     X(WKFramePolicyListenerDownload, void, (WKFramePolicyListenerRef)) \
     X(WKFrameInfoGetIsMainFrame, bool, (WKFrameInfoRef)) \
+    X(WKFrameInfoGetPage, WKPageRef, (WKFrameInfoRef)) \
     X(WKFrameIsMainFrame, bool, (WKFrameRef)) \
     X(WKFrameCopyURL, WKURLRef, (WKFrameRef)) \
     X(WKNavigationActionCopyRequest, WKURLRequestRef, (WKNavigationActionRef)) \
@@ -364,6 +366,7 @@ typedef struct WKDownloadClientV0 {
     X(WKUserScriptCreateWithSource, WKUserScriptRef, (WKStringRef, _WKUserScriptInjectionTime, bool)) \
     X(WKPageConfigurationSetUserContentController, void, (WKPageConfigurationRef, WKUserContentControllerRef)) \
     X(WKScriptMessageGetBody, WKTypeRef, (WKScriptMessageRef)) \
+    X(WKScriptMessageGetFrameInfo, WKFrameInfoRef, (WKScriptMessageRef)) \
     X(WKCompletionListenerComplete, void, (WKCompletionListenerRef, WKTypeRef))
 
 #define PRISM_WK_OPTIONAL(X) \
@@ -390,6 +393,8 @@ typedef struct WKDownloadClientV0 {
     X(WKPreferencesSetDNSPrefetchingEnabled, void, (WKPreferencesRef, bool)) \
     X(WKPreferencesSetHyperlinkAuditingEnabled, void, (WKPreferencesRef, bool)) \
     X(WKPreferencesSetDeveloperExtrasEnabled, void, (WKPreferencesRef, bool)) \
+    X(WKPreferencesSetHiddenPageDOMTimerThrottlingEnabled, void, (WKPreferencesRef, bool)) \
+    X(WKPreferencesSetPageVisibilityBasedProcessSuppressionEnabled, void, (WKPreferencesRef, bool)) \
     X(WKPreferencesSetJavaScriptCanOpenWindowsAutomatically, void, (WKPreferencesRef, bool)) \
     X(WKPageSetApplicationNameForUserAgent, void, (WKPageRef, WKStringRef)) \
     X(WKPageSetCustomBackingScaleFactor, void, (WKPageRef, double)) \

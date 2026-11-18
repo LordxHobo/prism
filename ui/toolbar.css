@@ -119,6 +119,58 @@ button {
   stroke: none;
 }
 
+/* ---- Extension buttons ----------------------------------------------------- */
+
+#actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  max-width: 40vw;
+  overflow: hidden;
+}
+
+#actions:empty {
+  display: none;
+}
+
+.icon.action {
+  position: relative;
+}
+
+.icon.action img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.icon.action.dimmed img {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+
+.icon.action.open {
+  background: var(--button-active);
+}
+
+.icon.action .badge {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  min-width: 14px;
+  height: 13px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 7px;
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 13px;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 0 0 1.5px var(--frame);
+}
+
 /* ---- Tab strip --------------------------------------------------------- */
 
 #tabstrip {

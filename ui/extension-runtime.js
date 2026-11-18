@@ -43,9 +43,14 @@
   const regExpTest = RegExp.prototype.test;
   const setTimeoutFn = win.setTimeout.bind(win);
   const consoleError = console.error.bind(console);
+  const MapCtor = Map;
+  const mapGet = Map.prototype.get;
+  const mapSet = Map.prototype.set;
+  const mapDelete = Map.prototype.delete;
 
   const location = win.location;
-  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  if (location.protocol !== 'http:' && location.protocol !== 'https:' && location.protocol !== 'file:') return;
+  if (location.protocol === 'file:' && !config.injected) return;
   const pageURL = location.href.split('#')[0];
   const isTopFrame = win.top === win;
 
@@ -168,8 +173,11 @@
   // ---- storage ------------------------------------------------------------------
   const storageChanged = makeEvent();
 
+  const areaEvents = createObject(null);
+
   function makeStorageArea(area) {
     const areaChanged = makeEvent();
+    areaEvents[area] = (changes) => { areaChanged.fire(changes); storageChanged.fire(changes, area); };
 
     function fireChanged(changes) {
       if (!changes || !keysOf(changes).length) return;
@@ -196,15 +204,15 @@
       }),
       set: withCallback((items) => {
         if (!items || typeof items !== 'object') return PromiseCtor.reject(new TypeError('Invalid storage items'));
-        return call('storage.set', { area, items }).then((result) => { fireChanged(result && result.changes); });
+        return call('storage.set', { area, items, ctx: contextId }).then((result) => { fireChanged(result && result.changes); });
       }),
       remove: withCallback((keys) => {
         const list = typeof keys === 'string' ? [keys] : isArray(keys) ? keys.map(String) : [];
-        return call('storage.remove', { area, keys: list }).then((result) => { fireChanged(result && result.changes); });
+        return call('storage.remove', { area, keys: list, ctx: contextId }).then((result) => { fireChanged(result && result.changes); });
       }),
-      clear: withCallback(() => call('storage.clear', { area }).then((result) => { fireChanged(result && result.changes); })),
+      clear: withCallback(() => call('storage.clear', { area, ctx: contextId }).then((result) => { fireChanged(result && result.changes); })),
       getBytesInUse: withCallback(() => call('storage.bytes', { area })),
-      onChanged: areaChanged.event,
+      onChanged: lazyEvent(areaChanged),
     });
   }
 
@@ -237,22 +245,184 @@
     return text.replace(/\$\$/g, '$');
   }
 
+  // ---- Messages from the rest of the extension ----------------------------------------
+  // Registering with Prism is lazy: only content scripts that listen for
+  // messages (or use ports or storage.onChanged) keep a request open.
+  let contextId = 0;
+  let hello = null;
+  const ports = new MapCtor();
+
+  function register() {
+    if (!hello) {
+      hello = call('hello', { url: pageURL }).then((info) => {
+        contextId = info.ctx;
+        pollLoop();
+        return info;
+      });
+      hello.then(null, (error) => consoleError('[' + config.name + ']', error));
+    }
+    return hello;
+  }
+
+  function pollLoop() {
+    call('poll', { ctx: contextId }).then((events) => {
+      if (isArray(events)) for (const event of events) handleEvent(event);
+      pollLoop();
+    }, () => setTimeoutFn(pollLoop, 2000));
+  }
+
+  function handleEvent(event) {
+    if (!event) return;
+    if (event.type === 'message') dispatchMessage(onMessage.listeners, event);
+    else if (event.type === 'connect') onConnect.fire(makePort(event.port, event.name, event.sender, true));
+    else if (event.type === 'portMessage') {
+      const entry = apply(mapGet, ports, [event.port]);
+      if (entry) entry.onMessage.fire(event.message, entry.port);
+    } else if (event.type === 'portDisconnect') {
+      const entry = apply(mapGet, ports, [event.port]);
+      if (entry) entry.close();
+    } else if (event.type === 'storageChanged') {
+      const fire = areaEvents[event.area];
+      if (fire && event.changes && keysOf(event.changes).length) fire(event.changes);
+    }
+  }
+
+  // onMessage listeners answer by calling sendResponse, returning true (and
+  // calling it later) or returning a promise (Firefox style).
+  function dispatchMessage(listeners, event) {
+    let responded = false;
+    let willRespond = false;
+    const respond = (handled, response) => {
+      if (responded) return;
+      responded = true;
+      const data = { id: event.id, handled, ctx: contextId };
+      if (handled) data.response = response;
+      call('respond', data).then(null, (error) => consoleError(error));
+    };
+    const sendResponse = (response) => respond(true, response);
+    for (const listener of listeners.slice()) {
+      let result;
+      try {
+        result = listener(event.message, event.sender, sendResponse);
+      } catch (error) {
+        consoleError(error);
+        continue;
+      }
+      if (result === true) willRespond = true;
+      else if (result && typeof result.then === 'function') {
+        willRespond = true;
+        result.then(sendResponse, (error) => { consoleError(error); respond(false); });
+      }
+    }
+    if (!willRespond && !responded) respond(false);
+  }
+
+  function makePort(id, name, sender, connected) {
+    const portMessage = makeEvent();
+    const portDisconnect = makeEvent();
+    let open = true;
+    let portId = id;
+    const queued = [];
+    const port = {
+      name: name || '',
+      sender: sender || undefined,
+      onMessage: portMessage.event,
+      onDisconnect: portDisconnect.event,
+      postMessage(message) {
+        if (!open) throw new Error('Attempting to use a disconnected port object');
+        if (portId === null) queued.push(message);
+        else call('port.post', { ctx: contextId, port: portId, message }).then(null, () => {});
+      },
+      disconnect() {
+        if (!open) return;
+        open = false;
+        if (portId !== null) {
+          apply(mapDelete, ports, [portId]);
+          call('port.disconnect', { ctx: contextId, port: portId }).then(null, () => {});
+        }
+      },
+    };
+    const entry = {
+      port,
+      onMessage: portMessage,
+      close() {
+        if (!open) return;
+        open = false;
+        apply(mapDelete, ports, [portId]);
+        portDisconnect.fire(port);
+      },
+      setId(newId) {
+        portId = newId;
+        apply(mapSet, ports, [newId, entry]);
+        if (!open) {
+          call('port.disconnect', { ctx: contextId, port: newId }).then(null, () => {});
+          return;
+        }
+        for (const message of queued.splice(0)) call('port.post', { ctx: contextId, port: newId, message }).then(null, () => {});
+      },
+    };
+    if (connected) entry.setId(id);
+    else portId = null;
+    return { port, entry };
+  }
+
   // ---- runtime ----------------------------------------------------------------------
-  const notYet = (what) => () => PromiseCtor.reject(new Error(what + " isn't supported in Prism yet."));
   const onMessage = makeEvent();
   const onConnect = makeEvent();
-  const extensionURL = (path) => 'chrome-extension://' + config.id + '/' + String(path || '').replace(/^\//, '');
+  const base = config.base || ('chrome-extension://' + config.id + '/');
+  const extensionURL = (path) => base + String(path || '').replace(/^\//, '');
 
+  function lazyEvent(source) {
+    return freeze({
+      addListener(listener) { register(); source.event.addListener(listener); },
+      removeListener: source.event.removeListener,
+      hasListener: source.event.hasListener,
+      hasListeners: source.event.hasListeners,
+    });
+  }
+
+  // sendMessage([extensionId,] message [, options]), like Chrome reads it.
+  function messageArguments(args) {
+    if (args.length === 1) return { message: args[0] };
+    if (args.length >= 3) return { id: args[0], message: args[1] };
+    const optionsLike = args[1] && typeof args[1] === 'object' && 'includeTlsChannelId' in args[1];
+    if ((typeof args[0] === 'string' || args[0] === null || args[0] === undefined) && !optionsLike) return { id: args[0], message: args[1] };
+    return { message: args[0] };
+  }
+
+  const connectEvent = makeEvent();
   const runtime = {
     id: config.id,
     getURL: extensionURL,
     getManifest: () => parseJSON(stringify(config.manifest)),
-    sendMessage: withCallback(notYet('Messaging the extension’s background part')),
-    connect() { throw new Error("Connecting to the extension’s background part isn't supported in Prism yet."); },
-    onMessage: onMessage.event,
-    onConnect: onConnect.event,
+    sendMessage: withCallback((...args) => {
+      const target = messageArguments(args);
+      if (target.id !== undefined && target.id !== null && target.id !== config.id) {
+        return PromiseCtor.reject(new Error('Messaging other extensions isn\'t supported in Prism yet.'));
+      }
+      return register()
+        .then(() => call('runtime.sendMessage', { ctx: contextId, message: target.message }))
+        .then((result) => (result && 'response' in result ? result.response : undefined));
+    }),
+    connect(...args) {
+      const info = args.find((arg) => arg && typeof arg === 'object') || {};
+      const made = makePort(null, info.name, undefined, false);
+      register().then(() => call('port.connect', { ctx: contextId, name: info.name || '' })).then((result) => {
+        made.entry.setId(result.port);
+        if (result.disconnected) {
+          lastError = { message: 'Could not establish connection. Receiving end does not exist.' };
+          made.entry.close();
+          lastError = undefined;
+        }
+      }, () => made.entry.close());
+      return made.port;
+    },
+    onMessage: lazyEvent(onMessage),
+    onConnect: lazyEvent({ event: connectEvent.event }),
     getPlatformInfo: withCallback(() => PromiseCtor.resolve({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' })),
   };
+  // onConnect listeners get the port object, not the internal entry.
+  onConnect.fire = (made) => connectEvent.fire(made.port);
   defineProperty(runtime, 'lastError', { get: () => lastError, enumerable: true });
 
   const api = {
@@ -261,7 +431,7 @@
       local: makeStorageArea('local'),
       sync: makeStorageArea('sync'),
       session: makeStorageArea('session'),
-      onChanged: storageChanged.event,
+      onChanged: lazyEvent(storageChanged),
     }),
     i18n: freeze({
       getMessage,
@@ -271,6 +441,8 @@
     extension: freeze({
       getURL: extensionURL,
       inIncognitoContext: false,
+      sendMessage: (...args) => runtime.sendMessage(...args),
+      onMessage: lazyEvent(onMessage),
     }),
   };
   freeze(api);

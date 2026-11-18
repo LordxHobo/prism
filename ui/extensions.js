@@ -79,9 +79,10 @@ function supportItems(support) {
     const count = support.blockingDomains ? ' (' + support.blockingDomains.toLocaleString() + ' domains)' : '';
     items.push([true, 'Blocks ads and trackers by domain' + count]);
   }
-  if (support.background) items.push([false, 'Background tasks: not yet']);
-  if (support.popup) items.push([false, 'Toolbar button and popup: not yet']);
-  if (support.options) items.push([false, 'Options page: not yet']);
+  if (support.background) items.push([true, 'Runs in the background']);
+  if (support.action) items.push([true, support.popup ? 'Toolbar button with a popup' : 'Toolbar button']);
+  if (support.options) items.push([true, 'Options page']);
+  for (const missing of support.unsupported || []) items.push([false, missing + ': not yet']);
   if (!items.length) items.push([false, 'Nothing this extension does works in Prism yet']);
   return items;
 }
@@ -266,6 +267,13 @@ function render(data) {
       $('reloadHint').hidden = false;
     });
     toggle.append(checkbox, document.createElement('span'));
+    if (ext.support.options && ext.enabled) {
+      const options = document.createElement('button');
+      options.className = 'button secondary';
+      options.textContent = 'Options';
+      options.addEventListener('click', () => ask('openOptions', ext.id));
+      actions.append(options);
+    }
     actions.append(remove, toggle);
 
     head.append(icon, info, actions);
