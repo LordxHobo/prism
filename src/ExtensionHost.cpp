@@ -19,6 +19,8 @@
 
 #include "BrowserWindow.h"
 #include "Engine.h"
+#include "ExtensionServer.h"
+#include "Http.h"
 #include "Json.h"
 #include "Tabs.h"
 #include "Util.h"
@@ -32,6 +34,7 @@
 #include <memory>
 #include <regex>
 #include <set>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -65,6 +68,25 @@ std::string raw(const std::string& text, const json::Value& value)
     if (value.end() <= value.start())
         return "null";
     return text.substr(value.start(), value.end() - value.start());
+}
+
+std::string decodeBase64(const std::string& text)
+{
+    static const std::string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    int value = 0, bits = -8;
+    for (char c : text) {
+        size_t index = alphabet.find(c);
+        if (index == std::string::npos)
+            continue; // padding, line breaks
+        value = (value << 6) + static_cast<int>(index);
+        bits += 6;
+        if (bits >= 0) {
+            out += static_cast<char>((value >> bits) & 0xFF);
+            bits -= 8;
+        }
+    }
+    return out;
 }
 
 double nowMilliseconds()
@@ -778,8 +800,8 @@ std::string actionValue(const Extension& ext, const std::string& property, int t
         return ext.actionTitle;
     if (property == "popup")
         return ext.actionPopup;
-    if (property == "icon")
-        return ext.actionIcon.empty() ? ext.iconDataURL : baseURL(ext) + ext.actionIcon;
+    if (property == "icon") // Prism's toolbar is a file:// page: give it the file
+        return ext.actionIcon.empty() ? ext.iconDataURL : internal::fileURL(ext, ext.actionIcon);
     if (property == "enabled")
         return "1";
     if (property == "badgeColor")
@@ -1173,6 +1195,10 @@ void extensionsChanged()
         for (Extension* ext : internal::enabledExtensions())
             sendToBackground(ext->id, eventJSON("runtime.onStartup", "[]"));
     }
+    std::vector<server::Site> sites;
+    for (Extension* ext : internal::enabledExtensions())
+        sites.push_back({ ext->id, ext->dir, ext->webAccessible });
+    server::setSites(std::move(sites));
     engine::setUserScripts("extension-pages", { });
     std::vector<std::string> scripts;
     std::string runtime = util::readFile(util::exeDirectory() + L"\\ui\\extension-page.js");
@@ -1460,6 +1486,45 @@ void pageOperation(Extension& ext, Context& context, const std::string& op, cons
         return;
     }
 
+    if (op == "runtime.fetch") {
+        // fetch() to another site: Prism makes the request (without cookies)
+        // if the extension has permission for that site, like Chrome lets
+        // extensions skip CORS there.
+        std::string target = message["url"].asString();
+        bool allowed = target.rfind("http://", 0) == 0 || target.rfind("https://", 0) == 0;
+        bool permitted = false;
+        for (auto& host : ext.hosts)
+            permitted = permitted || matchesPattern(host, target);
+        if (!allowed || !permitted) {
+            complete(listener, ok("{\"fallback\":true}"));
+            return;
+        }
+        http::Request request;
+        request.url = util::fromUTF8(target);
+        request.method = util::fromUTF8(message["method"].asString().empty() ? std::string("GET") : message["method"].asString());
+        for (auto& pair : message["headers"].items())
+            request.headers.emplace_back(util::fromUTF8(pair[0].asString()), util::fromUTF8(pair[1].asString()));
+        request.body = decodeBase64(message["body"].asString());
+        auto held = Ref<WKCompletionListenerRef>::retain(listener);
+        std::thread([request, held] {
+            http::Response response;
+            std::wstring error;
+            bool done = http::request(request, response, error);
+            std::string json;
+            if (!done)
+                json = fail(util::toUTF8(error));
+            else {
+                std::string headers = "[";
+                for (size_t i = 0; i < response.headers.size(); ++i)
+                    headers += (i ? "," : "") + std::string("[") + json::quote(util::toUTF8(response.headers[i].first)) + "," + json::quote(util::toUTF8(response.headers[i].second)) + "]";
+                json = ok("{\"status\":" + std::to_string(response.status) + ",\"statusText\":" + json::quote(util::toUTF8(response.statusText))
+                    + ",\"url\":" + json::quote(util::toUTF8(response.url)) + ",\"headers\":" + headers + "],\"base64\":\"" + util::base64(response.body) + "\"}");
+            }
+            util::postToMainThread([held, json] { complete(held.get(), json); });
+        }).detach();
+        return;
+    }
+
     // ---- tabs ----
     if (op == "tabs.query") {
         std::string json = "[";
@@ -1668,7 +1733,7 @@ void pageOperation(Extension& ext, Context& context, const std::string& op, cons
                 path = value[0] == '/' ? value.substr(1) : value;
             else if (internal::extensionForURL(value, &path) != &ext)
                 path.clear();
-            value = internal::resolve(ext, path).empty() ? std::string() : baseURL(ext) + path;
+            value = internal::resolve(ext, path).empty() ? std::string() : internal::fileURL(ext, path);
         }
         auto& state = g_actions[ext.id];
         bool reset = message["value"].isNull();

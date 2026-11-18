@@ -285,7 +285,7 @@
     setUninstallURL: resolved(undefined),
     requestUpdateCheck: resolved({ status: 'no_update' }),
     getPlatformInfo: resolved({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' }),
-    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.5.1', buildID: '0' }),
+    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.5.2', buildID: '0' }),
     getContexts: resolved([]),
     getBackgroundPage: notYet('Reaching the background page directly'),
     getPackageDirectoryEntry: notYet('getPackageDirectoryEntry'),
@@ -714,25 +714,50 @@
   window.chrome = api;
   window.browser = api;
 
-  // ---- fetch() of the extension's own files --------------------------------------------------------
-  // Pages loaded from files can't fetch() other files, so Prism reads them.
-  const types = { json: 'application/json', js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', html: 'text/html', htm: 'text/html',
-    txt: 'text/plain', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
-    wasm: 'application/wasm', woff2: 'font/woff2', woff: 'font/woff', ttf: 'font/ttf', xml: 'text/xml', map: 'application/json' };
+  // ---- fetch() to other sites -------------------------------------------------------------------
+  // Extensions may fetch from the sites they have permission for without
+  // those sites allowing it (CORS). Prism makes those requests (without
+  // cookies) and hands back the answer; anything else is a normal fetch().
   const originalFetch = window.fetch.bind(window);
+  const ownOrigin = new URL(base).origin;
+  const toBase64 = (buffer) => {
+    const bytes = new Uint8Array(buffer);
+    let text = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(text);
+  };
   window.fetch = function (input, init) {
-    const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input && input.url;
-    let absolute;
-    try { absolute = new URL(String(target), location.href).href; } catch (error) { absolute = ''; }
-    if (absolute && normalize(absolute).startsWith(normalize(base))) {
-      return call('runtime.readFile', { url: absolute }).then((file) => {
-        const bytes = Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0));
-        const extensionOf = /\.([a-z0-9]+)(?:[?#]|$)/i.exec(absolute);
-        const type = types[extensionOf ? extensionOf[1].toLowerCase() : ''] || 'application/octet-stream';
-        return new Response(bytes, { status: 200, headers: { 'Content-Type': type } });
-      }, () => new Response('', { status: 404 }));
+    let request;
+    try {
+      request = new Request(input, init);
+    } catch (error) {
+      return originalFetch(input, init);
     }
-    return originalFetch(input, init);
+    const target = new URL(request.url);
+    if ((target.protocol !== 'http:' && target.protocol !== 'https:') || target.origin === ownOrigin || request.mode === 'no-cors') {
+      return originalFetch(input, init);
+    }
+    const method = request.method;
+    const bodyPromise = method === 'GET' || method === 'HEAD' ? Promise.resolve(null) : request.clone().arrayBuffer();
+    return bodyPromise.then((body) => call('runtime.fetch', {
+      url: request.url,
+      method,
+      headers: Array.from(request.headers.entries()),
+      body: body ? toBase64(body) : '',
+    })).then((answer) => {
+      if (!answer || answer.fallback) return originalFetch(input, init);
+      const bytes = Uint8Array.from(atob(answer.base64), (c) => c.charCodeAt(0));
+      const noBody = method === 'HEAD' || answer.status === 204 || answer.status === 304;
+      const response = new Response(noBody ? null : bytes, {
+        status: answer.status < 200 || answer.status > 599 ? 200 : answer.status,
+        statusText: answer.statusText || '',
+        headers: answer.headers.filter((pair) => !/^(content-encoding|transfer-encoding|content-length)$/i.test(pair[0])),
+      });
+      Object.defineProperty(response, 'url', { value: answer.url || request.url });
+      return response;
+    }, (error) => {
+      throw new TypeError('Load failed: ' + ((error && error.message) || error));
+    });
   };
 
   // ---- Background service workers run as a page -------------------------------------------------------

@@ -4,6 +4,7 @@
 
 #include "Extensions.h"
 #include "ExtensionsInternal.h"
+#include "ExtensionServer.h"
 
 #include "Blocker.h"
 #include "BrowserWindow.h"
@@ -361,6 +362,14 @@ bool loadExtension(const fs::path& dir, Extension& ext, std::string& error)
         ext.actionIcon = bestIconPath(manifest["icons"]);
     if (ext.actionTitle.empty())
         ext.actionTitle = ext.name;
+
+    ext.webAccessible.clear();
+    for (auto& entry : manifest["web_accessible_resources"].items()) {
+        if (entry.isString())
+            ext.webAccessible.push_back(entry.asString()); // MV2
+        for (auto& resource : entry["resources"].items())
+            ext.webAccessible.push_back(resource.asString()); // MV3
+    }
 
     ext.optionsPage = manifest["options_ui"]["page"].asString();
     if (ext.optionsPage.empty())
@@ -1320,6 +1329,7 @@ std::wstring pickPath(HWND owner, bool folder)
 void initialize(std::function<void(const std::string&)> notify)
 {
     g_notify = std::move(notify);
+    server::start(); // extension addresses include its port
     g_runtimeSource = loadRuntimeSource();
     std::error_code ignored;
     fs::create_directories(extensionsRoot(), ignored);
@@ -1502,12 +1512,23 @@ Extension* findEnabled(const std::string& id)
     return ext && ext->enabled ? ext : nullptr;
 }
 
-std::string baseURL(const Extension& ext)
+std::string fileURL(const Extension& ext, const std::string& path)
 {
     std::string url = util::toUTF8(util::fileURLFromPath(ext.dir.wstring()));
     if (url.empty() || url.back() != '/')
         url += '/';
-    return url;
+    std::string clean = path;
+    while (!clean.empty() && clean[0] == '/')
+        clean.erase(0, 1);
+    return url + clean;
+}
+
+std::string baseURL(const Extension& ext)
+{
+    uint16_t port = server::start();
+    if (!port)
+        return fileURL(ext, ""); // no server: the v0.5.0 behaviour
+    return "http://" + server::hostLabel(ext.id) + ".localhost:" + std::to_string(port) + "/";
 }
 
 // "%20" -> " ", and lower case: Windows paths are case-insensitive, and
@@ -1545,6 +1566,26 @@ Extension* extensionForURL(const std::string& url, std::string* path)
             }
             return nullptr;
         }
+    }
+    if (url.rfind("http://", 0) == 0 && server::port()) {
+        std::string rest = lowerASCII(url.substr(7));
+        size_t slash = rest.find('/');
+        std::string host = rest.substr(0, slash);
+        std::string suffix = ".localhost:" + std::to_string(server::port());
+        if (host.size() <= suffix.size() || host.compare(host.size() - suffix.size(), std::string::npos, suffix) != 0)
+            return nullptr;
+        std::string label = host.substr(0, host.size() - suffix.size());
+        for (auto& ext : g_extensions) {
+            if (server::hostLabel(ext->id) == label) {
+                if (path) {
+                    std::string tail = slash == std::string::npos ? "" : url.substr(7 + slash + 1);
+                    tail = tail.substr(0, tail.find_first_of("?#"));
+                    *path = normalizeFileURL(tail); // percent-decoded
+                }
+                return ext.get();
+            }
+        }
+        return nullptr;
     }
     if (url.rfind("file:", 0) != 0)
         return nullptr;

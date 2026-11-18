@@ -176,16 +176,10 @@ bool initialize(std::wstring& error)
     applyCookiePolicy();
 
     s_preferences = createPreferences();
-    // Extension pages (background, popups, options tabs) are files in the
-    // extension's folder. Like in Chrome, they may load each other (WebKit
-    // only loads JavaScript modules between files when this is allowed) and
-    // reach the websites the extension has permission for. Background pages
-    // run in hidden windows: WebKit would otherwise slow their timers down.
+    // Extension pages (background, popups, options tabs) come from each
+    // extension's own address (ExtensionServer.h). Background pages run in
+    // hidden windows: WebKit would otherwise slow their timers down.
     s_backgroundPreferences = createPreferences();
-    if (WKPreferencesSetFileAccessFromFileURLsAllowed)
-        WKPreferencesSetFileAccessFromFileURLsAllowed(s_backgroundPreferences.get(), true);
-    if (WKPreferencesSetUniversalAccessFromFileURLsAllowed)
-        WKPreferencesSetUniversalAccessFromFileURLsAllowed(s_backgroundPreferences.get(), true);
     if (WKPreferencesSetHiddenPageDOMTimerThrottlingEnabled)
         WKPreferencesSetHiddenPageDOMTimerThrottlingEnabled(s_backgroundPreferences.get(), false);
     if (WKPreferencesSetPageVisibilityBasedProcessSuppressionEnabled)
@@ -237,7 +231,7 @@ void updateBlockingProxy()
             return;
         // Local addresses (your router, local dev servers) skip the proxy.
         WKWebsiteDataStoreEnableCustomNetworkProxySettings(s_dataStore.get(),
-            url(L"http://127.0.0.1:" + std::to_wstring(port)).get(), stringUTF8("localhost,127.0.0.1,::1").get());
+            url(L"http://127.0.0.1:" + std::to_wstring(port)).get(), stringUTF8("localhost,.localhost,127.0.0.1,::1").get());
         s_proxyEnabled = true;
     } else if (!wanted && s_proxyEnabled) {
         WKWebsiteDataStoreDisableNetworkProxySettings(s_dataStore.get());

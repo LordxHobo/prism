@@ -394,8 +394,6 @@ typedef struct WKDownloadClientV0 {
     X(WKPreferencesSetHyperlinkAuditingEnabled, void, (WKPreferencesRef, bool)) \
     X(WKPreferencesSetDeveloperExtrasEnabled, void, (WKPreferencesRef, bool)) \
     X(WKPreferencesSetHiddenPageDOMTimerThrottlingEnabled, void, (WKPreferencesRef, bool)) \
-    X(WKPreferencesSetFileAccessFromFileURLsAllowed, void, (WKPreferencesRef, bool)) \
-    X(WKPreferencesSetUniversalAccessFromFileURLsAllowed, void, (WKPreferencesRef, bool)) \
     X(WKPreferencesSetPageVisibilityBasedProcessSuppressionEnabled, void, (WKPreferencesRef, bool)) \
     X(WKPreferencesSetJavaScriptCanOpenWindowsAutomatically, void, (WKPreferencesRef, bool)) \
     X(WKPageSetApplicationNameForUserAgent, void, (WKPageRef, WKStringRef)) \

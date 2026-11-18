@@ -864,17 +864,18 @@ void BrowserWindow::navigate(Tab* tab, const std::wstring& url)
         engine::loadInternalPage(tab->page, name, query);
     } else {
         // chrome-extension://<id>/page.html -> the page's file.
+        // (and older file:// addresses of extension pages -> their address)
         std::wstring target = url;
         std::wstring scheme = schemeOf(url);
-        if (scheme == L"chrome-extension" || scheme == L"moz-extension") {
-            target = extensions::resolveExtensionURL(url);
-            if (target.empty())
-                target = engine::internalPageURL(L"error", L"kind=network&url=" + util::urlEncode(url) + L"&message=" + util::urlEncode(L"There's no installed (and turned on) extension with this address."));
-        }
-        // Extension pages need an extension tab (see newTab); other files
-        // must never load in one.
-        bool extensionPage = !extensions::resolveExtensionURL(target).empty();
-        if (extensionPage != tab->extensionPages && (extensionPage || schemeOf(target) == L"file") && !engine::isInternalURL(target)) {
+        std::wstring mapped = extensions::resolveExtensionURL(url);
+        if (!mapped.empty())
+            target = mapped;
+        else if (scheme == L"chrome-extension" || scheme == L"moz-extension")
+            target = engine::internalPageURL(L"error", L"kind=network&url=" + util::urlEncode(url) + L"&message=" + util::urlEncode(L"There's no installed (and turned on) extension with this address."));
+        // Extension pages need an extension tab (see newTab), and extension
+        // tabs show nothing else.
+        bool extensionPage = !mapped.empty();
+        if (extensionPage != tab->extensionPages && !engine::isInternalURL(target)) {
             bool replace = tab->url.empty() || engine::isInternalPage(tab->url, L"newtab");
             int oldId = tab->id;
             Tab* fresh = newTab(target, true);
@@ -1260,15 +1261,18 @@ void BrowserWindow::decidePolicyForNavigationAction(WKPageRef, WKNavigationActio
     std::wstring scheme = schemeOf(target);
 
     static const wchar_t* webSchemes[] = { L"http", L"https", L"file", L"about", L"data", L"blob", L"javascript", L"ws", L"wss" };
-    // Extension pages only in extension tabs, and other files never there:
-    // the main frame moves to a tab of the right kind instead.
-    if (scheme == L"file" && !engine::isInternalURL(target)) {
+    // Extension pages only in extension tabs, and nothing else there. A link
+    // from an extension page to a website opens in a normal tab; websites
+    // can't open extension pages (frames are fine: the extension's server
+    // only gives web pages the files the extension shares).
+    bool extensionPage = !extensions::resolveExtensionURL(target).empty();
+    bool webLike = scheme == L"file" || scheme == L"http" || scheme == L"https";
+    if (webLike && !engine::isInternalURL(target) && extensionPage != tab->extensionPages) {
         auto frame = Ref<WKFrameInfoRef>::adopt(WKNavigationActionCopyTargetFrameInfo(action));
         bool mainFrame = !frame || WKFrameInfoGetIsMainFrame(frame.get());
-        bool extensionPage = !extensions::resolveExtensionURL(target).empty();
-        if (extensionPage != tab->extensionPages) {
+        if (mainFrame) {
             WKFramePolicyListenerIgnore(listener);
-            if (mainFrame) {
+            if (tab->extensionPages) {
                 BrowserWindow* window = tab->window;
                 int index = window->indexOf(tab) + 1;
                 util::postToMainThread([hwnd = window->m_hwnd, target, index] {
@@ -1287,7 +1291,7 @@ void BrowserWindow::decidePolicyForNavigationAction(WKPageRef, WKNavigationActio
             // Prism Shields puts the site's filters in place before the page
             // (or frame) starts loading. WebKit delivers them to the page's
             // process ahead of the go-ahead below.
-            if (scheme == L"http" || scheme == L"https") {
+            if ((scheme == L"http" || scheme == L"https") && !extensionPage) {
                 auto frame = Ref<WKFrameInfoRef>::adopt(WKNavigationActionCopyTargetFrameInfo(action));
                 // No target frame means a new window: that's a top-level page too.
                 if (!frame || WKFrameInfoGetIsMainFrame(frame.get()))

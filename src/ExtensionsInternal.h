@@ -65,6 +65,7 @@ struct Extension {
     std::string actionTitle, actionPopup, actionIcon; // icon: path in the extension
 
     std::string optionsPage;
+    std::vector<std::string> webAccessible; // "web_accessible_resources" paths
     std::vector<std::string> unsupported; // features Prism can't do yet, in plain words
 
     bool rulesetEnabled(const Ruleset& ruleset) const
@@ -82,10 +83,15 @@ std::vector<Extension*> enabledExtensions();
 Extension* find(const std::string& id); // enabled or not
 Extension* findEnabled(const std::string& id);
 
-// file:///.../Extensions/<id>/ (with the trailing slash).
+// The extension's own address, http://<id>.localhost:<port>/ (with the
+// trailing slash; see ExtensionServer.h).
 std::string baseURL(const Extension&);
+// A file of the extension as a file:// URL (for Prism's own pages, like the
+// toolbar's button icons).
+std::string fileURL(const Extension&, const std::string& path);
 // The extension an extension-page URL belongs to (or null), and the path
-// inside it. Accepts file URLs and chrome-extension:// / moz-extension://.
+// inside it. Accepts its http://<id>.localhost:<port>/ address, file URLs
+// and chrome-extension:// / moz-extension://.
 Extension* extensionForURL(const std::string& url, std::string* path = nullptr);
 // A file inside the extension, or empty if `relative` escapes its folder.
 std::filesystem::path resolve(const Extension&, const std::string& relative);

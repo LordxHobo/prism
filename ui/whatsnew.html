@@ -22,7 +22,7 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.5.1</span>
+      <span class="version">Version 0.5.2</span>
     </div>
   </header>
 
@@ -30,6 +30,14 @@
     <h2 style="margin-top:0">Extensions, for real this time</h2>
     <p>Extensions now run all their parts: the background part that works behind the scenes, their <b>toolbar button and popup</b>, and their <b>options page</b>. Dark Reader, uBlock Origin Lite's popup and similar extensions should work like in Chrome or Firefox.</p>
   </div>
+
+  <h2>Fixed in 0.5.2</h2>
+  <ul class="notes">
+    <li><b>Extension popups and dashboards that stayed empty</b> or said “not a website” (like uBlock Origin Lite's) should now work. Extensions can now find their own files the way they do in Chrome, so their background part starts properly.</li>
+    <li>Each extension now has its own address on your PC (shown as <code>chrome-extension://…</code>), with its own storage, separate from other extensions and websites. Websites only get the files an extension chooses to share.</li>
+    <li>Extension pages no longer have access to other files on your PC (0.5.1 needed that as a stopgap).</li>
+    <li>Extensions can talk to the sites they have permission for (like Bitwarden to its server), without sending your cookies for those sites.</li>
+  </ul>
 
   <h2>Fixed in 0.5.1</h2>
   <ul class="notes">
