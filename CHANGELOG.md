@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1
+
+- Background tabs are not "in the window" (`WKViewSetIsInWindow(false)`; only the selected tab is). WebKit then doesn't let them start media (`Page::setCanStartMedia`), like Safari: YouTube opened in the background or restored tabs wait until shown; already playing media continues.
+- Switching tabs posts `WM_MOUSELEAVE` to the hidden tab, and to the shown one when the cursor isn't over it, so pages don't act on a stale mouse position (YouTube's hover previews started on their own).
+- Prism Shields at startup: navigations to websites wait (up to 5 s) until the blocker is built (`shields::isStarting`/`whenReady`, the policy listener is kept and used later), so the first pages get their scriptlets (YouTube showed an ad on the first load). The first build after starting uses the lists already downloaded and skips due updates (`cacheOnly`); a normal build with downloads follows right after.
+
 ## 0.7.0
 
 - **Tab groups** (`TabGroup` in BrowserWindow: id, name, color, collapsed; `Tab::groupId`; a group's tabs are kept together by `normalizeGroups()`, empty groups go away). Tab right-click menu: new tab to the right, reload, duplicate, add to new/existing group, remove from group, close / close others / close to the right. Group menu: name, color (Chrome's 9 colors), collapse/expand, new tab in group, ungroup, close group. Links and popups from a grouped tab join its group. Saved in the session (`G` lines; `T` lines get an optional group number).

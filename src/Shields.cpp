@@ -337,6 +337,18 @@ size_t g_domainCount = 0;
 bool g_working = false;
 bool g_rerun = false;
 bool g_rerunForce = false;
+// The first build after starting uses the lists already on disk (updates
+// come right after), so pages don't wait for downloads.
+bool g_cacheOnlyNext = false;
+std::vector<std::function<void()>> g_waiting;
+
+void flushWaiting()
+{
+    auto tasks = std::move(g_waiting);
+    g_waiting.clear();
+    for (auto& task : tasks)
+        task();
+}
 
 // Per-host scripts, most recently used last.
 std::list<std::pair<std::string, std::string>> g_hostScripts;
@@ -359,6 +371,7 @@ void resetHostScripts()
 // Building the engine (worker thread)
 
 struct BuildResult {
+    bool skippedDownloads { false };
     void* engine { nullptr };
     std::shared_ptr<blocker::Lists> domains;
     std::string error;
@@ -403,15 +416,20 @@ bool download(const ListInfo& list, std::string& error)
 }
 
 BuildResult build(const std::vector<std::string>& ids, const std::string& custom, bool force,
-    std::function<void(const std::string&)> progress)
+    std::function<void(const std::string&)> progress, bool cacheOnly)
 {
     BuildResult result;
 
-    // 1. Fetch lists that are missing or due for an update.
+    // 1. Fetch lists that are missing or due for an update (only missing
+    //    ones for the quick first build after starting).
     for (auto& id : ids) {
         const ListInfo* list = findList(id);
         if (!list || !needsDownload(id, force))
             continue;
+        if (cacheOnly && !util::readFile(listFile(id).wstring()).empty()) {
+            result.skippedDownloads = true;
+            continue;
+        }
         progress(std::string("Downloading ") + list->name + "…");
         std::string error;
         if (!download(*list, error))
@@ -488,7 +506,9 @@ void startBuild(bool force)
 
     std::vector<std::string> ids = shieldsOn() ? enabledLists() : std::vector<std::string>();
     std::string custom = util::readFile(customFile().wstring());
-    std::thread([ids, custom, force] {
+    bool cacheOnly = g_cacheOnlyNext;
+    g_cacheOnlyNext = false;
+    std::thread([ids, custom, force, cacheOnly] {
         auto progress = [](const std::string& text) {
             util::postToMainThread([text] {
                 g_status = text.rfind("Downloading", 0) == 0 ? "downloading" : "building";
@@ -496,7 +516,7 @@ void startBuild(bool force)
                 notifyChanged();
             });
         };
-        BuildResult result = build(ids, custom, force, progress);
+        BuildResult result = build(ids, custom, force, progress, cacheOnly);
         util::postToMainThread([result] {
             g_working = false;
             if (g_engine)
@@ -520,6 +540,10 @@ void startBuild(bool force)
                 util::writeSetting(L"ShieldsUpdated", std::to_wstring(static_cast<long long>(time(nullptr))));
             }
             notifyChanged();
+            flushWaiting();
+            // The quick build skipped due updates: fetch them now.
+            if (result.skippedDownloads && !g_rerun)
+                g_rerun = true;
             if (g_rerun) {
                 bool force = g_rerunForce;
                 g_rerun = g_rerunForce = false;
@@ -591,6 +615,7 @@ void initialize(std::function<void(const std::string&)> notify)
         allowed.insert(domain);
     blocker::setUserAllowed(std::move(allowed));
 
+    g_cacheOnlyNext = true;
     startBuild(false);
 
     // Check for list updates every few hours (each list updates every 4 days).
@@ -600,6 +625,27 @@ void initialize(std::function<void(const std::string&)> notify)
             util::postToMainThread([] { startBuild(false); });
         }
     }).detach();
+}
+
+bool isStarting()
+{
+    return g_lib.loaded && shieldsOn() && !g_engine && g_status != "error" && g_status != "unavailable";
+}
+
+void whenReady(std::function<void()> task)
+{
+    if (!isStarting()) {
+        task();
+        return;
+    }
+    g_waiting.push_back(std::move(task));
+    if (g_waiting.size() == 1) {
+        // Don't hold pages back for long if building takes a while.
+        std::thread([] {
+            Sleep(5000);
+            util::postToMainThread([] { flushWaiting(); });
+        }).detach();
+    }
 }
 
 bool isActiveFor(const std::wstring& url)

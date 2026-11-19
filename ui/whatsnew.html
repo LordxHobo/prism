@@ -22,7 +22,7 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.7.0</span>
+      <span class="version">Version 0.7.1</span>
     </div>
   </header>
 
@@ -30,6 +30,13 @@
     <h2 style="margin-top:0">Make it yours</h2>
     <p><b>Tab groups</b> (one row like Chrome, or two rows like Vivaldi), <b>vertical tabs</b>, <b>site icons</b>, <b>color palettes</b>, <b>your own CSS</b> and a <b>new tab page</b> with shortcuts.</p>
   </div>
+
+  <h2>Fixed in 0.7.1</h2>
+  <ul class="notes">
+    <li><b>Background tabs no longer start playing videos</b> (like YouTube opened in the background, or tabs from last time). They start when you switch to them, like in Safari. Something already playing keeps playing when you switch away.</li>
+    <li>Pages no longer think the mouse is still over them after you switch tabs, so YouTube's hover previews don't start by themselves.</li>
+    <li><b>Ads right after starting Prism:</b> pages opened while Prism Shields was still loading (such as tabs from last time) didn't get Shields' site fixes, so YouTube could show an ad. Those pages now wait for Shields (5 seconds at most), and Shields starts with the filter lists it already has, updating them afterwards.</li>
+  </ul>
 
   <h2>New in 0.7</h2>
   <ul class="notes">

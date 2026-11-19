@@ -991,7 +991,8 @@ Tab* BrowserWindow::newTab(const std::wstring& url, bool select, WKPageConfigura
         tab->extensionPages = true;
     RECT rect = { };
     tab->view = Ref<WKViewRef>::adopt(WKViewCreate(rect, configuration ? configuration : engine::pageConfiguration(), m_hwnd));
-    WKViewSetIsInWindow(tab->view.get(), true);
+    // Only the selected tab counts as "in the window" (see selectTab).
+    WKViewSetIsInWindow(tab->view.get(), false);
     tab->hwnd = WKViewGetWindow(tab->view.get());
     tab->page = WKViewGetPage(tab->view.get());
     ShowWindow(tab->hwnd, SW_HIDE);
@@ -1084,10 +1085,25 @@ void BrowserWindow::selectTab(int id)
     if (TabGroup* group = findGroup(next->groupId); group && group->collapsed)
         group->collapsed = false;
     m_activeTabId = id;
+    // Like Safari, WebKit only lets a page start videos and sound while it's
+    // in a window: background tabs (opened from a link, restored from last
+    // time) wait until you look at them. Media that's already playing keeps
+    // playing after you switch away.
+    WKViewSetIsInWindow(next->view.get(), true);
     layout();
     ShowWindow(next->hwnd, SW_SHOW);
-    if (previous && previous != next)
+    if (previous && previous != next) {
+        // The page that's going away shouldn't keep thinking the mouse is
+        // over it (sites like YouTube play previews on hover).
+        PostMessageW(previous->hwnd, WM_MOUSELEAVE, 0, 0);
+        WKViewSetIsInWindow(previous->view.get(), false);
         ShowWindow(previous->hwnd, SW_HIDE);
+    }
+    // Nor should the new one, unless the mouse really is over it.
+    POINT cursor;
+    RECT area;
+    if (GetCursorPos(&cursor) && GetWindowRect(next->hwnd, &area) && !PtInRect(&area, cursor))
+        PostMessageW(next->hwnd, WM_MOUSELEAVE, 0, 0);
     focusContent();
     updateTitle();
     pushState();
@@ -1790,6 +1806,17 @@ void BrowserWindow::decidePolicyForNavigationAction(WKPageRef, WKNavigationActio
                 // No target frame means a new window: that's a top-level page too.
                 if (!frame || WKFrameInfoGetIsMainFrame(frame.get()))
                     blocker::noteTopLevelSite(util::toUTF8(hostOf(target)));
+                // Right after Prism starts (tabs from last time), wait for
+                // Shields' blocker (5 s at most), so pages like YouTube get
+                // their fixes from the start instead of showing an ad.
+                if (shields::isStarting()) {
+                    auto held = Ref<WKFramePolicyListenerRef>::retain(listener);
+                    shields::whenReady([held, target] {
+                        shields::prepareNavigation(target);
+                        WKFramePolicyListenerUse(held.get());
+                    });
+                    return;
+                }
                 shields::prepareNavigation(target);
             }
             WKFramePolicyListenerUse(listener);

@@ -40,4 +40,10 @@ std::string handleCommand(const std::wstring& command, const std::wstring& argum
 // For the toolbar: is Shields protecting this site?
 bool isActiveFor(const std::wstring& url);
 
+// True while Prism is starting and Shields' blocker isn't built yet.
+bool isStarting();
+// Runs `task` once the blocker is ready (straight away if it already is, and
+// after 5 seconds at the latest), so the first pages get their site fixes.
+void whenReady(std::function<void()> task);
+
 } // namespace shields
