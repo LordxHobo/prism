@@ -82,6 +82,14 @@ function render(settings) {
   $('bookmarksBar').checked = !!settings.bookmarksBar;
   renderSegmented('locationDefault', settings.locationDefault);
   renderSegmented('palette', settings.palette);
+  renderSegmented('httpsMode', settings.httpsMode);
+  $('httpsHelp').textContent = {
+    off: 'Sites open the way their address says, http:// or https://.',
+    first: 'http:// addresses open with the secure https:// version. Sites without one open unsecured, with a message.',
+    only: 'http:// addresses open with https://. If a site has no secure version, Prism asks before opening the unsecured one.',
+  }[settings.httpsMode] || '';
+  $('stripTrackingParams').checked = !!settings.stripTrackingParams;
+  $('fingerprinting').checked = !!settings.fingerprinting;
   renderSegmented('tabLayout', settings.tabLayout);
   renderSegmented('groupStyle', settings.groupStyle);
   renderSegmented('newTabShortcuts', settings.newTabShortcuts);
@@ -142,7 +150,7 @@ for (const [color, name] of ACCENTS) {
 }
 
 for (const id of ['startup', 'theme', 'accent', 'tabStyle', 'cookiePolicy', 'locationDefault', 'notificationsDefault',
-  'palette', 'tabLayout', 'groupStyle', 'newTabShortcuts']) {
+  'palette', 'tabLayout', 'groupStyle', 'newTabShortcuts', 'httpsMode']) {
   $(id).addEventListener('click', (event) => {
     const button = event.target.closest('button');
     if (button) setSetting(id, button.dataset.value);
@@ -177,6 +185,41 @@ $('changeDownloads').addEventListener('click', () => {
   if (updated && !updated.error) render(updated);
 });
 $('openDownloads').addEventListener('click', () => ask('openDownloads'));
+
+$('stripTrackingParams').addEventListener('change', () => {
+  setSetting('stripTrackingParams', $('stripTrackingParams').checked ? '1' : '0');
+});
+$('fingerprinting').addEventListener('change', () => {
+  setSetting('fingerprinting', $('fingerprinting').checked ? '1' : '0');
+});
+
+const PRIVACY_NAMES = { https: 'HTTPS', params: 'Remove tracking', fingerprinting: 'Fingerprinting protection' };
+function renderPrivacySites() {
+  const list = $('privacySites');
+  const sites = ask('privacy.list') || [];
+  list.textContent = '';
+  for (const site of sites) {
+    const parts = Object.keys(PRIVACY_NAMES).filter((key) => site[key] !== null && site[key] !== undefined)
+      .map((key) => PRIVACY_NAMES[key] + ' ' + (site[key] ? 'on' : 'off'));
+    const row = document.createElement('li');
+    const name = document.createElement('span');
+    name.textContent = site.site + ' · ' + parts.join(', ');
+    const remove = document.createElement('button');
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', () => {
+      ask('privacy.remove', site.site);
+      renderPrivacySites();
+    });
+    row.append(name, remove);
+    list.appendChild(row);
+  }
+  if (!sites.length) {
+    const none = document.createElement('li');
+    none.className = 'none';
+    none.textContent = 'None.';
+    list.appendChild(none);
+  }
+}
 
 $('homeButton').addEventListener('change', () => {
   setSetting('homeButton', $('homeButton').checked ? '1' : '0');
@@ -431,12 +474,14 @@ renderShields(ask('shields.get'));
 renderPermissions();
 renderUserCSS();
 renderBackground();
+renderPrivacySites();
 
 // Prism calls this when a setting changes elsewhere (Ctrl+Shift+B, the menu).
 window.prismSettingsChanged = () => {
   const settings = ask('get');
   if (settings) render(settings);
   renderPermissions();
+  renderPrivacySites();
 };
 const startSection = new URLSearchParams(location.search).get('section');
 if (startSection) requestAnimationFrame(() => window.prismShowSection(startSection));

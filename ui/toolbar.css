@@ -1025,3 +1025,16 @@ button {
   --field: #fffaf0;
   --field-border: #d6c8aa;
 }
+
+/* ---- "Not secure" for http:// pages ------------------------------------------- */
+
+#insecure {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e5484d;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #e5484d 14%, transparent);
+  margin-right: 2px;
+}

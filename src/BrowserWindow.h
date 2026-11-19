@@ -52,6 +52,12 @@ struct Tab {
 
     std::vector<PermissionPrompt> prompts;
 
+    // HTTPS upgrades: the http address we turned into https (until the page
+    // commits or fails), and when, to notice sites that send us back.
+    std::wstring upgradedFrom;
+    std::wstring upgradedTo;
+    unsigned long long upgradedAt { 0 };
+
     int groupId { 0 };          // 0 = not in a group
     unsigned long long lastActive { 0 }; // when it was last the selected tab
 };

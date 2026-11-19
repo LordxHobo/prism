@@ -579,6 +579,7 @@ function renderNavigation() {
 
   if (!editing)
     elements.address.value = tab ? displayURL(tab.url) : '';
+  $('insecure').hidden = !(tab && /^http:\/\//i.test(tab.url) && !/^http:\/\/[^/]*\.localhost[:/]/i.test(tab.url));
 
   // The shield is grey where Prism Shields is off (or on Prism's own pages).
   shieldsOn = !!(tab && tab.shields);

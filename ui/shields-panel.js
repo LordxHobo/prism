@@ -112,6 +112,24 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') ask('close');
 });
 
+// Privacy switches for this site (HTTPS, tracking parameters, fingerprinting).
+function renderPrivacy(data) {
+  const section = $('privacySection');
+  if (!data || !section) return;
+  $('privHttps').checked = !!data.https;
+  $('privParams').checked = !!data.params;
+  $('privFingerprinting').checked = !!data.fingerprinting;
+  $('httpsHint').textContent = data.httpsMode === 'only'
+    ? 'Only the secure version; asks before opening an unsecured one.'
+    : 'Opens the secure version of this site when there is one.';
+}
+for (const [id, key] of [['privHttps', 'https'], ['privParams', 'params'], ['privFingerprinting', 'fingerprinting']]) {
+  $(id).addEventListener('change', () => renderPrivacy(ask('setPrivacy', key + '\n' + ($(id).checked ? '1' : '0'))));
+}
+const privacyData = ask('privacy');
+$('privacySection').hidden = !privacyData;
+renderPrivacy(privacyData);
+
 render(ask('get'));
 // Keep the numbers fresh while the panel is open.
 setInterval(() => render(ask('get')), 1500);

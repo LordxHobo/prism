@@ -67,6 +67,23 @@ if (kind === 'blocked') {
   $('retry').textContent = 'Go back';
   $('retry').addEventListener('click', (event) => { event.stopImmediatePropagation(); history.back(); }, true);
   $('details').textContent = 'Blocked by ' + owner + ' \u2014 ' + url;
+} else if (kind === 'https') {
+  document.title = 'Not secure: ' + host;
+  $('icon').textContent = '\u{1F513}';
+  $('heading').textContent = host + ' doesn\u2019t offer a secure connection';
+  $('summary').textContent = 'Prism tried the secure (HTTPS) version of this site, but it didn\u2019t work. On the unsecured version, others on your network could see or change what you send and receive.';
+  tips.push('Don\u2019t enter passwords or payment details on the unsecured version.');
+  tips.push('To stop being asked, turn HTTPS off for this site in the Shields panel, or choose \u201cHTTPS first\u201d in Settings \u2192 Privacy.');
+  const go = document.createElement('button');
+  go.className = 'button secondary';
+  go.textContent = 'Continue to ' + host + ' (not secure)';
+  go.addEventListener('click', () => {
+    if (window.prompt('prism:allowHttp\n' + url) === 'true') location.href = url;
+  });
+  $('retry').after(go);
+  $('retry').textContent = 'Go back';
+  $('retry').addEventListener('click', (event) => { event.stopImmediatePropagation(); history.back(); }, true);
+  $('details').textContent = 'HTTPS only \u2014 ' + url;
 } else if (kind === 'crash') {
   document.title = 'Page crashed';
   $('icon').textContent = '\u{1F4A5}';

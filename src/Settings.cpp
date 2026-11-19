@@ -268,6 +268,9 @@ std::string toJSON()
     json += ",\"bookmarksBar\":" + jsonBool(showBookmarksBar());
     json += ",\"locationDefault\":" + util::jsonString(permissionDefault(L"location"));
     json += ",\"notificationsDefault\":" + util::jsonString(permissionDefault(L"notifications"));
+    json += ",\"httpsMode\":" + util::jsonString([] { std::wstring m = util::readSetting(L"HttpsMode", L"first"); return m == L"off" || m == L"only" ? m : std::wstring(L"first"); }());
+    json += ",\"stripTrackingParams\":" + jsonBool(util::readSetting(L"StripTrackingParams", L"1") != L"0");
+    json += ",\"fingerprinting\":" + jsonBool(util::readSetting(L"Fingerprinting", L"1") != L"0");
     json += ",\"tabLayout\":" + util::jsonString(verticalTabs() ? L"vertical" : L"horizontal");
     json += ",\"groupStyle\":" + util::jsonString(groupStyle());
     json += ",\"palette\":" + util::jsonString(palette());
@@ -328,6 +331,14 @@ bool set(const std::wstring& key, const std::wstring& value)
         if (!isOneOf(value, { L"0", L"1" }))
             return false;
         util::writeSetting(L"BookmarksBar", value);
+    } else if (key == L"httpsMode") {
+        if (!isOneOf(value, { L"off", L"first", L"only" }))
+            return false;
+        util::writeSetting(L"HttpsMode", value);
+    } else if (key == L"stripTrackingParams" || key == L"fingerprinting") {
+        if (!isOneOf(value, { L"0", L"1" }))
+            return false;
+        util::writeSetting(key == L"fingerprinting" ? L"Fingerprinting" : L"StripTrackingParams", value);
     } else if (key == L"tabLayout") {
         if (!isOneOf(value, { L"horizontal", L"vertical" }))
             return false;

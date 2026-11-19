@@ -12,6 +12,7 @@
 #include "History.h"
 #include "Icons.h"
 #include "Permissions.h"
+#include "Privacy.h"
 #include "Shields.h"
 #include "ShieldsPanel.h"
 #include "Suggestions.h"
@@ -1420,6 +1421,7 @@ bool BrowserWindow::restoreSession(const std::vector<std::wstring>& extraURLs)
 void BrowserWindow::settingsChanged()
 {
     engine::applyCookiePolicy();
+    privacy::settingsChanged();
     for (auto* window : s_windows) {
         window->updateTheme();
         if (settings::verticalTabs())
@@ -1716,6 +1718,12 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
         bool isNewTab = engine::isInternalPage(frameURL, L"newtab");
         bool isBookmarks = engine::isInternalPage(frameURL, L"bookmarks");
         // The "blocked" page can allow the site it's showing, and nothing else.
+        if (engine::isInternalPage(frameURL, L"error") && message.rfind(L"prism:allowHttp\n", 0) == 0) {
+            std::wstring site = message.substr(16);
+            privacy::allowHttpThisSession(site);
+            WKPageRunJavaScriptPromptResultListenerCall(listener, stringUTF8("true").get());
+            return;
+        }
         if (engine::isInternalPage(frameURL, L"error") && message.rfind(L"prism:allowSite\n", 0) == 0) {
             std::wstring site = message.substr(16);
             std::string blockedBy;
@@ -1734,7 +1742,9 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
             if (isSettings && command.rfind(L"shields.", 0) == 0) {
                 answer = shields::handleCommand(command.substr(8), argument);
                 refreshToolbars();
-            } else if (isSettings && command.rfind(L"usercss.", 0) == 0)
+            } else if (isSettings && command.rfind(L"privacy.", 0) == 0)
+                answer = privacy::handleCommand(command.substr(8), argument);
+            else if (isSettings && command.rfind(L"usercss.", 0) == 0)
                 answer = usercss::handleCommand(command.substr(8), argument);
             else if (isNewTab && command == L"data")
                 answer = newTabData();
@@ -1814,6 +1824,40 @@ void BrowserWindow::decidePolicyForNavigationAction(WKPageRef, WKNavigationActio
         }
     }
 
+    // Main-frame web pages: remove tracking parameters and use HTTPS.
+    if ((scheme == L"http" || scheme == L"https") && !extensionPage) {
+        auto frame = Ref<WKFrameInfoRef>::adopt(WKNavigationActionCopyTargetFrameInfo(action));
+        if (!frame || WKFrameInfoGetIsMainFrame(frame.get())) {
+            // An https page we upgraded to sent us straight back to http:
+            // the site doesn't really do HTTPS, so don't loop.
+            if (scheme == L"http" && !tab->upgradedTo.empty() && privacy::siteOf(target) == privacy::siteOf(tab->upgradedTo)
+                && GetTickCount64() - tab->upgradedAt < 10000) {
+                privacy::allowHttpThisSession(target);
+                tab->upgradedTo.clear();
+                tab->upgradedFrom.clear();
+            }
+            std::wstring cleaned = privacy::removeTrackingParameters(target);
+            std::wstring upgraded = privacy::upgradeURL(cleaned);
+            std::wstring next = upgraded.empty() ? cleaned : upgraded;
+            if (next != target) {
+                WKFramePolicyListenerIgnore(listener);
+                if (!upgraded.empty()) {
+                    tab->upgradedFrom = cleaned;
+                    tab->upgradedTo = upgraded;
+                    tab->upgradedAt = GetTickCount64();
+                }
+                int tabId = tab->id;
+                util::postToMainThread([hwnd = tab->window->m_hwnd, tabId, next] {
+                    if (BrowserWindow* window = BrowserWindow::fromHWND(hwnd)) {
+                        if (Tab* again = window->findTab(tabId))
+                            window->navigate(again, next);
+                    }
+                });
+                return;
+            }
+        }
+    }
+
     for (auto* web : webSchemes) {
         if (scheme == web) {
             // Prism Shields puts the site's filters in place before the page
@@ -1889,6 +1933,25 @@ void BrowserWindow::didFailProvisionalNavigation(WKPageRef, WKNavigationRef, WKE
 
     std::wstring failingURL = toWide(Ref<WKURLRef>::adopt(WKErrorCopyFailingURL(error)).get());
     std::wstring description = toWide(Ref<WKStringRef>::adopt(WKErrorCopyLocalizedDescription(error)).get());
+
+    // An address Prism switched to https didn't load: the site has no
+    // (working) HTTPS. "HTTPS first" opens the http address; "HTTPS only"
+    // asks first.
+    if (!tab->upgradedFrom.empty() && privacy::siteOf(failingURL) == privacy::siteOf(tab->upgradedTo)) {
+        std::wstring original = tab->upgradedFrom;
+        tab->upgradedFrom.clear();
+        if (privacy::httpsMode() == L"only") {
+            tab->url = original;
+            engine::loadInternalPage(tab->page, L"error", L"kind=https&url=" + util::urlEncode(original));
+            tab->window->tabChanged(tab);
+        } else {
+            privacy::allowHttpThisSession(original);
+            tab->window->navigate(tab, original);
+            if (tab->id == tab->window->m_activeTabId)
+                tab->window->showToast(L"This site has no secure (HTTPS) version, so it's open without one.");
+        }
+        return;
+    }
     std::wstring query = L"kind=network&url=" + util::urlEncode(failingURL)
         + L"&message=" + util::urlEncode(description) + L"&code=" + std::to_wstring(code);
 
@@ -2210,6 +2273,7 @@ bool BrowserWindow::handleShortcut(const MSG& msg)
 void BrowserWindow::didCommitNavigation(WKPageRef page, WKNavigationRef, WKTypeRef, const void* clientInfo)
 {
     Tab* tab = tabFromClientInfo(clientInfo);
+    tab->upgradedFrom.clear(); // the upgrade worked (or was replaced)
     // A new page: the old page's questions go away, and find starts over.
     tab->window->denyPrompts(tab);
     if (tab->findOpen) {

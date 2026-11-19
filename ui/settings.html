@@ -253,6 +253,44 @@
 
       <div class="row">
         <div class="label">
+          <span class="title">HTTPS</span>
+          <p class="dim" id="httpsHelp"></p>
+        </div>
+        <div class="control segmented" id="httpsMode" role="radiogroup">
+          <button data-value="off" role="radio">Off</button>
+          <button data-value="first" role="radio">HTTPS first</button>
+          <button data-value="only" role="radio">HTTPS only</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <label for="stripTrackingParams" class="title">Remove tracking from links</label>
+          <p class="dim">Takes click trackers like <code>utm_source</code>, <code>fbclid</code> and <code>gclid</code> out of addresses before pages open.</p>
+        </div>
+        <div class="control">
+          <label class="switch"><input type="checkbox" id="stripTrackingParams"><span></span></label>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <label for="fingerprinting" class="title">Fingerprinting protection</label>
+          <p class="dim">Sites can try to recognize your PC from how it draws pictures and sound and from its hardware. Prism makes those details slightly different for every site and every time you start it, so they can't follow you. Applies to pages opened afterwards.</p>
+        </div>
+        <div class="control">
+          <label class="switch"><input type="checkbox" id="fingerprinting"><span></span></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Sites with their own settings</h2>
+        <p class="dim">Change these for a site in the Shields panel (the shield in the address bar). Remove one to use the settings above again.</p>
+        <ul class="entries" id="privacySites"></ul>
+      </div>
+
+      <div class="row">
+        <div class="label">
           <label for="saveHistory" class="title">Save browsing history</label>
           <p class="dim">Keeps the pages you visit for 90 days, on this PC only, for <a href="prism://history">History</a> and address-bar suggestions. Turning it off doesn't delete what's already saved.</p>
         </div>

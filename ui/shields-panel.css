@@ -47,3 +47,9 @@ footer a:hover { text-decoration: underline; }
 .switch input:focus-visible + span { box-shadow: 0 0 0 3px var(--accent-soft); }
 .switch input:disabled + span { opacity: 0.5; cursor: default; }
 .global input { accent-color: var(--accent); }
+
+.privacy { margin-top: 12px; padding: 4px 12px 8px; border: 1px solid var(--border); border-radius: 10px; }
+.privacy h2 { font-size: 12px; font-weight: 600; color: var(--text-dim); margin: 8px 0 4px; text-transform: none; }
+.privacy .option { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; cursor: pointer; }
+.privacy .option > span:first-child { display: flex; flex-direction: column; font-size: 13px; }
+.privacy .option b { font-weight: 600; }

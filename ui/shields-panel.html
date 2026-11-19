@@ -33,6 +33,16 @@
 
   <p class="notice dim small" id="notice" hidden></p>
 
+  <section class="privacy" id="privacySection">
+    <h2>Privacy for this site</h2>
+    <label class="option"><span><b>Use HTTPS</b><span class="dim small" id="httpsHint">Opens the secure version of this site.</span></span>
+      <span class="switch"><input type="checkbox" id="privHttps" aria-label="Use HTTPS on this site"><span></span></span></label>
+    <label class="option"><span><b>Remove tracking from links</b><span class="dim small">Strips utm_, fbclid and similar from addresses.</span></span>
+      <span class="switch"><input type="checkbox" id="privParams" aria-label="Remove tracking from links on this site"><span></span></span></label>
+    <label class="option"><span><b>Fingerprinting protection</b><span class="dim small">Turn off if a site misbehaves (reload needed).</span></span>
+      <span class="switch"><input type="checkbox" id="privFingerprinting" aria-label="Fingerprinting protection on this site"><span></span></span></label>
+  </section>
+
   <section class="stats">
     <div><b id="blocked">0</b><span class="dim small">blocked since Prism started</span></div>
     <div><b id="domains">0</b><span class="dim small">ad and tracker domains known</span></div>

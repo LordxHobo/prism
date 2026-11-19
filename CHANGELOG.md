@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0
+
+- `src/Privacy.cpp`: per-site overrides in `site-privacy.json` (`{site: {https, params, fingerprinting}}`; a site's override also covers its subdomains; "www." is ignored). Settings `HttpsMode` (off | first | only, default first), `StripTrackingParams`, `Fingerprinting` (both default on).
+- **HTTPS:** main-frame http(s) navigations go through privacy first (decidePolicyForNavigationAction): tracking parameters removed, then http:// upgraded to https:// (not for localhost, *.localhost, .local/.lan/.home/.internal/.test/.arpa, single-label names, IP addresses). The navigation is ignored and the new address loaded. If the upgraded load fails (didFailProvisionalNavigation): "first" opens the http address for this session with a toast; "only" shows error page `kind=https` with "Continue … (not secure)" (`prism:allowHttp`). An http navigation to the same site within 10 s of an upgrade (the site redirects back) stops upgrading it this session. Toolbar shows "Not secure" for http:// pages.
+- **Tracking parameters:** utm_*, fbclid, gclid, gclsrc, dclid, gbraid, wbraid, msclkid, mc_eid, mc_cid, igshid, igsh, yclid, ysclid, twclid, ttclid, li_fat_id, epik, _hsenc, _hsmi, __hssc, __hstc, __hsfp, hsCtaTracking, mkt_tok, oly_anon_id, oly_enc_id, _openstat, rb_clickid, s_cid, vero_conv, vero_id, wickedid, ml_subscriber(_hash), __s, _kx, irclickid, srsltid; si only on Spotify and YouTube.
+- **Fingerprinting protection:** a document-start user script (group "fingerprinting", all frames, http(s) only, not *.localhost, not sites with it off) seeded by a per-start random key and the site (last two labels): canvas getImageData/toDataURL/toBlob change ~1 in 128 pixels' lowest bit (stable per site), WebGL UNMASKED_VENDOR/RENDERER → "Apple Inc." / "Apple GPU" and readPixels changed the same way, AudioBuffer.getChannelData and AnalyserNode.getFloatFrequencyData ±1e-7 on some samples, navigator.hardwareConcurrency 4 or 8 (never more than the real value). Patched functions keep native-looking toString().
+- Shields panel: "Privacy for this site" (HTTPS, Remove tracking from links, Fingerprinting protection; commands privacy / setPrivacy, reloads the tab); panel max height 800 px. Settings › Privacy: HTTPS mode, the two switches, and "Sites with their own settings" (privacy.list / privacy.remove).
+
 ## 0.7.3
 
 - restoreSession(): extra prism:// pages (What's new after an update) that are already among the restored tabs select that tab instead of opening another one.

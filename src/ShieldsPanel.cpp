@@ -5,6 +5,7 @@
 #include "ShieldsPanel.h"
 
 #include "Engine.h"
+#include "Privacy.h"
 #include "Shields.h"
 #include "Util.h"
 #include "WebKitApi.h"
@@ -19,7 +20,7 @@ namespace {
 
 constexpr int kWidth = 340;         // CSS pixels
 constexpr int kInitialHeight = 380; // until the page reports its height
-constexpr int kMaxHeight = 640;
+constexpr int kMaxHeight = 800;
 constexpr UINT WM_PANEL_CLOSE = WM_APP + 1;
 
 struct Panel {
@@ -78,6 +79,16 @@ std::string handleCommand(Panel* panel, const std::wstring& command, const std::
         if (panel->callbacks.reloadTab)
             panel->callbacks.reloadTab();
         return "true";
+    }
+    if (command == L"privacy")
+        return privacy::siteJSON(site);
+    if (command == L"setPrivacy") {
+        // "<https|params|fingerprinting>\n<1|0>"
+        size_t newline = argument.find(L'\n');
+        privacy::setForSite(site, argument.substr(0, newline), newline != std::wstring::npos && argument.substr(newline + 1) == L"1");
+        if (panel->callbacks.reloadTab)
+            panel->callbacks.reloadTab();
+        return privacy::siteJSON(site);
     }
     if (command == L"settings") {
         auto open = panel->callbacks.openSettings;

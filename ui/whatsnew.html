@@ -22,14 +22,22 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.7.3</span>
+      <span class="version">Version 0.8.0</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Make it yours</h2>
-    <p><b>Tab groups</b> (one row like Chrome, or two rows like Vivaldi), <b>vertical tabs</b>, <b>site icons</b>, <b>color palettes</b>, <b>your own CSS</b> and a <b>new tab page</b> with shortcuts.</p>
+    <h2 style="margin-top:0">Harder to track</h2>
+    <p><b>HTTPS by default</b>, <b>tracking removed from links</b> and <b>fingerprinting protection</b>, each switchable per site in the Shields panel.</p>
   </div>
+
+  <h2>New in 0.8</h2>
+  <ul class="notes">
+    <li><b>HTTPS first:</b> http:// addresses open with the secure https:// version. Sites without one open unsecured with a message, and an address-bar label says <b>Not secure</b>. Prefer to be asked first? Choose <b>HTTPS only</b> in <a href="prism://settings#privacy">Settings › Privacy</a>. Your PC, local network devices and IP addresses are left as they are.</li>
+    <li><b>Tracking removed from links:</b> click trackers like <code>utm_source</code>, <code>fbclid</code>, <code>gclid</code> and <code>msclkid</code> are taken out of addresses before pages open.</li>
+    <li><b>Fingerprinting protection:</b> sites can try to recognize your PC from how it draws pictures and sound, its graphics card and its processor. Prism makes those details slightly different for every site and every time you start it, so they can't be used to follow you around.</li>
+    <li><b>Per-site switches</b> in the Shields panel (the shield in the address bar): HTTPS, tracking removal and fingerprinting protection, for when a site needs an exception. Settings › Privacy lists them.</li>
+  </ul>
 
   <h2>Fixed in 0.7.3</h2>
   <ul class="notes">
@@ -139,8 +147,8 @@
 
   <h2>Coming next</h2>
   <ul class="notes dim">
-    <li><b>0.8:</b> stronger privacy: fingerprinting protection, HTTPS-only, per-site settings, tracking-parameter removal.</li>
-    <li><b>0.9:</b> Prism's own WebKit build: printing, camera and microphone, full network filtering, more extension features.</li>
+    <li><b>0.9:</b> Prism's own WebKit build: printing, camera and microphone, full network filtering (for Prism Shields and ad-blocking extensions), more extension features.</li>
+    <li><b>0.10:</b> polish: an installer, optional update checks, crash recovery.</li>
   </ul>
 </main>
 </body>
