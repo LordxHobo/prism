@@ -1387,8 +1387,26 @@ bool BrowserWindow::restoreSession(const std::vector<std::wstring>& extraURLs)
         return false;
 
     for (auto& url : extraURLs) {
+        // Prism's own pages (like What's new after an update) that are
+        // already among last time's tabs are selected, not opened again.
+        bool found = false;
+        if (url.rfind(L"prism://", 0) == 0) {
+            for (auto& window : windows) {
+                for (size_t i = 0; i < window.urls.size() && !found; ++i) {
+                    if (lower(window.urls[i]) == lower(url)) {
+                        window.active = static_cast<int>(i);
+                        found = true;
+                    }
+                }
+                if (found)
+                    break;
+            }
+        }
+        if (found)
+            continue;
         windows.front().urls.push_back(url);
         windows.front().active = static_cast<int>(windows.front().urls.size()) - 1;
+        windows.front().tabGroups.push_back(0);
     }
     bool opened = false;
     for (auto& window : windows)

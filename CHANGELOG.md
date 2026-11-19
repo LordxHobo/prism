@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.3
+
+- restoreSession(): extra prism:// pages (What's new after an update) that are already among the restored tabs select that tab instead of opening another one.
+
 ## 0.7.2
 
 - tabs.* now report extension pages by the address `runtime.getURL()` gives (`http://<id>.localhost:<port>/<path>`) instead of `chrome-extension://<id>/<path>`, so extensions that look up their own tabs by URL find them. AdNauseam's first-run "Let's go!" sends `closeExtPage`, which looks for a tab whose URL starts with `vAPI.getURL('firstrun.html')`; it never matched, so the page stayed open.
