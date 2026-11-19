@@ -5,6 +5,7 @@
 #include "Bookmarks.h"
 
 #include "Dialogs.h"
+#include "Icons.h"
 #include "Json.h"
 #include "Util.h"
 
@@ -135,7 +136,7 @@ std::string nodeJSON(const Node& node)
             json += (i ? "," : "") + nodeJSON(*node.children[i]);
         json += "]";
     } else
-        json += ",\"url\":" + util::jsonString(node.url);
+        json += ",\"url\":" + util::jsonString(node.url) + ",\"icon\":" + util::jsonString(icons::fileURLFor(node.url));
     return json + "}";
 }
 
@@ -580,7 +581,8 @@ std::string barJSON()
     for (size_t i = 0; i < g_bar.children.size(); ++i) {
         auto& child = g_bar.children[i];
         json += (i ? "," : "") + std::string("{\"id\":") + std::to_string(child->id) + ",\"title\":" + util::jsonString(child->title)
-            + ",\"url\":" + util::jsonString(child->url) + ",\"folder\":" + (child->folder ? "true" : "false") + "}";
+            + ",\"url\":" + util::jsonString(child->url) + ",\"icon\":" + util::jsonString(child->folder ? L"" : icons::fileURLFor(child->url))
+            + ",\"folder\":" + (child->folder ? "true" : "false") + "}";
     }
     return json + "]";
 }

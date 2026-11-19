@@ -5,6 +5,7 @@
 #include "History.h"
 
 #include "Engine.h"
+#include "Icons.h"
 #include "Json.h"
 #include "Settings.h"
 #include "Util.h"
@@ -183,7 +184,8 @@ std::string visitJSON(const Visit& visit)
 {
     auto page = g_pages.find(visit.url);
     return "{\"time\":" + std::to_string(visit.time) + ",\"url\":" + util::jsonString(visit.url)
-        + ",\"title\":" + util::jsonString(page != g_pages.end() ? page->second.title : L"") + "}";
+        + ",\"title\":" + util::jsonString(page != g_pages.end() ? page->second.title : L"")
+        + ",\"icon\":" + util::jsonString(icons::fileURLFor(visit.url)) + "}";
 }
 
 } // namespace
@@ -298,6 +300,51 @@ std::vector<Match> search(const std::wstring& text, size_t limit)
     if (matches.size() > limit)
         matches.resize(limit);
     return matches;
+}
+
+std::vector<Match> topSites(size_t count, const std::vector<std::wstring>& hidden)
+{
+    load();
+    long long now = nowMilliseconds();
+    // Group pages by site; a site's score is the sum of its pages'.
+    struct Site {
+        double score { 0 };
+        Match best;
+        double bestScore { -1 };
+    };
+    std::unordered_map<std::wstring, Site> sites;
+    for (auto& [url, page] : g_pages) {
+        if (url.rfind(L"http", 0) != 0)
+            continue;
+        std::wstring bare = bareAddress(url);
+        std::wstring host = bare.substr(0, bare.find_first_of(L"/?#"));
+        bool isHidden = false;
+        for (auto& item : hidden)
+            isHidden = isHidden || item == host;
+        if (host.empty() || isHidden)
+            continue;
+        double ageDays = static_cast<double>(now - page.lastVisit) / 86400000.0;
+        double score = page.visits * std::pow(0.5, ageDays / 30.0);
+        auto& site = sites[host];
+        site.score += score;
+        size_t slash = bare.find(L'/');
+        double pageScore = score * (slash == std::wstring::npos || slash + 1 >= bare.size() ? 3 : 1);
+        if (pageScore > site.bestScore) {
+            site.bestScore = pageScore;
+            site.best = { url, page.title, 0 };
+        }
+    }
+    std::vector<Match> result;
+    for (auto& [host, site] : sites) {
+        Match match = site.best;
+        match.score = site.score;
+        // A deep page as the site's best: open the site's front page instead.
+        result.push_back(match);
+    }
+    std::sort(result.begin(), result.end(), [](const Match& a, const Match& b) { return a.score > b.score; });
+    if (result.size() > count)
+        result.resize(count);
+    return result;
 }
 
 void clear()

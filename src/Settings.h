@@ -46,6 +46,25 @@ bool showBookmarksBar();
 // "location" and "notifications".
 std::wstring permissionDefault(const std::wstring& permission);
 
+// Tabs across the top ("horizontal") or down the left side ("vertical").
+bool verticalTabs();
+// Vertical tabs narrowed to their icons.
+bool verticalTabsCollapsed();
+// How tab groups look with tabs on top: "chrome" (one row) or "vivaldi"
+// (groups on top, the selected group's tabs below).
+std::wstring groupStyle();
+// Color palette for Prism's interface: "default", "midnight", "nord",
+// "forest", "rose" or "sepia".
+std::wstring palette();
+bool showHomeButton();
+// Extensions whose buttons are hidden from the toolbar (still in the
+// Extensions menu).
+bool isActionHidden(const std::string& extensionId);
+void setActionHidden(const std::string& extensionId, bool hidden);
+std::string hiddenActionsJSON();
+// New tab page: "top" (most visited), "bookmarks" (the bookmarks bar) or "off".
+std::wstring newTabShortcuts();
+
 // All settings as a JSON object (UTF-8), for the settings page.
 std::string toJSON();
 

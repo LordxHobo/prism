@@ -81,6 +81,17 @@ function render(settings) {
   $('saveHistory').checked = !!settings.saveHistory;
   $('bookmarksBar').checked = !!settings.bookmarksBar;
   renderSegmented('locationDefault', settings.locationDefault);
+  renderSegmented('palette', settings.palette);
+  renderSegmented('tabLayout', settings.tabLayout);
+  renderSegmented('groupStyle', settings.groupStyle);
+  renderSegmented('newTabShortcuts', settings.newTabShortcuts);
+  $('homeButton').checked = !!settings.homeButton;
+  document.documentElement.dataset.palette = settings.palette || 'default';
+  $('groupStyleHelp').textContent = settings.tabLayout === 'vertical'
+    ? 'With tabs on the left side, groups are shown as folders in the list.'
+    : settings.groupStyle === 'vivaldi'
+      ? 'Two rows: your groups on top, the selected group\'s tabs below.'
+      : 'One row: each group is a colored label followed by its tabs.';
   renderSegmented('notificationsDefault', settings.notificationsDefault);
 }
 
@@ -130,7 +141,8 @@ for (const [color, name] of ACCENTS) {
   $('accent').appendChild(button);
 }
 
-for (const id of ['startup', 'theme', 'accent', 'tabStyle', 'cookiePolicy', 'locationDefault', 'notificationsDefault']) {
+for (const id of ['startup', 'theme', 'accent', 'tabStyle', 'cookiePolicy', 'locationDefault', 'notificationsDefault',
+  'palette', 'tabLayout', 'groupStyle', 'newTabShortcuts']) {
   $(id).addEventListener('click', (event) => {
     const button = event.target.closest('button');
     if (button) setSetting(id, button.dataset.value);
@@ -165,6 +177,86 @@ $('changeDownloads').addEventListener('click', () => {
   if (updated && !updated.error) render(updated);
 });
 $('openDownloads').addEventListener('click', () => ask('openDownloads'));
+
+$('homeButton').addEventListener('change', () => {
+  setSetting('homeButton', $('homeButton').checked ? '1' : '0');
+});
+
+// ---- New tab background ----------------------------------------------------------
+
+function renderBackground() {
+  const set = ask('newTabBackground') === 'set';
+  $('backgroundStatus').textContent = set ? 'A picture of yours (a copy is kept in Prism\'s folder).' : 'None.';
+  $('clearBackground').hidden = !set;
+}
+$('pickBackground').addEventListener('click', () => {
+  ask('pickNewTabBackground');
+  renderBackground();
+});
+$('clearBackground').addEventListener('click', () => {
+  ask('clearNewTabBackground');
+  renderBackground();
+});
+
+// ---- Custom CSS --------------------------------------------------------------------
+
+function flash(id, text) {
+  $(id).textContent = text;
+  setTimeout(() => { $(id).textContent = ''; }, 4000);
+}
+
+function addSiteRuleEditor(rule) {
+  const box = document.createElement('div');
+  box.className = 'site-rule';
+  const head = document.createElement('div');
+  head.className = 'head';
+  const sites = document.createElement('textarea');
+  sites.className = 'sites';
+  sites.rows = 1;
+  sites.spellcheck = false;
+  sites.placeholder = 'example.com';
+  sites.value = rule.sites || '';
+  sites.setAttribute('aria-label', 'Sites');
+  const enabled = document.createElement('label');
+  enabled.className = 'switch';
+  enabled.title = 'On or off';
+  enabled.innerHTML = '<input type="checkbox"><span></span>';
+  enabled.querySelector('input').checked = rule.enabled !== false;
+  const remove = document.createElement('button');
+  remove.className = 'button secondary remove';
+  remove.textContent = 'Remove';
+  remove.addEventListener('click', () => box.remove());
+  head.append(sites, enabled, remove);
+  const css = document.createElement('textarea');
+  css.className = 'css';
+  css.rows = 5;
+  css.spellcheck = false;
+  css.placeholder = 'body { font-size: 18px !important; }';
+  css.value = rule.css || '';
+  css.setAttribute('aria-label', 'CSS');
+  box.append(head, css);
+  $('siteRules').appendChild(box);
+}
+
+function renderUserCSS() {
+  const data = ask('usercss.get') || { interface: '', sites: [] };
+  $('interfaceCSS').value = data.interface || '';
+  $('siteRules').textContent = '';
+  for (const rule of data.sites || []) addSiteRuleEditor(rule);
+}
+
+$('interfaceCSSSave').addEventListener('click', () => {
+  flash('interfaceCSSStatus', ask('usercss.setInterface', $('interfaceCSS').value) ? 'Saved.' : 'Couldn\'t save (too long?).');
+});
+$('addSiteRule').addEventListener('click', () => addSiteRuleEditor({ sites: '', css: '', enabled: true }));
+$('siteRulesSave').addEventListener('click', () => {
+  const rules = [...document.querySelectorAll('.site-rule')].map((box) => ({
+    sites: box.querySelector('.sites').value,
+    css: box.querySelector('.css').value,
+    enabled: box.querySelector('.switch input').checked,
+  })).filter((rule) => rule.sites.trim() || rule.css.trim());
+  flash('siteRulesStatus', ask('usercss.setSites', JSON.stringify(rules)) ? 'Saved. Reload open pages to see the change.' : 'Couldn\'t save.');
+});
 
 $('saveHistory').addEventListener('change', () => {
   setSetting('saveHistory', $('saveHistory').checked ? '1' : '0');
@@ -337,6 +429,8 @@ if (initial) {
 }
 renderShields(ask('shields.get'));
 renderPermissions();
+renderUserCSS();
+renderBackground();
 
 // Prism calls this when a setting changes elsewhere (Ctrl+Shift+B, the menu).
 window.prismSettingsChanged = () => {

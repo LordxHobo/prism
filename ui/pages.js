@@ -17,5 +17,6 @@ window.prismApplyAccent = function (color) {
   const params = new URLSearchParams(location.search);
   const theme = params.get('theme');
   document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.palette = params.get('palette') || 'default';
   window.prismApplyAccent(params.get('accent'));
 })();

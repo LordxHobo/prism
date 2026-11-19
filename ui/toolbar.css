@@ -198,9 +198,9 @@ button {
   align-items: center;
   gap: 8px;
   height: var(--tab-height);
-  width: 220px;
-  min-width: 48px;
-  flex: 0 1 220px;
+  width: 220px; /* toolbar.js sets the real width */
+  min-width: 0;
+  flex: none;
   padding: 0 6px 0 10px;
   border-radius: 9px 9px 0 0;
   color: var(--text-dim);
@@ -616,4 +616,412 @@ button {
   color: var(--text-dim);
   font-size: 12px;
   padding-left: 8px;
+}
+
+/* ---- Site icons --------------------------------------------------------------- */
+
+.tab .badge.has-icon {
+  background: none;
+}
+
+.badge img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  display: block;
+}
+
+.tab.loading .badge img {
+  display: none;
+}
+
+.tab.tiny {
+  padding: 0;
+  justify-content: center;
+}
+
+.tab.tiny .close {
+  display: none;
+}
+
+/* ---- Tab groups (Chrome style) ---------------------------------------------------- */
+
+.group-chip {
+  flex: none;
+  align-self: center;
+  height: 22px;
+  min-width: 14px;
+  max-width: 160px;
+  margin: 0 2px 2px;
+  padding: 0 9px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--group-color);
+  color: #16161a;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.group-chip.unnamed {
+  padding: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}
+
+.group-chip.unnamed.collapsed {
+  width: auto;
+  height: 22px;
+  border-radius: 7px;
+  padding: 0 8px;
+}
+
+.group-chip .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.group-chip .count,
+.tab.stack .count,
+.group-header .count {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.tab.grouped::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--group-color);
+}
+
+/* ---- Vivaldi style: groups on top, the selected group's tabs below ------------------ */
+
+#subtabs {
+  display: none;
+}
+
+:root.vivaldi #subtabs {
+  height: var(--subtabs-height);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  background: var(--tab-active);
+  overflow: hidden;
+}
+
+:root {
+  --subtabs-height: 32px; /* must match kSubTabsCSSHeight in BrowserWindow.cpp */
+}
+
+:root.compact {
+  --subtabs-height: 28px;
+}
+
+:root.vivaldi #subtabs .tab {
+  height: calc(var(--subtabs-height) - 6px);
+  border-radius: 7px;
+  background: none;
+}
+
+:root.vivaldi #subtabs .tab:hover {
+  background: var(--tab-hover);
+}
+
+:root.vivaldi #subtabs .tab.active {
+  background: var(--frame);
+}
+
+:root.vivaldi #subtabs .tab.grouped::after {
+  display: none;
+}
+
+.group-chip.static {
+  cursor: default;
+}
+
+.tab.stack {
+  border-top: 2px solid var(--group-color);
+}
+
+.tab.stack .count {
+  background: var(--button-active);
+}
+
+/* ---- Vertical tabs ------------------------------------------------------------------- */
+/* The toolbar loses its tab strip; the sidebar view shows the tabs instead. */
+
+:root.vertical:not(.sidebar-view) #tabstrip,
+:root.vertical:not(.sidebar-view) #subtabs {
+  display: none;
+}
+
+#sidebarHeader {
+  display: none;
+}
+
+:root.sidebar-view body {
+  height: 100%;
+  background: var(--tab-active);
+}
+
+:root.sidebar-view #navbar,
+:root.sidebar-view .row,
+:root.sidebar-view #subtabs,
+:root.sidebar-view #newtab {
+  display: none !important;
+}
+
+:root.sidebar-view #tabstrip {
+  height: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 6px;
+  gap: 4px;
+  border-right: 1px solid var(--frame);
+}
+
+:root.sidebar-view #sidebarHeader {
+  display: flex;
+  justify-content: space-between;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--frame);
+}
+
+:root.sidebar-view #tabs {
+  flex: 1;
+  flex-direction: column;
+  align-items: stretch;
+  overflow-y: auto;
+  gap: 2px;
+}
+
+:root.sidebar-view .tab {
+  width: auto;
+  flex: none;
+  height: 32px;
+  border-radius: 8px;
+}
+
+:root.sidebar-view .tab.active {
+  background: var(--frame);
+}
+
+:root.sidebar-view .tab.grouped {
+  margin-left: 10px;
+}
+
+:root.sidebar-view .tab.grouped::after {
+  left: -6px;
+  right: auto;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  height: auto;
+}
+
+.group-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  margin-top: 4px;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.group-header:hover {
+  background: var(--tab-hover);
+}
+
+.group-header .caret {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: var(--group-color);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.12s;
+}
+
+.group-header.collapsed .caret {
+  transform: rotate(-90deg);
+}
+
+.group-header .label {
+  flex: 1;
+  min-width: 0;
+  color: var(--group-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Narrowed sidebar: icons only. */
+:root.sidebar-view.sidebar-collapsed #sidebarHeader {
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+:root.sidebar-view.sidebar-collapsed .tab {
+  justify-content: center;
+  padding: 0;
+}
+
+:root.sidebar-view.sidebar-collapsed .tab .title,
+:root.sidebar-view.sidebar-collapsed .tab .close,
+:root.sidebar-view.sidebar-collapsed .group-header .label,
+:root.sidebar-view.sidebar-collapsed .group-header .count {
+  display: none;
+}
+
+:root.sidebar-view.sidebar-collapsed .tab.grouped {
+  margin-left: 0;
+}
+
+:root.sidebar-view.sidebar-collapsed .group-header {
+  justify-content: center;
+  padding: 0;
+}
+
+/* ---- Dragging tabs --------------------------------------------------------------- */
+
+:root.dragging-tab,
+:root.dragging-tab * {
+  cursor: grabbing !important;
+}
+
+.drop-before {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.drop-after {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+
+:root.sidebar-view .drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+:root.sidebar-view .drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.drop-into {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- Color palettes (Settings › Appearance) --------------------------------- */
+:root[data-palette="midnight"][data-theme="dark"] {
+  --frame: #0d1117;
+  --tab-hover: #161b22;
+  --tab-active: #1b2230;
+  --text: #e6edf3;
+  --text-dim: #8b949e;
+  --field: #0d1117;
+  --field-border: #30363d;
+}
+:root[data-palette="midnight"][data-theme="light"] {
+  --frame: #dfe6f0;
+  --tab-hover: #eaf0f7;
+  --tab-active: #f6f9fc;
+  --text: #0d1b2a;
+  --text-dim: #4a5a70;
+  --field: #ffffff;
+  --field-border: #c3cedc;
+}
+:root[data-palette="nord"][data-theme="dark"] {
+  --frame: #2e3440;
+  --tab-hover: #353c4a;
+  --tab-active: #3b4252;
+  --text: #eceff4;
+  --text-dim: #a3abb9;
+  --field: #2e3440;
+  --field-border: #4c566a;
+}
+:root[data-palette="nord"][data-theme="light"] {
+  --frame: #d8dee9;
+  --tab-hover: #e5e9f0;
+  --tab-active: #eceff4;
+  --text: #2e3440;
+  --text-dim: #4c566a;
+  --field: #ffffff;
+  --field-border: #b8c1d1;
+}
+:root[data-palette="forest"][data-theme="dark"] {
+  --frame: #161d17;
+  --tab-hover: #1d261e;
+  --tab-active: #233025;
+  --text: #e5efe3;
+  --text-dim: #94a892;
+  --field: #121813;
+  --field-border: #34453a;
+}
+:root[data-palette="forest"][data-theme="light"] {
+  --frame: #dfe8dc;
+  --tab-hover: #e9f0e6;
+  --tab-active: #f4f8f2;
+  --text: #1c2a1d;
+  --text-dim: #4f6450;
+  --field: #ffffff;
+  --field-border: #c2d1c0;
+}
+:root[data-palette="rose"][data-theme="dark"] {
+  --frame: #1f171b;
+  --tab-hover: #281e23;
+  --tab-active: #30242a;
+  --text: #f3e7ec;
+  --text-dim: #b39aa6;
+  --field: #1a1317;
+  --field-border: #4a3640;
+}
+:root[data-palette="rose"][data-theme="light"] {
+  --frame: #f0e1e6;
+  --tab-hover: #f6eaee;
+  --tab-active: #fdf6f8;
+  --text: #2d1a22;
+  --text-dim: #6e5260;
+  --field: #ffffff;
+  --field-border: #dcc3cd;
+}
+:root[data-palette="sepia"][data-theme="dark"] {
+  --frame: #1e1a14;
+  --tab-hover: #27221a;
+  --tab-active: #2f2920;
+  --text: #f0e6d6;
+  --text-dim: #b0a28a;
+  --field: #191510;
+  --field-border: #4a4030;
+}
+:root[data-palette="sepia"][data-theme="light"] {
+  --frame: #eae0cc;
+  --tab-hover: #f1e9d8;
+  --tab-active: #f8f2e6;
+  --text: #2e2618;
+  --text-dim: #6b5d45;
+  --field: #fffaf0;
+  --field-border: #d6c8aa;
 }

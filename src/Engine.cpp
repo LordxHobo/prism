@@ -319,7 +319,7 @@ bool darkTheme()
 std::wstring internalPageURL(const std::wstring& name, const std::wstring& query)
 {
     std::wstring url = s_uiDirectoryURL + name + L".html?theme=" + (s_darkTheme ? L"dark" : L"light")
-        + L"&accent=" + util::urlEncode(settings::accent());
+        + L"&accent=" + util::urlEncode(settings::accent()) + L"&palette=" + settings::palette();
     if (!query.empty())
         url += L"&" + query;
     return url;

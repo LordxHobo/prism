@@ -7,9 +7,10 @@ A private, independent web browser for Windows, built on **WebKit** (the engine 
 - **Prism Shields, a built-in ad and tracker blocker.** Brave's blocking engine with uBlock Origin's filter lists: ad and tracker domains, leftover ad boxes, and site-specific fixes (like YouTube's video ads). On everywhere, switchable per site.
 - **Extensions from both stores**, with toolbar buttons, popups, background tasks and options pages. Install from the Chrome Web Store or Firefox Add-ons; the Extensions page shows what each one can and can't do in Prism yet.
 - **The basics:** bookmarks (with a bookmarks bar, folders, and import from Chrome, Edge, Brave, Vivaldi, Opera or an HTML file), history with address-bar suggestions, find in page, and location and notification prompts.
-- **Customizable.** The whole interface is HTML and CSS (see [`ui/`](ui)), so themes and layouts are easy to change.
+- **Tabs your way:** tab groups in one row (like Chrome) or two rows (like Vivaldi), vertical tabs, drag to reorder, site icons.
+- **Customizable:** color palettes, your own CSS for Prism's interface and for websites, a new tab page with shortcuts and your own background. The whole interface is HTML and CSS (see [`ui/`](ui)).
 
-> **Status: early development (v0.6).** Expect rough edges. Copy-protected (DRM) video such as Netflix or Disney+ can't play in any WebKit browser on Windows.
+> **Status: early development (v0.7).** Expect rough edges. Copy-protected (DRM) video such as Netflix or Disney+ can't play in any WebKit browser on Windows.
 
 ## Download
 
@@ -45,7 +46,7 @@ dist\Prism.exe
 - [x] Prism Shields, part 1: built-in ad and tracker blocker (v0.4)
 - [x] Extensions, part 2: popups, background tasks, options pages, messaging (v0.5)
 - [x] Bookmarks, history, find in page, permission prompts (v0.6; printing moves to v0.9)
-- [ ] Customization, tab groups and vertical tabs (v0.7)
+- [x] Customization, tab groups and vertical tabs (v0.7)
 - [ ] Privacy: fingerprinting protection, HTTPS-only, per-site settings, tracking-parameter removal (v0.8)
 - [ ] Prism's own WebKit build: printing, full network filtering, extensions part 3 (v0.9)
 - [ ] Polish (v0.10), then 1.0 and Linux

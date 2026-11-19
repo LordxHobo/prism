@@ -331,3 +331,26 @@ input[type="url"]:focus {
 code { font: 12px ui-monospace, Consolas, monospace; background: var(--bg); padding: 1px 4px; border-radius: 4px; }
 .small { font-size: 12px; }
 .lists input, footer input { accent-color: var(--accent); }
+
+/* v0.7: palette buttons wrap, tips, custom CSS editors */
+.segmented.wrap { flex-wrap: wrap; justify-content: flex-end; max-width: 380px; }
+ul.tips { margin: 8px 0 0; padding-left: 20px; color: var(--text-dim); }
+ul.tips li { margin: 6px 0; }
+#interfaceCSS, .site-rule textarea {
+  width: 100%;
+  font: 13px/1.45 "Cascadia Mono", Consolas, monospace;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  resize: vertical;
+  outline: none;
+}
+#interfaceCSS:focus, .site-rule textarea:focus, .site-rule input[type="text"]:focus { border-color: var(--accent); }
+.site-rule { border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-top: 12px; }
+.site-rule .head { display: flex; gap: 10px; align-items: center; }
+.site-rule .head textarea { margin-top: 0; font-family: inherit; flex: 1; min-height: 38px; }
+.site-rule .head .remove { flex: none; }
+.site-rule .sites { rows: 1; }

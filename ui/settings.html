@@ -16,6 +16,9 @@
     <div class="brand"><img src="prism.svg" alt=""> Settings</div>
     <a href="#general" class="current">General</a>
     <a href="#appearance">Appearance</a>
+    <a href="#tabs">Tabs</a>
+    <a href="#newtabpage">New tab page</a>
+    <a href="#customcss">Custom CSS</a>
     <a href="#privacy">Privacy</a>
     <a href="#permissions">Site permissions</a>
     <a href="#shields">Shields</a>
@@ -82,6 +85,21 @@
 
       <div class="row">
         <div class="label">
+          <span class="title">Colors</span>
+          <p class="dim">The colors of Prism's tab strip, toolbar and pages, in dark and light.</p>
+        </div>
+        <div class="control segmented wrap" id="palette" role="radiogroup">
+          <button data-value="default" role="radio">Prism</button>
+          <button data-value="midnight" role="radio">Midnight</button>
+          <button data-value="nord" role="radio">Nord</button>
+          <button data-value="forest" role="radio">Forest</button>
+          <button data-value="rose" role="radio">Rosé</button>
+          <button data-value="sepia" role="radio">Sepia</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="label">
           <span class="title">Accent color</span>
           <p class="dim">Used for the loading bar, focus rings and buttons.</p>
         </div>
@@ -108,6 +126,103 @@
         </div>
         <div class="control">
           <label class="switch"><input type="checkbox" id="bookmarksBar"><span></span></label>
+        </div>
+      </div>
+    </section>
+
+    <section id="tabs">
+      <h1>Tabs</h1>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Tab position</span>
+          <p class="dim">Vertical puts your tabs in a list on the left. The button at its top narrows it to icons.</p>
+        </div>
+        <div class="control segmented" id="tabLayout" role="radiogroup">
+          <button data-value="horizontal" role="radio">Top</button>
+          <button data-value="vertical" role="radio">Left side</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Tab groups</span>
+          <p class="dim" id="groupStyleHelp"></p>
+        </div>
+        <div class="control segmented" id="groupStyle" role="radiogroup">
+          <button data-value="chrome" role="radio">One row</button>
+          <button data-value="vivaldi" role="radio">Two rows</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Using tab groups</h2>
+        <ul class="tips">
+          <li>Right-click a tab and choose <b>Add tab to new group</b>. Right-click the group to name it, pick a color, collapse it or close it.</li>
+          <li>Drag tabs to reorder them. Drop a tab next to a grouped tab (or on a group) to add it to that group.</li>
+          <li>With two rows, <kbd>Ctrl</kbd> <kbd>1</kbd>–<kbd>9</kbd> picks a group as shown (the selected one is always first); pressing it again goes through that group's tabs. Drag a group to give it a new place.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="newtabpage">
+      <h1>New tab page</h1>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Shortcuts</span>
+          <p class="dim">Sites to open with one click. Most visited comes from your history, on this PC only.</p>
+        </div>
+        <div class="control segmented" id="newTabShortcuts" role="radiogroup">
+          <button data-value="top" role="radio">Most visited</button>
+          <button data-value="bookmarks" role="radio">Bookmarks bar</button>
+          <button data-value="off" role="radio">None</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Background picture</span>
+          <p class="dim" id="backgroundStatus">None.</p>
+        </div>
+        <div class="control">
+          <button class="button secondary" id="pickBackground">Choose…</button>
+          <button class="button secondary" id="clearBackground" hidden>Remove</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <label for="homeButton" class="title">Show Home button</label>
+          <p class="dim">A button next to Reload that opens the new tab page.</p>
+        </div>
+        <div class="control">
+          <label class="switch"><input type="checkbox" id="homeButton"><span></span></label>
+        </div>
+      </div>
+    </section>
+
+    <section id="customcss">
+      <h1>Custom CSS</h1>
+
+      <div class="card">
+        <h2>Prism's interface</h2>
+        <p class="dim">Styles for the tab strip, toolbar and vertical tabs, applied straight away. For example <code>:root { --accent: #ff7a59; } .tab .title { font-weight: 600; }</code></p>
+        <textarea id="interfaceCSS" spellcheck="false" rows="7" placeholder="/* Your CSS for Prism's interface */"></textarea>
+        <div class="buttons">
+          <button class="button" id="interfaceCSSSave">Save</button>
+          <span class="dim" id="interfaceCSSStatus" role="status"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Websites</h2>
+        <p class="dim">Each style applies to the sites you list (one per line; <code>example.com</code> includes its subdomains, <code>*</code> means every site). Changes apply to pages you open or reload afterwards.</p>
+        <div id="siteRules"></div>
+        <div class="buttons">
+          <button class="button secondary" id="addSiteRule">Add a style</button>
+          <button class="button" id="siteRulesSave">Save</button>
+          <span class="dim" id="siteRulesStatus" role="status"></span>
         </div>
       </div>
     </section>

@@ -9,10 +9,12 @@
 #include "Engine.h"
 #include "Extensions.h"
 #include "History.h"
+#include "Icons.h"
 #include "Permissions.h"
 #include "Settings.h"
 #include "Shields.h"
 #include "Tabs.h"
+#include "UserCSS.h"
 #include "Util.h"
 #include "Version.h"
 
@@ -56,6 +58,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         BrowserWindow::refreshToolbars();
         BrowserWindow::evaluateInInternalPages(L"bookmarks", "window.prismBookmarksChanged && prismBookmarksChanged();");
     });
+    icons::setChangeListener([] { BrowserWindow::refreshToolbars(); });
+    // Your own CSS for Prism's interface and for websites.
+    usercss::initialize([] { BrowserWindow::applyInterfaceCSS(); });
     permissions::initialize(engine::context(), [](WKPageRef page) {
         // A notification was clicked: show the tab it came from.
         tabs::Info info;

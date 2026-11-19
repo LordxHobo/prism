@@ -10,10 +10,12 @@
 #include "Engine.h"
 #include "Extensions.h"
 #include "History.h"
+#include "Icons.h"
 #include "Permissions.h"
 #include "Shields.h"
 #include "ShieldsPanel.h"
 #include "Suggestions.h"
+#include "UserCSS.h"
 #include "Json.h"
 #include "Tabs.h"
 #include "Settings.h"
@@ -44,6 +46,20 @@ constexpr int kCompactToolbarCSSHeight = 66;
 constexpr int kBookmarksBarCSSHeight = 30;
 constexpr int kInfobarCSSHeight = 40;
 constexpr int kFindbarCSSHeight = 38;
+// The tab strip's part of the toolbar, and the second row of the
+// Vivaldi-style strip (the selected group's tabs).
+constexpr int kTabStripCSSHeight = 36;
+constexpr int kCompactTabStripCSSHeight = 30;
+constexpr int kSubTabsCSSHeight = 32;
+constexpr int kCompactSubTabsCSSHeight = 28;
+// Vertical tabs: the sidebar's width, open and narrowed to icons.
+constexpr int kSidebarCSSWidth = 240;
+constexpr int kCollapsedSidebarCSSWidth = 48;
+// Chrome's tab group colors.
+const wchar_t* const kGroupColors[] = { L"#8ab4f8", L"#f28b82", L"#fdd663", L"#81c995", L"#ff8bcb", L"#c58af9", L"#78d9ec", L"#fcad70", L"#9aa0a6" };
+const wchar_t* const kGroupColorNames[] = { L"Blue", L"Red", L"Yellow", L"Green", L"Pink", L"Purple", L"Cyan", L"Orange", L"Grey" };
+unsigned long long s_activationCounter = 0;
+int s_nextGroupId = 0;
 bool s_sessionDirty = false;
 
 std::vector<BrowserWindow*> s_windows;
@@ -171,9 +187,17 @@ bool BrowserWindow::registerWindowClass(HINSTANCE instance)
 
 BrowserWindow* BrowserWindow::open(const std::vector<std::wstring>& startURLs, int activeIndex)
 {
+    return open(startURLs, activeIndex, { }, { });
+}
+
+BrowserWindow* BrowserWindow::open(const std::vector<std::wstring>& startURLs, int activeIndex,
+    const std::vector<TabGroup>& groups, const std::vector<int>& tabGroups)
+{
     auto* window = new BrowserWindow();
     window->m_pendingStartURLs = startURLs;
     window->m_pendingActiveIndex = activeIndex;
+    window->m_pendingGroups = groups;
+    window->m_pendingTabGroups = tabGroups;
     if (window->m_pendingStartURLs.empty())
         window->m_pendingStartURLs.push_back(L"prism://newtab");
 
@@ -242,12 +266,27 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         auto urls = std::move(m_pendingStartURLs);
         int active = m_pendingActiveIndex >= 0 && m_pendingActiveIndex < static_cast<int>(urls.size())
             ? m_pendingActiveIndex : static_cast<int>(urls.size()) - 1;
+        // Saved tab groups get new ids in this window.
+        std::vector<int> groupIds;
+        for (auto& group : m_pendingGroups) {
+            TabGroup copy = group;
+            copy.id = ++s_nextGroupId;
+            m_groups.push_back(copy);
+            groupIds.push_back(copy.id);
+        }
         Tab* selected = nullptr;
         for (size_t i = 0; i < urls.size(); ++i) {
             Tab* tab = newTab(urls[i], false);
+            if (i < m_pendingTabGroups.size() && m_pendingTabGroups[i] > 0 && m_pendingTabGroups[i] <= static_cast<int>(groupIds.size()))
+                tab->groupId = groupIds[static_cast<size_t>(m_pendingTabGroups[i] - 1)];
             if (static_cast<int>(i) == active)
                 selected = tab;
         }
+        m_pendingGroups.clear();
+        m_pendingTabGroups.clear();
+        normalizeGroups();
+        if (settings::verticalTabs())
+            createSidebar();
         if (selected)
             selectTab(selected->id);
         return 0;
@@ -372,6 +411,8 @@ void BrowserWindow::onDestroy()
     for (auto& tab : m_tabs)
         denyPrompts(tab.get());
     detachClients(m_toolbarPage);
+    detachClients(m_sidebarPage);
+    m_sidebarReady = false;
     for (auto& tab : m_tabs)
         detachClients(tab->page);
     m_toolbarReady = false;
@@ -411,6 +452,11 @@ int BrowserWindow::toolbarHeight() const
 int BrowserWindow::toolbarCSSHeight() const
 {
     int height = settings::compactTabs() ? kCompactToolbarCSSHeight : kToolbarCSSHeight;
+    // Vertical tabs: no tab strip on top. Vivaldi-style groups: a second row.
+    if (settings::verticalTabs())
+        height -= settings::compactTabs() ? kCompactTabStripCSSHeight : kTabStripCSSHeight;
+    else if (settings::groupStyle() == L"vivaldi")
+        height += settings::compactTabs() ? kCompactSubTabsCSSHeight : kSubTabsCSSHeight;
     if (settings::showBookmarksBar())
         height += kBookmarksBarCSSHeight;
     if (Tab* tab = activeTab()) {
@@ -429,6 +475,8 @@ void BrowserWindow::applyScaleFactor()
         return;
     if (m_toolbarPage)
         WKPageSetCustomBackingScaleFactor(m_toolbarPage, scale);
+    if (m_sidebarPage)
+        WKPageSetCustomBackingScaleFactor(m_sidebarPage, scale);
     for (auto& tab : m_tabs)
         WKPageSetCustomBackingScaleFactor(tab->page, scale);
 }
@@ -458,10 +506,14 @@ void BrowserWindow::layout()
     int height = client.bottom - client.top;
     int toolbar = std::min(toolbarHeight(), height);
 
+    int side = std::min(sidebarWidth(), width / 2);
+
     if (m_toolbarHwnd)
         MoveWindow(m_toolbarHwnd, 0, 0, width, toolbar, TRUE);
+    if (m_sidebarHwnd)
+        MoveWindow(m_sidebarHwnd, 0, toolbar, side, std::max(0, height - toolbar), TRUE);
     if (auto* tab = activeTab())
-        MoveWindow(tab->hwnd, 0, toolbar, width, std::max(0, height - toolbar), TRUE);
+        MoveWindow(tab->hwnd, side, toolbar, std::max(0, width - side), std::max(0, height - toolbar), TRUE);
 }
 
 // ---------------------------------------------------------------------------
@@ -491,6 +543,58 @@ void BrowserWindow::createToolbar()
     engine::loadInternalPage(m_toolbarPage, L"toolbar");
     layout();
     SetTimer(m_hwnd, kStatsTimer, 2000, nullptr);
+}
+
+// Vertical tabs: a second view of the toolbar page down the left side
+// (toolbar.html?layout=sidebar), getting the same state and sending the same
+// commands as the toolbar.
+void BrowserWindow::createSidebar()
+{
+    if (m_sidebarHwnd)
+        return;
+    RECT rect = { };
+    m_sidebarView = Ref<WKViewRef>::adopt(WKViewCreate(rect, engine::pageConfiguration(), m_hwnd));
+    WKViewSetIsInWindow(m_sidebarView.get(), true);
+    m_sidebarHwnd = WKViewGetWindow(m_sidebarView.get());
+    m_sidebarPage = WKViewGetPage(m_sidebarView.get());
+    engine::configurePage(m_sidebarPage, scaleFactor());
+
+    WKPageUIClientV6 uiClient = { };
+    uiClient.base.version = 6;
+    uiClient.base.clientInfo = this;
+    uiClient.runJavaScriptPrompt = toolbarPrompt;
+    WKPageSetPageUIClient(m_sidebarPage, &uiClient.base);
+
+    WKPageNavigationClientV3 navigationClient = { };
+    navigationClient.base.version = 3;
+    navigationClient.base.clientInfo = this;
+    navigationClient.decidePolicyForNavigationAction = toolbarDecidePolicyForNavigationAction;
+    WKPageSetPageNavigationClient(m_sidebarPage, &navigationClient.base);
+
+    engine::loadInternalPage(m_sidebarPage, L"toolbar", L"layout=sidebar");
+    layout();
+}
+
+void BrowserWindow::destroySidebar()
+{
+    if (!m_sidebarHwnd)
+        return;
+    detachClients(m_sidebarPage);
+    m_sidebarReady = false;
+    HWND hwnd = m_sidebarHwnd;
+    m_sidebarHwnd = nullptr;
+    m_sidebarPage = nullptr;
+    m_sidebarView.reset();
+    DestroyWindow(hwnd);
+    layout();
+}
+
+int BrowserWindow::sidebarWidth() const
+{
+    if (!m_sidebarHwnd)
+        return 0;
+    int css = settings::verticalTabsCollapsed() ? kCollapsedSidebarCSSWidth : kSidebarCSSWidth;
+    return static_cast<int>(std::lround(css * scaleFactor()));
 }
 
 void BrowserWindow::toolbarDecidePolicyForNavigationAction(WKPageRef, WKNavigationActionRef action, WKFramePolicyListenerRef listener, WKTypeRef, const void*)
@@ -534,8 +638,12 @@ void BrowserWindow::toolbarPrompt(WKPageRef, WKStringRef message, WKStringRef, W
 void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std::wstring& argument)
 {
     Tab* tab = activeTab();
-    if (command == L"ready") {
-        m_toolbarReady = true;
+    if (command == L"ready" || command == L"sidebarReady") {
+        if (command == L"ready")
+            m_toolbarReady = true;
+        else
+            m_sidebarReady = true;
+        runToolbarScript("window.prism && prism.setUserCSS(" + json::quote(usercss::interfaceCSS()) + ");");
         pushState();
         if (GetForegroundWindow() == m_hwnd)
             focusContent();
@@ -568,6 +676,46 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
         openInternalPage(L"settings");
     } else if (command == L"extensions") {
         openInternalPage(L"extensions");
+    } else if (command == L"extensionsMenu") {
+        showExtensionsMenu(toolbarPoint(argument));
+    } else if (command == L"home") {
+        if (tab) {
+            navigate(tab, L"prism://newtab");
+            focusContent();
+        }
+    } else if (command == L"moveTab") {
+        // "<tab id>\n<index>\n<group id>" (index in the whole tab list)
+        int id = 0, index = 0, group = 0;
+        swscanf_s(argument.c_str(), L"%d\n%d\n%d", &id, &index, &group);
+        moveTabTo(id, index, group);
+    } else if (command == L"moveUnit") {
+        // "<unit>\n<index among units>"
+        int unit = 0, index = 0;
+        swscanf_s(argument.c_str(), L"%d\n%d", &unit, &index);
+        moveUnit(unit, index);
+    } else if (command == L"selectUnit") {
+        selectUnit(_wtoi(argument.c_str()), false);
+    } else if (command == L"tabMenu" || command == L"groupMenu") {
+        size_t newline = argument.find(L'\n');
+        int id = _wtoi(argument.substr(0, newline).c_str());
+        POINT point = toolbarPoint(newline == std::wstring::npos ? L"" : argument.substr(newline + 1));
+        if (command == L"tabMenu")
+            showTabMenu(id, point);
+        else
+            showGroupMenu(id, point);
+    } else if (command == L"groupToggle") {
+        if (TabGroup* group = findGroup(_wtoi(argument.c_str())))
+            setGroupCollapsed(group->id, !group->collapsed);
+    } else if (command == L"newTabInGroup") {
+        int groupId = _wtoi(argument.c_str());
+        if (findGroup(groupId)) {
+            Tab* fresh = newTab(L"prism://newtab", true);
+            addTabToGroup(fresh, groupId);
+        }
+    } else if (command == L"sidebarToggle") {
+        settings::set(L"verticalTabsCollapsed", settings::verticalTabsCollapsed() ? L"0" : L"1");
+        layout();
+        pushState();
     } else if (command == L"addExtension") {
         // "Add to Prism" on a store page: open the Extensions page, which
         // picks the link up and starts the install.
@@ -612,7 +760,7 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
         if (command == L"extensionAction")
             extensions::actionClicked(m_hwnd, tab ? tab->id : -1, id, x, y);
         else
-            extensions::showActionMenu(m_hwnd, id, x, y);
+            showHiddenActionMenu(id, x, y);
     } else if (command == L"focusContent") {
         focusContent();
     } else if (command == L"suggestSelect") {
@@ -684,14 +832,15 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
 
 void BrowserWindow::runToolbarScript(const std::string& script)
 {
-    if (!m_toolbarPage || !m_toolbarReady)
-        return;
-    WKPageEvaluateJavaScriptInMainFrame(m_toolbarPage, stringUTF8(script).get(), nullptr, nullptr);
+    if (m_toolbarPage && m_toolbarReady)
+        WKPageEvaluateJavaScriptInMainFrame(m_toolbarPage, stringUTF8(script).get(), nullptr, nullptr);
+    if (m_sidebarPage && m_sidebarReady)
+        WKPageEvaluateJavaScriptInMainFrame(m_sidebarPage, stringUTF8(script).get(), nullptr, nullptr);
 }
 
 void BrowserWindow::pushState()
 {
-    if (!m_toolbarReady)
+    if (!m_toolbarReady && !m_sidebarReady)
         return;
     std::string json = "{\"version\":" + util::jsonString(PRISM_VERSION_WSTRING);
     json += ",\"uiBase\":" + util::jsonString(engine::uiDirectoryURL());
@@ -702,6 +851,21 @@ void BrowserWindow::pushState()
     json += ",\"blocked\":" + std::to_string(blocker::blockedCount());
     json += ",\"active\":" + std::to_string(m_activeTabId);
     json += ",\"actions\":" + extensions::actionsJSON(m_activeTabId);
+    json += ",\"palette\":" + util::jsonString(settings::palette());
+    json += ",\"vertical\":" + std::string(settings::verticalTabs() ? "true" : "false");
+    json += ",\"sidebarCollapsed\":" + std::string(settings::verticalTabsCollapsed() ? "true" : "false");
+    json += ",\"groupStyle\":" + util::jsonString(settings::groupStyle());
+    json += ",\"homeButton\":" + std::string(settings::showHomeButton() ? "true" : "false");
+    json += ",\"hiddenActions\":" + settings::hiddenActionsJSON();
+    json += ",\"groups\":[";
+    for (size_t i = 0; i < m_groups.size(); ++i) {
+        auto& group = m_groups[i];
+        json += (i ? "," : "") + std::string("{\"id\":") + std::to_string(group.id) + ",\"name\":" + util::jsonString(group.name)
+            + ",\"color\":" + util::jsonString(group.color) + ",\"collapsed\":" + (group.collapsed ? "true" : "false") + "}";
+    }
+    json += "]";
+    if (Tab* active = activeTab())
+        json += ",\"activeUnit\":" + std::to_string(unitOf(active));
     json += ",\"bookmarksBar\":" + std::string(settings::showBookmarksBar() ? "true" : "false");
     if (settings::showBookmarksBar())
         json += ",\"bookmarks\":" + bookmarks::barJSON();
@@ -717,6 +881,8 @@ void BrowserWindow::pushState()
         json += "{\"id\":" + std::to_string(tab->id);
         json += ",\"title\":" + util::jsonString(tab->title);
         json += ",\"url\":" + util::jsonString(extensions::displayURL(tab->url));
+        json += ",\"group\":" + std::to_string(tab->groupId);
+        json += ",\"icon\":" + util::jsonString(tab->extensionPages || engine::isInternalURL(tab->url) ? L"" : icons::fileURLFor(tab->url));
         json += ",\"loading\":" + std::string(tab->loading ? "true" : "false");
         json += ",\"progress\":" + std::string(progress);
         json += ",\"canBack\":" + std::string(WKPageCanGoBack(tab->page) ? "true" : "false");
@@ -834,11 +1000,13 @@ Tab* BrowserWindow::newTab(const std::wstring& url, bool select, WKPageConfigura
     Tab* raw = tab.get();
     attachClients(raw);
 
-    // Popups and links open next to the tab they came from; new tabs go last.
+    // Popups and links open next to the tab they came from (in its group);
+    // new tabs go last.
     int active = indexOf(activeTab());
-    if (configuration && active >= 0)
+    if (configuration && active >= 0) {
+        raw->groupId = m_tabs[static_cast<size_t>(active)]->groupId;
         m_tabs.insert(m_tabs.begin() + active + 1, std::move(tab));
-    else
+    } else
         m_tabs.push_back(std::move(tab));
 
     extensions::tabCreated(raw->id);
@@ -911,6 +1079,10 @@ void BrowserWindow::selectTab(int id)
         return;
     Tab* previous = activeTab();
     suggestions::hide();
+    next->lastActive = ++s_activationCounter;
+    // A tab in a collapsed group opens the group.
+    if (TabGroup* group = findGroup(next->groupId); group && group->collapsed)
+        group->collapsed = false;
     m_activeTabId = id;
     layout();
     ShowWindow(next->hwnd, SW_SHOW);
@@ -954,6 +1126,7 @@ void BrowserWindow::closeTab(int id)
     // Destroying the view's window makes WebKit close the page and its process.
     DestroyWindow(tab->hwnd);
     m_tabs.erase(m_tabs.begin() + index);
+    normalizeGroups();
 
     if (m_tabs.empty()) {
         // Last tab closed: close the window, but not from inside a WebKit
@@ -1035,8 +1208,11 @@ void BrowserWindow::tabStateChanged(const void* clientInfo)
     std::wstring active = toWide(Ref<WKURLRef>::adopt(WKPageCopyActiveURL(tab->page)).get());
     if (!active.empty())
         tab->url = active;
+    bool wasLoading = tab->loading;
     tab->progress = WKPageGetEstimatedProgress(tab->page);
     tab->loading = tab->progress > 0 && tab->progress < 1;
+    if (wasLoading && !tab->loading)
+        tab->window->requestIcon(tab);
     if (!tab->extensionPages)
         history::updateTitle(tab->url, tab->title);
     tab->window->tabChanged(tab);
@@ -1073,7 +1249,7 @@ std::wstring BrowserWindow::sessionURL(const Tab* tab)
         return { };
     if (!engine::isInternalURL(url))
         return url;
-    for (auto* name : { L"newtab", L"whatsnew", L"settings", L"extensions" }) {
+    for (auto* name : { L"newtab", L"whatsnew", L"settings", L"extensions", L"history", L"bookmarks" }) {
         if (engine::isInternalPage(url, name))
             return std::wstring(L"prism://") + name;
     }
@@ -1103,14 +1279,27 @@ void BrowserWindow::saveSession()
     std::string contents;
     for (auto* window : s_windows) {
         std::string tabs;
+        // G <number> <color> <collapsed 1|0> <name>; tabs refer to the number.
+        std::string groups;
+        for (size_t i = 0; i < window->m_groups.size(); ++i) {
+            auto& group = window->m_groups[i];
+            groups += "G\t" + std::to_string(i + 1) + "\t" + util::toUTF8(group.color) + "\t" + (group.collapsed ? "1" : "0") + "\t" + util::toUTF8(group.name) + "\n";
+        }
         for (auto& tab : window->m_tabs) {
             tab->savedURL = sessionURL(tab.get());
             if (tab->savedURL.empty())
                 continue;
-            tabs += std::string("T\t") + (tab->id == window->m_activeTabId ? "1" : "0") + "\t" + util::toUTF8(tab->savedURL) + "\n";
+            int groupNumber = 0;
+            for (size_t i = 0; i < window->m_groups.size(); ++i) {
+                if (window->m_groups[i].id == tab->groupId)
+                    groupNumber = static_cast<int>(i) + 1;
+            }
+            // T <selected 1|0> <url> [<group number>]
+            tabs += std::string("T\t") + (tab->id == window->m_activeTabId ? "1" : "0") + "\t" + util::toUTF8(tab->savedURL)
+                + (groupNumber ? "\t" + std::to_string(groupNumber) : "") + "\n";
         }
         if (!tabs.empty())
-            contents += "W\n" + tabs;
+            contents += "W\n" + groups + tabs;
     }
     util::writeFileAtomically(sessionFile(), contents);
 }
@@ -1120,6 +1309,8 @@ bool BrowserWindow::restoreSession(const std::vector<std::wstring>& extraURLs)
     struct SavedWindow {
         std::vector<std::wstring> urls;
         int active { -1 };
+        std::vector<TabGroup> groups;
+        std::vector<int> tabGroups;
     };
     std::vector<SavedWindow> windows;
 
@@ -1133,11 +1324,38 @@ bool BrowserWindow::restoreSession(const std::vector<std::wstring>& extraURLs)
             line.pop_back();
         if (line == "W") {
             windows.emplace_back();
+        } else if (line.rfind("G\t", 0) == 0 && !windows.empty()) {
+            // G <number> <color> <collapsed> <name>
+            std::vector<std::string> parts;
+            size_t start = 2;
+            for (int field = 0; field < 3; ++field) {
+                size_t next = line.find('\t', start);
+                if (next == std::string::npos)
+                    break;
+                parts.push_back(line.substr(start, next - start));
+                start = next + 1;
+            }
+            if (parts.size() < 3)
+                continue;
+            TabGroup group;
+            group.color = util::fromUTF8(parts[1]);
+            if (group.color.size() != 7 || group.color[0] != L'#')
+                group.color = kGroupColors[0];
+            group.collapsed = parts[2] == "1";
+            group.name = util::fromUTF8(line.substr(start));
+            windows.back().groups.push_back(group);
         } else if (line.rfind("T\t", 0) == 0 && line.size() > 4 && !windows.empty()) {
             size_t tab = line.find('\t', 2);
             if (tab == std::string::npos)
                 continue;
-            std::wstring url = util::fromUTF8(line.substr(tab + 1));
+            std::string rest = line.substr(tab + 1);
+            int groupNumber = 0;
+            // URLs never contain a tab character, so a last field is the group.
+            if (size_t last = rest.rfind('\t'); last != std::string::npos) {
+                groupNumber = atoi(rest.c_str() + last + 1);
+                rest = rest.substr(0, last);
+            }
+            std::wstring url = util::fromUTF8(rest);
             // Only reopen web pages and Prism's own pages.
             std::wstring scheme = schemeOf(url);
             if (scheme != L"http" && scheme != L"https" && scheme != L"prism" && scheme != L"file")
@@ -1145,6 +1363,7 @@ bool BrowserWindow::restoreSession(const std::vector<std::wstring>& extraURLs)
             if (line.substr(2, tab - 2) == "1")
                 windows.back().active = static_cast<int>(windows.back().urls.size());
             windows.back().urls.push_back(url);
+            windows.back().tabGroups.push_back(groupNumber > 0 && groupNumber <= static_cast<int>(windows.back().groups.size()) ? groupNumber : 0);
         }
     }
     windows.erase(std::remove_if(windows.begin(), windows.end(), [](const SavedWindow& w) { return w.urls.empty(); }), windows.end());
@@ -1157,7 +1376,7 @@ bool BrowserWindow::restoreSession(const std::vector<std::wstring>& extraURLs)
     }
     bool opened = false;
     for (auto& window : windows)
-        opened = BrowserWindow::open(window.urls, window.active) || opened;
+        opened = BrowserWindow::open(window.urls, window.active, window.groups, window.tabGroups) || opened;
     return opened;
 }
 
@@ -1169,9 +1388,19 @@ void BrowserWindow::settingsChanged()
     engine::applyCookiePolicy();
     for (auto* window : s_windows) {
         window->updateTheme();
+        if (settings::verticalTabs())
+            window->createSidebar();
+        else
+            window->destroySidebar();
         window->layout();
         window->pushState();
     }
+}
+
+void BrowserWindow::applyInterfaceCSS()
+{
+    for (auto* window : s_windows)
+        window->runToolbarScript("window.prism && prism.setUserCSS(" + json::quote(usercss::interfaceCSS()) + ");");
 }
 
 void BrowserWindow::refreshToolbars()
@@ -1245,6 +1474,61 @@ static std::wstring pickFolder(HWND owner, const std::wstring& start)
 
 // Commands from prism://settings. Each returns a string to the page.
 // Settings as JSON, plus the theme actually in use (for "system").
+// What prism://newtab shows: shortcuts (most visited sites or the bookmarks
+// bar) and the background picture.
+static std::wstring newTabBackgroundPath()
+{
+    std::wstring path = util::readSetting(L"NewTabBackground", L"");
+    if (path.empty() || GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES)
+        return { };
+    return path;
+}
+
+static std::string newTabData()
+{
+    std::wstring mode = settings::newTabShortcuts();
+    std::string json = "{\"mode\":" + util::jsonString(mode) + ",\"shortcuts\":[";
+    bool first = true;
+    auto add = [&](const std::wstring& url, const std::wstring& title) {
+        json += (first ? "" : ",") + std::string("{\"url\":") + util::jsonString(url) + ",\"title\":" + util::jsonString(title)
+            + ",\"icon\":" + util::jsonString(icons::fileURLFor(url)) + "}";
+        first = false;
+    };
+    if (mode == L"top") {
+        std::vector<std::wstring> hidden;
+        std::wstring list = util::readSetting(L"NewTabHidden", L"");
+        for (size_t start = 0; start < list.size();) {
+            size_t comma = list.find(L',', start);
+            hidden.push_back(list.substr(start, comma == std::wstring::npos ? std::wstring::npos : comma - start));
+            if (comma == std::wstring::npos)
+                break;
+            start = comma + 1;
+        }
+        for (auto& site : history::topSites(8, hidden))
+            add(site.url, site.title);
+    } else if (mode == L"bookmarks") {
+        if (const bookmarks::Node* bar = bookmarks::find(bookmarks::kBarId)) {
+            int count = 0;
+            for (auto& child : bar->children) {
+                if (child->folder || count >= 12)
+                    continue;
+                add(child->url, child->title);
+                ++count;
+            }
+        }
+    }
+    json += "]";
+    std::wstring background = newTabBackgroundPath();
+    std::wstring backgroundURL;
+    if (!background.empty()) {
+        WIN32_FILE_ATTRIBUTE_DATA info = { };
+        GetFileAttributesExW(background.c_str(), GetFileExInfoStandard, &info);
+        backgroundURL = util::fileURLFromPath(background) + L"?" + std::to_wstring(info.ftLastWriteTime.dwLowDateTime);
+    }
+    json += ",\"background\":" + util::jsonString(backgroundURL) + "}";
+    return json;
+}
+
 static std::string settingsForPage()
 {
     std::string json = settings::toJSON();
@@ -1278,6 +1562,7 @@ std::string BrowserWindow::handleSettingsCommand(const std::wstring& command, co
         bool cache = argument.find(L"cache") != std::wstring::npos;
         if (argument.find(L"history") != std::wstring::npos) {
             history::clear();
+            icons::clear();
             m_closedURLs.clear();
             if (!cookies && !cache) {
                 showToast(L"History cleared");
@@ -1308,6 +1593,35 @@ std::string BrowserWindow::handleSettingsCommand(const std::wstring& command, co
 
     if (command == L"version")
         return util::jsonString(PRISM_VERSION_WSTRING);
+
+    if (command == L"pickNewTabBackground") {
+        // A copy goes into Prism's folder, so moving the original is fine.
+        auto picked = dialogs::openFile(m_hwnd, L"Choose a background picture", L"Pictures (*.jpg, *.png, *.webp, *.gif)", L"*.jpg;*.jpeg;*.png;*.webp;*.gif;*.bmp");
+        if (!picked)
+            return "false";
+        std::wstring extension = picked->substr(picked->rfind(L'.') + 1);
+        for (auto& c : extension)
+            c = static_cast<wchar_t>(towlower(c));
+        std::wstring target = util::dataDirectory() + L"\newtab-background." + extension;
+        std::wstring old = newTabBackgroundPath();
+        if (!old.empty() && old != target)
+            DeleteFileW(old.c_str());
+        if (!CopyFileW(picked->c_str(), target.c_str(), FALSE))
+            return "false";
+        util::writeSetting(L"NewTabBackground", target);
+        return "true";
+    }
+
+    if (command == L"clearNewTabBackground") {
+        std::wstring old = newTabBackgroundPath();
+        if (!old.empty())
+            DeleteFileW(old.c_str());
+        util::writeSetting(L"NewTabBackground", L"");
+        return "true";
+    }
+
+    if (command == L"newTabBackground")
+        return util::jsonString(newTabBackgroundPath().empty() ? L"" : L"set");
 
     return "null";
 }
@@ -1365,6 +1679,7 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
         bool isSettings = engine::isInternalPage(frameURL, L"settings");
         bool isExtensions = engine::isInternalPage(frameURL, L"extensions");
         bool isHistory = engine::isInternalPage(frameURL, L"history");
+        bool isNewTab = engine::isInternalPage(frameURL, L"newtab");
         bool isBookmarks = engine::isInternalPage(frameURL, L"bookmarks");
         // The "blocked" page can allow the site it's showing, and nothing else.
         if (engine::isInternalPage(frameURL, L"error") && message.rfind(L"prism:allowSite\n", 0) == 0) {
@@ -1376,7 +1691,7 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
             WKPageRunJavaScriptPromptResultListenerCall(listener, stringUTF8(allowed ? "true" : "false").get());
             return;
         }
-        if (isSettings || isExtensions || isHistory || isBookmarks) {
+        if (isSettings || isExtensions || isHistory || isBookmarks || isNewTab) {
             std::wstring body = message.substr(6);
             size_t newline = body.find(L'\n');
             std::wstring command = body.substr(0, newline);
@@ -1385,7 +1700,25 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
             if (isSettings && command.rfind(L"shields.", 0) == 0) {
                 answer = shields::handleCommand(command.substr(8), argument);
                 refreshToolbars();
-            } else if (isSettings && command.rfind(L"permissions.", 0) == 0)
+            } else if (isSettings && command.rfind(L"usercss.", 0) == 0)
+                answer = usercss::handleCommand(command.substr(8), argument);
+            else if (isNewTab && command == L"data")
+                answer = newTabData();
+            else if (isNewTab && command == L"hide") {
+                // A site removed from the shortcuts.
+                std::wstring hidden = util::readSetting(L"NewTabHidden", L"");
+                if (argument.find(L',') == std::wstring::npos && !argument.empty())
+                    util::writeSetting(L"NewTabHidden", hidden.empty() ? argument : hidden + L"," + argument);
+                answer = newTabData();
+            } else if (isNewTab && command == L"open") {
+                size_t split = argument.find(L'\n');
+                std::wstring url = argument.substr(0, split);
+                if (schemeOf(url) == L"http" || schemeOf(url) == L"https")
+                    tab->window->openBookmarkURL(url, split == std::wstring::npos ? L"current" : argument.substr(split + 1));
+                answer = "true";
+            } else if (isNewTab)
+                answer = "null";
+            else if (isSettings && command.rfind(L"permissions.", 0) == 0)
                 answer = permissions::handleCommand(command.substr(12), argument);
             else if ((isHistory || isBookmarks) && command == L"open") {
                 // "<url>\n<current|foreground|background>"
@@ -1764,6 +2097,14 @@ bool BrowserWindow::handleShortcut(const MSG& msg)
         case 'I':
             if (!shift) return false;
             showDevTools();
+            return true;
+        }
+        if (key >= '1' && key <= '9' && !m_tabs.empty() && settings::groupStyle() == L"vivaldi" && !settings::verticalTabs()) {
+            // The Nth group as shown (the selected one is always first): pick
+            // it, or cycle through its tabs if it's already selected.
+            auto shown = displayedUnits();
+            size_t index = key == '9' ? shown.size() - 1 : std::min<size_t>(key - '1', shown.size() - 1);
+            selectUnit(shown[index], true);
             return true;
         }
         if (key >= '1' && key <= '9' && !m_tabs.empty()) {
@@ -2298,6 +2639,562 @@ void BrowserWindow::showBookmarkMenu(long long id, POINT screen)
     case Manage: openInternalPage(L"bookmarks"); break;
     case HideBar: toggleBookmarksBar(); break;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Site icons
+
+namespace {
+struct IconRequest {
+    std::wstring url;
+};
+}
+
+void BrowserWindow::requestIcon(Tab* tab)
+{
+    if (tab->extensionPages || engine::isInternalURL(tab->url))
+        return;
+    std::wstring scheme = schemeOf(tab->url);
+    if (scheme != L"http" && scheme != L"https")
+        return;
+    auto* request = new IconRequest { tab->url };
+    WKPageEvaluateJavaScriptInMainFrame(tab->page, stringUTF8(icons::pageScript()).get(), request, [](WKTypeRef result, WKErrorRef, void* context) {
+        std::unique_ptr<IconRequest> request(static_cast<IconRequest*>(context));
+        std::wstring icon;
+        if (result && WKGetTypeID(result) == WKStringGetTypeID())
+            icon = toWide(static_cast<WKStringRef>(result));
+        if (!icon.empty())
+            icons::pageLoaded(request->url, icon);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Tab groups
+
+TabGroup* BrowserWindow::findGroup(int id)
+{
+    if (id <= 0)
+        return nullptr;
+    for (auto& group : m_groups) {
+        if (group.id == id)
+            return &group;
+    }
+    return nullptr;
+}
+
+// Keeps each group's tabs next to each other (where the group's first tab
+// is) and drops groups without tabs.
+void BrowserWindow::normalizeGroups()
+{
+    for (auto& tab : m_tabs) {
+        if (tab->groupId && !findGroup(tab->groupId))
+            tab->groupId = 0;
+    }
+    std::vector<std::unique_ptr<Tab>> ordered;
+    std::vector<int> emitted;
+    std::vector<std::unique_ptr<Tab>*> slots;
+    for (auto& tab : m_tabs)
+        slots.push_back(&tab);
+    for (size_t i = 0; i < slots.size(); ++i) {
+        if (!*slots[i])
+            continue;
+        int group = (*slots[i])->groupId;
+        if (!group) {
+            ordered.push_back(std::move(*slots[i]));
+            continue;
+        }
+        if (std::find(emitted.begin(), emitted.end(), group) != emitted.end())
+            continue;
+        emitted.push_back(group);
+        for (size_t j = i; j < slots.size(); ++j) {
+            if (*slots[j] && (*slots[j])->groupId == group)
+                ordered.push_back(std::move(*slots[j]));
+        }
+    }
+    m_tabs = std::move(ordered);
+    std::erase_if(m_groups, [&](const TabGroup& group) { return std::find(emitted.begin(), emitted.end(), group.id) == emitted.end(); });
+}
+
+int BrowserWindow::createGroup(Tab* tab)
+{
+    TabGroup group;
+    group.id = ++s_nextGroupId;
+    // The first color no other group uses (then round again).
+    group.color = kGroupColors[m_groups.size() % std::size(kGroupColors)];
+    for (auto* color : kGroupColors) {
+        bool used = false;
+        for (auto& other : m_groups)
+            used = used || other.color == color;
+        if (!used) {
+            group.color = color;
+            break;
+        }
+    }
+    m_groups.push_back(group);
+    tab->groupId = group.id;
+    normalizeGroups();
+    pushState();
+    scheduleSessionSave();
+    return group.id;
+}
+
+void BrowserWindow::addTabToGroup(Tab* tab, int groupId)
+{
+    if (!findGroup(groupId))
+        return;
+    int from = indexOf(tab);
+    auto owned = std::move(m_tabs[static_cast<size_t>(from)]);
+    m_tabs.erase(m_tabs.begin() + from);
+    int last = -1;
+    for (size_t i = 0; i < m_tabs.size(); ++i) {
+        if (m_tabs[i]->groupId == groupId)
+            last = static_cast<int>(i);
+    }
+    owned->groupId = groupId;
+    m_tabs.insert(m_tabs.begin() + (last + 1), std::move(owned));
+    normalizeGroups();
+    pushState();
+    scheduleSessionSave();
+}
+
+void BrowserWindow::removeTabFromGroup(Tab* tab)
+{
+    int groupId = tab->groupId;
+    if (!groupId)
+        return;
+    // Out of the group, just after it.
+    int from = indexOf(tab);
+    auto owned = std::move(m_tabs[static_cast<size_t>(from)]);
+    m_tabs.erase(m_tabs.begin() + from);
+    int last = from - 1;
+    for (size_t i = 0; i < m_tabs.size(); ++i) {
+        if (m_tabs[i]->groupId == groupId)
+            last = static_cast<int>(i);
+    }
+    owned->groupId = 0;
+    m_tabs.insert(m_tabs.begin() + (last + 1), std::move(owned));
+    normalizeGroups();
+    pushState();
+    scheduleSessionSave();
+}
+
+void BrowserWindow::closeTabs(const std::vector<int>& ids)
+{
+    for (int id : ids) {
+        if (m_tabs.empty())
+            break;
+        closeTab(id);
+    }
+}
+
+void BrowserWindow::closeGroup(int id)
+{
+    std::vector<int> ids;
+    for (auto& tab : m_tabs) {
+        if (tab->groupId == id)
+            ids.push_back(tab->id);
+    }
+    closeTabs(ids);
+}
+
+void BrowserWindow::ungroup(int id)
+{
+    for (auto& tab : m_tabs) {
+        if (tab->groupId == id)
+            tab->groupId = 0;
+    }
+    normalizeGroups();
+    pushState();
+    scheduleSessionSave();
+}
+
+void BrowserWindow::setGroupCollapsed(int id, bool collapsed)
+{
+    TabGroup* group = findGroup(id);
+    if (!group)
+        return;
+    group->collapsed = collapsed;
+    // Collapsing the selected tab's group: select the nearest tab outside it.
+    Tab* active = activeTab();
+    if (collapsed && active && active->groupId == id) {
+        int index = indexOf(active);
+        Tab* next = nullptr;
+        for (int distance = 1; distance < static_cast<int>(m_tabs.size()) && !next; ++distance) {
+            for (int candidate : { index + distance, index - distance }) {
+                if (candidate < 0 || candidate >= static_cast<int>(m_tabs.size()))
+                    continue;
+                Tab* tab = m_tabs[static_cast<size_t>(candidate)].get();
+                TabGroup* other = findGroup(tab->groupId);
+                if (!other || !other->collapsed) {
+                    next = tab;
+                    break;
+                }
+            }
+        }
+        if (next)
+            selectTab(next->id);
+        else
+            newTab(L"prism://newtab", true);
+        group = findGroup(id);
+        if (group)
+            group->collapsed = true; // selectTab may have opened it again
+    }
+    pushState();
+    scheduleSessionSave();
+}
+
+void BrowserWindow::moveTabTo(int tabId, int index, int groupId)
+{
+    Tab* tab = findTab(tabId);
+    if (!tab)
+        return;
+    tab->groupId = findGroup(groupId) ? groupId : 0;
+    moveTab(tabId, index);
+    normalizeGroups();
+    pushState();
+    scheduleSessionSave();
+}
+
+std::vector<int> BrowserWindow::units() const
+{
+    std::vector<int> result;
+    for (auto& tab : m_tabs) {
+        int unit = unitOf(tab.get());
+        if (result.empty() || result.back() != unit)
+            result.push_back(unit);
+    }
+    return result;
+}
+
+int BrowserWindow::unitOf(const Tab* tab) const
+{
+    return tab->groupId > 0 ? tab->groupId : -tab->id;
+}
+
+// Vivaldi style: the selected group (or single tab) first, then the rest
+// in their own order.
+std::vector<int> BrowserWindow::displayedUnits() const
+{
+    std::vector<int> all = units();
+    Tab* active = activeTab();
+    if (!active)
+        return all;
+    int current = unitOf(active);
+    std::vector<int> shown { current };
+    for (int unit : all) {
+        if (unit != current)
+            shown.push_back(unit);
+    }
+    return shown;
+}
+
+void BrowserWindow::selectUnit(int unit, bool cycle)
+{
+    std::vector<Tab*> members;
+    for (auto& tab : m_tabs) {
+        if (unitOf(tab.get()) == unit)
+            members.push_back(tab.get());
+    }
+    if (members.empty())
+        return;
+    Tab* active = activeTab();
+    Tab* target = nullptr;
+    if (cycle && active && unitOf(active) == unit) {
+        // Already selected: the next tab of the group, round again at the end.
+        auto it = std::find(members.begin(), members.end(), active);
+        target = (it == members.end() || it + 1 == members.end()) ? members.front() : *(it + 1);
+    } else {
+        // The group's tab you used last.
+        target = members.front();
+        for (Tab* tab : members) {
+            if (tab->lastActive > target->lastActive)
+                target = tab;
+        }
+    }
+    if (target != active)
+        selectTab(target->id);
+}
+
+void BrowserWindow::moveUnit(int unit, int index)
+{
+    // Moves a group (or single tab) to another place among the groups. This
+    // is its new home place in the Vivaldi-style strip.
+    std::vector<std::unique_ptr<Tab>> moving;
+    std::vector<std::unique_ptr<Tab>> rest;
+    for (auto& tab : m_tabs)
+        (unitOf(tab.get()) == unit ? moving : rest).push_back(std::move(tab));
+    if (moving.empty()) {
+        m_tabs = std::move(rest);
+        return;
+    }
+    // Where unit number `index` starts in the remaining tabs.
+    size_t position = rest.size();
+    int seen = -1;
+    int last = 0;
+    for (size_t i = 0; i < rest.size(); ++i) {
+        int current = unitOf(rest[i].get());
+        if (i == 0 || current != last) {
+            ++seen;
+            last = current;
+            if (seen == index) {
+                position = i;
+                break;
+            }
+        }
+    }
+    m_tabs.clear();
+    for (size_t i = 0; i < rest.size(); ++i) {
+        if (i == position) {
+            for (auto& tab : moving)
+                m_tabs.push_back(std::move(tab));
+        }
+        m_tabs.push_back(std::move(rest[i]));
+    }
+    if (position >= rest.size()) {
+        for (auto& tab : moving) {
+            if (tab)
+                m_tabs.push_back(std::move(tab));
+        }
+    }
+    pushState();
+    scheduleSessionSave();
+}
+
+static std::wstring groupLabel(const TabGroup& group)
+{
+    if (!group.name.empty())
+        return group.name;
+    for (size_t i = 0; i < std::size(kGroupColors); ++i) {
+        if (group.color == kGroupColors[i])
+            return std::wstring(kGroupColorNames[i]) + L" group";
+    }
+    return L"Unnamed group";
+}
+
+void BrowserWindow::showTabMenu(int tabId, POINT screen)
+{
+    Tab* tab = findTab(tabId);
+    if (!tab)
+        return;
+    enum { NewTabRight = 1, Reload, Duplicate, NewGroup, RemoveFromGroup, Close, CloseOthers, CloseRight, FirstGroup = 100 };
+    HMENU menu = CreatePopupMenu();
+    AppendMenuW(menu, MF_STRING, NewTabRight, L"New tab to the right");
+    AppendMenuW(menu, MF_STRING, Reload, L"Reload");
+    AppendMenuW(menu, MF_STRING, Duplicate, L"Duplicate");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, NewGroup, L"Add tab to new group");
+    std::vector<int> groupChoices;
+    if (!m_groups.empty()) {
+        HMENU groups = CreatePopupMenu();
+        for (auto& group : m_groups) {
+            if (group.id == tab->groupId)
+                continue;
+            groupChoices.push_back(group.id);
+            AppendMenuW(groups, MF_STRING, FirstGroup + groupChoices.size() - 1, menuText(groupLabel(group)).c_str());
+        }
+        if (groupChoices.empty())
+            DestroyMenu(groups);
+        else
+            AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(groups), L"Add tab to group");
+    }
+    if (tab->groupId)
+        AppendMenuW(menu, MF_STRING, RemoveFromGroup, L"Remove from group");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, Close, L"Close tab\tCtrl+W");
+    AppendMenuW(menu, MF_STRING | (m_tabs.size() > 1 ? 0 : MF_GRAYED), CloseOthers, L"Close other tabs");
+    AppendMenuW(menu, MF_STRING | (indexOf(tab) + 1 < static_cast<int>(m_tabs.size()) ? 0 : MF_GRAYED), CloseRight, L"Close tabs to the right");
+    int choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, screen.x, screen.y, 0, m_hwnd, nullptr);
+    DestroyMenu(menu);
+    tab = findTab(tabId);
+    if (!tab)
+        return;
+    switch (choice) {
+    case NewTabRight: {
+        Tab* fresh = newTab(L"prism://newtab", true);
+        fresh->groupId = tab->groupId;
+        moveTab(fresh->id, indexOf(tab) + 1);
+        normalizeGroups();
+        pushState();
+        break;
+    }
+    case Reload: WKPageReload(tab->page); break;
+    case Duplicate: {
+        std::wstring url = sessionURL(tab);
+        if (url.empty())
+            break;
+        Tab* copy = newTab(url, true);
+        copy->groupId = tab->groupId;
+        moveTab(copy->id, indexOf(tab) + 1);
+        normalizeGroups();
+        pushState();
+        break;
+    }
+    case NewGroup: createGroup(tab); break;
+    case RemoveFromGroup: removeTabFromGroup(tab); break;
+    case Close: closeTab(tabId); break;
+    case CloseOthers: {
+        std::vector<int> ids;
+        for (auto& other : m_tabs) {
+            if (other->id != tabId)
+                ids.push_back(other->id);
+        }
+        closeTabs(ids);
+        break;
+    }
+    case CloseRight: {
+        std::vector<int> ids;
+        for (size_t i = static_cast<size_t>(indexOf(tab)) + 1; i < m_tabs.size(); ++i)
+            ids.push_back(m_tabs[i]->id);
+        closeTabs(ids);
+        break;
+    }
+    default:
+        if (choice >= FirstGroup && static_cast<size_t>(choice - FirstGroup) < groupChoices.size())
+            addTabToGroup(tab, groupChoices[static_cast<size_t>(choice - FirstGroup)]);
+    }
+}
+
+void BrowserWindow::showGroupMenu(int groupId, POINT screen)
+{
+    TabGroup* group = findGroup(groupId);
+    if (!group)
+        return;
+    enum { Rename = 1, Toggle, NewTabInGroup, Ungroup, CloseGroup, FirstColor = 100 };
+    HMENU menu = CreatePopupMenu();
+    AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, menuText(groupLabel(*group)).c_str());
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, Rename, L"Name group…");
+    HMENU colors = CreatePopupMenu();
+    for (size_t i = 0; i < std::size(kGroupColors); ++i)
+        AppendMenuW(colors, MF_STRING | (group->color == kGroupColors[i] ? MF_CHECKED : 0), FirstColor + i, kGroupColorNames[i]);
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(colors), L"Color");
+    if (settings::groupStyle() != L"vivaldi" || settings::verticalTabs())
+        AppendMenuW(menu, MF_STRING, Toggle, group->collapsed ? L"Expand group" : L"Collapse group");
+    AppendMenuW(menu, MF_STRING, NewTabInGroup, L"New tab in group");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, Ungroup, L"Ungroup");
+    AppendMenuW(menu, MF_STRING, CloseGroup, L"Close group");
+    std::wstring name = group->name;
+    bool collapsed = group->collapsed;
+    int choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, screen.x, screen.y, 0, m_hwnd, nullptr);
+    DestroyMenu(menu);
+    if (!findGroup(groupId))
+        return;
+    switch (choice) {
+    case Rename:
+        if (auto answer = dialogs::prompt(m_hwnd, L"Name group", L"Name (leave empty for none):", name); answer) {
+            if (TabGroup* again = findGroup(groupId)) {
+                again->name = answer->size() > 60 ? answer->substr(0, 60) : *answer;
+                pushState();
+                scheduleSessionSave();
+            }
+        }
+        break;
+    case Toggle: setGroupCollapsed(groupId, !collapsed); break;
+    case NewTabInGroup: {
+        Tab* fresh = newTab(L"prism://newtab", true);
+        addTabToGroup(fresh, groupId);
+        break;
+    }
+    case Ungroup: ungroup(groupId); break;
+    case CloseGroup: closeGroup(groupId); break;
+    default:
+        if (choice >= FirstColor && static_cast<size_t>(choice - FirstColor) < std::size(kGroupColors)) {
+            findGroup(groupId)->color = kGroupColors[choice - FirstColor];
+            pushState();
+            scheduleSessionSave();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Extensions menu (the puzzle button) and showing or hiding their buttons
+
+void BrowserWindow::showExtensionsMenu(POINT screen)
+{
+    Tab* tab = activeTab();
+    json::Value actions;
+    json::parse(extensions::actionsJSON(tab ? tab->id : -1), actions);
+    enum { Manage = 1, Base = 100 };
+    // Per extension: Base + 4*i + {0 open, 1 show/hide, 2 options}
+    HMENU menu = CreatePopupMenu();
+    std::vector<std::string> ids;
+    for (auto& action : actions.items()) {
+        std::string id = action["id"].asString();
+        size_t i = ids.size();
+        ids.push_back(id);
+        bool hidden = settings::isActionHidden(id);
+        HMENU submenu = CreatePopupMenu();
+        AppendMenuW(submenu, MF_STRING, Base + i * 4, L"Open");
+        AppendMenuW(submenu, MF_STRING | (hidden ? 0 : MF_CHECKED), Base + i * 4 + 1, L"Show in toolbar");
+        AppendMenuW(submenu, MF_STRING | (action["options"].asBool() ? 0 : MF_GRAYED), Base + i * 4 + 2, L"Options");
+        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(submenu), menuText(util::fromUTF8(action["name"].asString())).c_str());
+    }
+    if (ids.empty())
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L"No extensions with buttons");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, Manage, L"Manage extensions\tCtrl+Shift+E");
+    int choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTALIGN, screen.x, screen.y, 0, m_hwnd, nullptr);
+    DestroyMenu(menu);
+    if (choice == Manage) {
+        openInternalPage(L"extensions");
+        return;
+    }
+    if (choice < Base || static_cast<size_t>((choice - Base) / 4) >= ids.size())
+        return;
+    const std::string& id = ids[static_cast<size_t>((choice - Base) / 4)];
+    switch ((choice - Base) % 4) {
+    case 0: {
+        // Popups open under the Extensions button.
+        POINT client = screen;
+        ScreenToClient(m_toolbarHwnd, &client);
+        double scale = scaleFactor();
+        Tab* current = activeTab();
+        extensions::actionClicked(m_hwnd, current ? current->id : -1, id, static_cast<int>(client.x / scale), static_cast<int>(client.y / scale));
+        break;
+    }
+    case 1:
+        settings::setActionHidden(id, !settings::isActionHidden(id));
+        refreshToolbars();
+        break;
+    case 2:
+        extensions::openOptionsPage(id, m_id);
+        break;
+    }
+}
+
+void BrowserWindow::showHiddenActionMenu(const std::string& extensionId, int x, int y)
+{
+    // Right-click on an extension's button.
+    Tab* tab = activeTab();
+    json::Value actions;
+    json::parse(extensions::actionsJSON(tab ? tab->id : -1), actions);
+    std::wstring name;
+    bool options = false;
+    for (auto& action : actions.items()) {
+        if (action["id"].asString() == extensionId) {
+            name = util::fromUTF8(action["name"].asString());
+            options = action["options"].asBool();
+        }
+    }
+    POINT point;
+    anchorForExtension(x, y, point);
+    HMENU menu = CreatePopupMenu();
+    AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, menuText(name).c_str());
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING | (options ? 0 : MF_GRAYED), 1, L"Options");
+    AppendMenuW(menu, MF_STRING, 2, L"Hide from toolbar");
+    AppendMenuW(menu, MF_STRING, 3, L"Manage extension");
+    int choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_RIGHTALIGN, point.x, point.y, 0, m_hwnd, nullptr);
+    DestroyMenu(menu);
+    if (choice == 1)
+        extensions::openOptionsPage(extensionId, m_id);
+    else if (choice == 2) {
+        settings::setActionHidden(extensionId, true);
+        refreshToolbars();
+        showToast(L"Hidden. It's still in the Extensions menu (the puzzle button).");
+    } else if (choice == 3)
+        openInternalPage(L"extensions");
 }
 
 // ---------------------------------------------------------------------------

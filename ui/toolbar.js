@@ -128,63 +128,390 @@ function activeTab() {
   return state.tabs.find((tab) => tab.id === state.active) || null;
 }
 
-function renderTabs() {
-  const container = elements.tabs;
-  container.textContent = '';
+// ---- Tabs ------------------------------------------------------------------------
+// Three ways to show them: one row with Chrome-style groups; Vivaldi style
+// (groups on top, the selected group's tabs below); or vertical, in the
+// sidebar (a second copy of this page, ?layout=sidebar).
+
+const isSidebar = params.get('layout') === 'sidebar';
+if (isSidebar) document.documentElement.classList.add('sidebar-view');
+
+function groupById(id) {
+  return (state.groups || []).find((group) => group.id === id) || null;
+}
+
+function unitOf(tab) {
+  return tab.group > 0 ? tab.group : -tab.id;
+}
+
+// Groups (by id) and ungrouped tabs (minus their id), in order.
+function homeUnits() {
+  const units = [];
   for (const tab of state.tabs) {
+    const unit = unitOf(tab);
+    if (units[units.length - 1] !== unit) units.push(unit);
+  }
+  return units;
+}
+
+function displayedUnits() {
+  const active = state.activeUnit;
+  return [active].concat(homeUnits().filter((unit) => unit !== active));
+}
+
+function groupLabel(group, fallback) {
+  return group.name || fallback || '';
+}
+
+function makeIcon(tab) {
+  const holder = document.createElement('span');
+  holder.className = 'badge';
+  if (tab.icon && !tab.loading) {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.draggable = false;
+    img.src = tab.icon;
+    img.addEventListener('error', () => {
+      img.remove();
+      holder.textContent = tabBadge(tab);
+      holder.classList.remove('has-icon');
+    });
+    holder.classList.add('has-icon');
+    holder.appendChild(img);
+  } else {
+    holder.textContent = tabBadge(tab);
+  }
+  return holder;
+}
+
+function makeTab(tab) {
+  const element = document.createElement('div');
+  element.className = 'tab' + (tab.id === state.active ? ' active' : '') + (tab.loading ? ' loading' : '');
+  element.setAttribute('role', 'tab');
+  element.setAttribute('aria-selected', tab.id === state.active ? 'true' : 'false');
+  element.title = tabTitle(tab);
+  element.dataset.id = tab.id;
+  const group = groupById(tab.group);
+  if (group) {
+    element.classList.add('grouped');
+    element.style.setProperty('--group-color', group.color);
+  }
+
+  const title = document.createElement('span');
+  title.className = 'title';
+  title.textContent = tabTitle(tab);
+
+  const close = document.createElement('button');
+  close.className = 'icon close';
+  close.title = 'Close tab (Ctrl+W)';
+  close.setAttribute('aria-label', 'Close tab');
+  close.innerHTML = '<svg viewBox="0 0 16 16"><path d="M3 3l10 10M13 3L3 13"/></svg>';
+  close.addEventListener('click', (event) => {
+    event.stopPropagation();
+    send('close', String(tab.id));
+  });
+
+  element.append(makeIcon(tab), title, close);
+  element.addEventListener('mousedown', (event) => {
+    // Don't re-render under the close button before its click arrives.
+    if (event.target.closest('.close')) return;
+    if (event.button !== 0) return;
+    startDrag(event, { kind: 'tab', id: tab.id });
+    send('select', String(tab.id));
+  });
+  element.addEventListener('auxclick', (event) => {
+    // Middle click closes a tab.
+    if (event.button === 1) send('close', String(tab.id));
+  });
+  element.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    send('tabMenu', tab.id + '\n' + Math.round(event.clientX) + ',' + Math.round(event.clientY));
+  });
+  return element;
+}
+
+function makeGroupChip(group, tabsInGroup) {
+  const chip = document.createElement('div');
+  chip.className = 'group-chip' + (group.collapsed ? ' collapsed' : '') + (group.name ? '' : ' unnamed');
+  chip.style.setProperty('--group-color', group.color);
+  chip.dataset.group = group.id;
+  chip.title = (group.name || 'Unnamed group') + ' · ' + tabsInGroup.length + (tabsInGroup.length === 1 ? ' tab' : ' tabs')
+    + (group.collapsed ? ' (click to expand)' : ' (click to collapse)');
+  const label = document.createElement('span');
+  label.className = 'label';
+  label.textContent = group.name || '';
+  chip.appendChild(label);
+  if (group.collapsed) {
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = tabsInGroup.length;
+    chip.appendChild(count);
+  }
+  chip.addEventListener('click', () => send('groupToggle', String(group.id)));
+  chip.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    send('groupMenu', group.id + '\n' + Math.round(event.clientX) + ',' + Math.round(event.clientY));
+  });
+  return chip;
+}
+
+// Chrome style: one row; a group is a colored chip followed by its tabs.
+function renderChromeStyle(container) {
+  let lastGroup = 0;
+  for (const tab of state.tabs) {
+    const group = groupById(tab.group);
+    if (group && tab.group !== lastGroup)
+      container.appendChild(makeGroupChip(group, state.tabs.filter((t) => t.group === group.id)));
+    lastGroup = tab.group;
+    if (group && group.collapsed) continue;
+    container.appendChild(makeTab(tab));
+  }
+}
+
+// Vivaldi style, top row: groups and single tabs, the selected one first.
+function renderVivaldiStyle(container, second) {
+  for (const unit of displayedUnits()) {
+    if (unit < 0) {
+      const tab = state.tabs.find((t) => t.id === -unit);
+      if (!tab) continue;
+      const element = makeTab(tab);
+      element.dataset.unit = unit;
+      element.addEventListener('mousedown', (event) => {
+        if (event.button === 0 && !event.target.closest('.close')) {
+          drag.kind = 'unit';
+          drag.unit = unit;
+        }
+      });
+      container.appendChild(element);
+      continue;
+    }
+    const group = groupById(unit);
+    if (!group) continue;
+    const members = state.tabs.filter((t) => t.group === unit);
+    const current = members.find((t) => t.id === state.active);
     const element = document.createElement('div');
-    element.className = 'tab' + (tab.id === state.active ? ' active' : '') + (tab.loading ? ' loading' : '');
-    element.setAttribute('role', 'tab');
-    element.setAttribute('aria-selected', tab.id === state.active ? 'true' : 'false');
-    element.title = tabTitle(tab);
-    element.dataset.id = tab.id;
-
-    const badge = document.createElement('span');
-    badge.className = 'badge';
-    badge.textContent = tabBadge(tab);
-
+    element.className = 'tab stack' + (unit === state.activeUnit ? ' active' : '');
+    element.dataset.unit = unit;
+    element.style.setProperty('--group-color', group.color);
+    element.title = (group.name || 'Unnamed group') + ' · ' + members.length + ' tabs';
+    const shown = current || members[0];
     const title = document.createElement('span');
     title.className = 'title';
-    title.textContent = tabTitle(tab);
-
-    const close = document.createElement('button');
-    close.className = 'icon close';
-    close.title = 'Close tab (Ctrl+W)';
-    close.setAttribute('aria-label', 'Close tab');
-    close.innerHTML = '<svg viewBox="0 0 16 16"><path d="M3 3l10 10M13 3L3 13"/></svg>';
-    close.addEventListener('click', (event) => {
-      event.stopPropagation();
-      send('close', String(tab.id));
-    });
-
-    element.append(badge, title, close);
+    title.textContent = group.name ? group.name : tabTitle(shown);
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = members.length;
+    element.append(makeIcon(shown), title, count);
     element.addEventListener('mousedown', (event) => {
-      // Don't re-render under the close button before its click arrives.
-      if (event.target.closest('.close')) return;
-      if (event.button === 0) send('select', String(tab.id));
+      if (event.button !== 0) return;
+      startDrag(event, { kind: 'unit', unit });
+      send('selectUnit', String(unit));
     });
-    element.addEventListener('auxclick', (event) => {
-      // Middle click closes a tab.
-      if (event.button === 1) send('close', String(tab.id));
+    element.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      send('groupMenu', unit + '\n' + Math.round(event.clientX) + ',' + Math.round(event.clientY));
     });
     container.appendChild(element);
   }
+  // Second row: the selected group's tabs (or the single selected tab).
+  second.textContent = '';
+  const active = state.activeUnit;
+  const members = active > 0 ? state.tabs.filter((t) => t.group === active) : state.tabs.filter((t) => t.id === -active);
+  const group = active > 0 ? groupById(active) : null;
+  if (group) {
+    const label = document.createElement('div');
+    label.className = 'group-chip static';
+    label.style.setProperty('--group-color', group.color);
+    label.textContent = group.name || '';
+    label.title = 'Right-click for group options';
+    label.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      send('groupMenu', group.id + '\n' + Math.round(event.clientX) + ',' + Math.round(event.clientY));
+    });
+    second.appendChild(label);
+  }
+  for (const tab of members) second.appendChild(makeTab(tab));
+  if (group) {
+    const add = document.createElement('button');
+    add.className = 'icon small';
+    add.title = 'New tab in this group';
+    add.setAttribute('aria-label', 'New tab in this group');
+    add.innerHTML = '<svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>';
+    add.addEventListener('click', () => send('newTabInGroup', String(group.id)));
+    second.appendChild(add);
+  }
+}
 
+// Vertical: groups are headers with their tabs below.
+function renderVertical(container) {
+  let lastGroup = 0;
+  for (const tab of state.tabs) {
+    const group = groupById(tab.group);
+    if (group && tab.group !== lastGroup) {
+      const members = state.tabs.filter((t) => t.group === group.id);
+      const header = document.createElement('div');
+      header.className = 'group-header' + (group.collapsed ? ' collapsed' : '');
+      header.style.setProperty('--group-color', group.color);
+      header.dataset.group = group.id;
+      header.title = group.collapsed ? 'Expand group' : 'Collapse group';
+      header.innerHTML = '<svg class="caret" viewBox="0 0 16 16"><path d="M5 6l3 3 3-3"/></svg>';
+      const label = document.createElement('span');
+      label.className = 'label';
+      label.textContent = group.name || (members.length + ' tabs');
+      const count = document.createElement('span');
+      count.className = 'count';
+      count.textContent = members.length;
+      header.append(label, count);
+      header.addEventListener('click', () => send('groupToggle', String(group.id)));
+      header.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        send('groupMenu', group.id + '\n' + Math.round(event.clientX) + ',' + Math.round(event.clientY));
+      });
+      container.appendChild(header);
+    }
+    lastGroup = tab.group;
+    if (group && group.collapsed) continue;
+    container.appendChild(makeTab(tab));
+  }
+}
+
+function renderTabs() {
+  const container = elements.tabs;
+  container.textContent = '';
+  const root = document.documentElement;
+  const vivaldi = !state.vertical && state.groupStyle === 'vivaldi';
+  root.classList.toggle('vertical', !!state.vertical);
+  root.classList.toggle('vivaldi', vivaldi);
+  root.classList.toggle('sidebar-collapsed', !!state.sidebarCollapsed);
+  if (isSidebar) renderVertical(container);
+  else if (state.vertical) return;
+  else if (vivaldi) renderVivaldiStyle(container, $('subtabs'));
+  else renderChromeStyle(container);
   updateTabWidths();
 }
 
-// Very narrow tabs only show their badge. Worked out from the window width
-// (not measured), so it's right even before the first layout.
+// Tab widths are worked out here (not left to flexbox), so the tabs always
+// leave room for the + button: up to 220 px each, narrower as more open.
 function updateTabWidths() {
-  const count = elements.tabs.children.length;
-  if (!count) return;
-  const available = window.innerWidth - 12 - 34 - 2 * count;
-  const narrow = available / count < 90;
-  for (const element of elements.tabs.children)
-    element.classList.toggle('narrow', narrow);
+  if (isSidebar) return;
+  const rows = [elements.tabs];
+  if (document.documentElement.classList.contains('vivaldi')) rows.push($('subtabs'));
+  for (const row of rows) {
+    const tabs = [...row.children].filter((child) => child.classList.contains('tab'));
+    if (!tabs.length) continue;
+    let fixed = 0;
+    for (const child of row.children) {
+      if (!child.classList.contains('tab')) fixed += child.getBoundingClientRect().width + 2;
+    }
+    // The strip's padding (12) and the + button (34) for the top row.
+    const room = window.innerWidth - 12 - (row === elements.tabs ? 36 : 4) - fixed - 2 * tabs.length;
+    const width = Math.max(28, Math.min(220, Math.floor(room / tabs.length)));
+    for (const tab of tabs) {
+      tab.style.width = width + 'px';
+      tab.classList.toggle('narrow', width < 90);
+      tab.classList.toggle('tiny', width < 44);
+    }
+  }
 }
 
 window.addEventListener('resize', updateTabWidths);
+
+// ---- Dragging tabs and groups ------------------------------------------------------
+// Drop a tab before or after another tab (it joins that tab's group, if any)
+// or on a group's chip. In the Vivaldi-style top row, groups move as a whole.
+
+let drag = null;
+
+function startDrag(event, what) {
+  drag = Object.assign({ x: event.clientX, y: event.clientY, moving: false, target: null, after: false }, what);
+}
+
+function clearDropMarks() {
+  for (const element of document.querySelectorAll('.drop-before, .drop-after, .drop-into'))
+    element.classList.remove('drop-before', 'drop-after', 'drop-into');
+}
+
+function dropTargetAt(x, y) {
+  const vertical = isSidebar;
+  const selector = drag.kind === 'unit' ? '#tabs > [data-unit]' : '.tab[data-id], .group-chip[data-group], .group-header[data-group]';
+  let best = null;
+  let bestDistance = Infinity;
+  for (const element of document.querySelectorAll(selector)) {
+    if (drag.kind === 'tab' && element.closest('#tabs') === null && element.closest('#subtabs') === null) continue;
+    const rect = element.getBoundingClientRect();
+    if (!vertical && (y < rect.top - 20 || y > rect.bottom + 20)) continue;
+    const center = vertical ? rect.top + rect.height / 2 : rect.left + rect.width / 2;
+    const distance = Math.abs((vertical ? y : x) - center);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = { element, after: (vertical ? y : x) > center };
+    }
+  }
+  return best;
+}
+
+document.addEventListener('mousemove', (event) => {
+  if (!drag) return;
+  if (!drag.moving) {
+    if (Math.abs(event.clientX - drag.x) + Math.abs(event.clientY - drag.y) < 8) return;
+    drag.moving = true;
+    document.documentElement.classList.add('dragging-tab');
+  }
+  clearDropMarks();
+  const target = dropTargetAt(event.clientX, event.clientY);
+  drag.target = target;
+  if (!target) return;
+  const chip = target.element.matches('.group-chip, .group-header');
+  target.element.classList.add(chip && drag.kind === 'tab' ? 'drop-into' : target.after ? 'drop-after' : 'drop-before');
+});
+
+document.addEventListener('mouseup', () => {
+  if (!drag) return;
+  const finished = drag;
+  drag = null;
+  document.documentElement.classList.remove('dragging-tab');
+  clearDropMarks();
+  if (!finished.moving || !finished.target) return;
+  const element = finished.target.element;
+
+  if (finished.kind === 'unit') {
+    // Where it lands among the groups decides its new home place.
+    const targetUnit = Number(element.dataset.unit);
+    if (targetUnit === finished.unit) return;
+    const shown = displayedUnits().filter((unit) => unit !== finished.unit);
+    let position = shown.indexOf(targetUnit) + (finished.target.after ? 1 : 0);
+    const home = homeUnits().filter((unit) => unit !== finished.unit);
+    let index;
+    if (finished.unit === state.activeUnit) {
+      index = position;
+    } else {
+      const others = home.filter((unit) => unit !== state.activeUnit);
+      const before = shown.slice(0, position).filter((unit) => unit !== state.activeUnit).length;
+      index = before >= others.length ? home.length : home.indexOf(others[before]);
+    }
+    send('moveUnit', finished.unit + '\n' + index);
+    return;
+  }
+
+  const dragged = state.tabs.findIndex((tab) => tab.id === finished.id);
+  if (dragged < 0) return;
+  let index;
+  let group;
+  if (element.matches('.group-chip, .group-header')) {
+    // Onto a group: first in the group.
+    group = Number(element.dataset.group);
+    index = state.tabs.findIndex((tab) => tab.group === group);
+  } else {
+    const targetId = Number(element.dataset.id);
+    if (targetId === finished.id) return;
+    index = state.tabs.findIndex((tab) => tab.id === targetId);
+    group = state.tabs[index].group;
+    if (finished.target.after) index += 1;
+  }
+  if (index < 0) return;
+  if (dragged < index) index -= 1;
+  send('moveTab', finished.id + '\n' + index + '\n' + (group || 0));
+});
 
 let shieldsOn = false;
 let lastBlocked = 0;
@@ -195,7 +522,8 @@ let lastBlocked = 0;
 // right-click: Options / Manage extension.
 
 function renderActions() {
-  const list = (state && state.actions) || [];
+  const hidden = (state && state.hiddenActions) || [];
+  const list = ((state && state.actions) || []).filter((action) => !hidden.includes(action.id));
   const container = elements.actions;
   const existing = new Map();
   for (const button of container.children) existing.set(button.dataset.id, button);
@@ -405,7 +733,9 @@ window.prism = {
     state = newState;
     const root = document.documentElement;
     root.dataset.theme = state.theme;
+    root.dataset.palette = state.palette || 'default';
     root.classList.toggle('compact', !!state.compact);
+    $('home').hidden = !state.homeButton;
     if (/^#[0-9a-f]{6}$/i.test(state.accent || '')) {
       root.style.setProperty('--accent', state.accent);
       root.style.setProperty('--field-focus', state.accent);
@@ -438,6 +768,18 @@ window.prism = {
   focusAddress() {
     elements.address.focus();
     elements.address.select();
+  },
+
+  // Your own CSS for Prism's interface (Settings › Appearance).
+  setUserCSS(css) {
+    let style = document.getElementById('user-css');
+    if (!style) {
+      style = document.createElement('style');
+      style.id = 'user-css';
+      document.head.appendChild(style);
+    }
+    style.textContent = css || '';
+    updateTabWidths();
   },
 
   focusFind() {
@@ -497,11 +839,17 @@ elements.shield.addEventListener('click', () => {
   send('shields', Math.round(rect.left + 340) + ',' + Math.round(rect.bottom + 4));
 });
 elements.addExtension.addEventListener('click', () => send('addExtension'));
-elements.extensions.addEventListener('click', () => send('extensions'));
+elements.extensions.addEventListener('click', () => {
+  const rect = elements.extensions.getBoundingClientRect();
+  send('extensionsMenu', Math.round(rect.right) + ',' + Math.round(rect.bottom + 4));
+});
+$('home').addEventListener('click', () => send('home'));
+$('sidebarToggle').addEventListener('click', () => send('sidebarToggle'));
+$('sidebarNewTab').addEventListener('click', () => send('newtab'));
 
 // Double-clicking empty tab strip space opens a new tab.
 $('tabstrip').addEventListener('dblclick', (event) => {
-  if (event.target.id === 'tabstrip' || event.target.id === 'tabs') send('newtab');
+  if (event.target.id === 'tabstrip' || event.target.id === 'tabs' || event.target.id === 'subtabs') send('newtab');
 });
 
 // ---- Suggestions while typing -------------------------------------------------------
@@ -635,4 +983,4 @@ $('findPrev').addEventListener('click', () => send('findPrevious'));
 $('findNext').addEventListener('click', () => send('findNext'));
 $('findClose').addEventListener('click', () => send('findClose'));
 
-send('ready');
+send(isSidebar ? 'sidebarReady' : 'ready');

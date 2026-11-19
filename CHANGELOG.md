@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.0
+
+- **Tab groups** (`TabGroup` in BrowserWindow: id, name, color, collapsed; `Tab::groupId`; a group's tabs are kept together by `normalizeGroups()`, empty groups go away). Tab right-click menu: new tab to the right, reload, duplicate, add to new/existing group, remove from group, close / close others / close to the right. Group menu: name, color (Chrome's 9 colors), collapse/expand, new tab in group, ungroup, close group. Links and popups from a grouped tab join its group. Saved in the session (`G` lines; `T` lines get an optional group number).
+  - **One row** (setting `GroupStyle=chrome`): colored chip (name, or a dot) before the group's tabs, colored underline; click the chip to collapse (the selected tab moves out of a collapsed group).
+  - **Two rows** (`GroupStyle=vivaldi`): top row = groups and single tabs ("units"), the selected one first, the rest in their home order; second row (32 px, 28 compact) = the selected group's tabs and a + for the group. Ctrl+1–9 pick the Nth unit as shown; on the selected unit they cycle its tabs. Selecting a group returns to its last used tab. Dragging a unit sets its new home place (`moveUnit`).
+- **Dragging tabs** (toolbar.js, mouse-based): before/after another tab (joins that tab's group), onto a group chip or header (first in the group). `moveTab "<id>\n<index>\n<group>"`.
+- **Vertical tabs** (`TabLayout=vertical`): a second WKView of toolbar.html?layout=sidebar on the left (240 px, 48 px narrowed with `VerticalTabsCollapsed`), same state and commands as the toolbar; the toolbar drops its tab strip. Groups are collapsible headers.
+- **Site icons** (`src/Icons.cpp`, `%LOCALAPPDATA%\Prism\Icons\` + index.txt): after a page finishes loading, a script asks it for its best `<link rel=icon>` (SVG first, else up to 64 px; else /favicon.ico); Prism downloads it with `http::request` (no cookies, 512 KB max, only public host names, not localhost/IP literals), or decodes data: URLs; checked by magic bytes; per site, refreshed weekly. Shown in tabs, bookmarks bar, History, Bookmarks and new tab shortcuts. Cleared with "Browsing history".
+- Tab widths are computed in toolbar.js (up to 220 px; narrow under 90, icon-only under 44) so the + button always fits (it was cut off with many tabs).
+- **Color palettes** (`Palette`: default, midnight, nord, forest, rose, sepia; dark and light each) for the toolbar (`data-palette`) and Prism's pages (`?palette=`).
+- **Custom CSS** (`src/UserCSS.cpp`): `interface.css` for the toolbar and sidebar (`prism.setUserCSS`), and `site-styles.json` rules (sites list, CSS, on/off) applied by one document-start user script (group `usercss`) on http(s) pages only. Settings › Custom CSS.
+- **New tab page:** shortcuts (`NewTabShortcuts`: most visited from `history::topSites`, the bookmarks bar, or none; hide a site with ×, `NewTabHidden`), background picture (copied to the data folder, `NewTabBackground`). Home button (`HomeButton`).
+- **Extensions menu** on the puzzle button: per extension Open / Show in toolbar / Options, and Manage extensions. Right-click on an extension button adds "Hide from toolbar" (`HiddenActions`).
+- Settings: new Tabs, New tab page and Custom CSS sections; Colors under Appearance.
+
 ## 0.6.0
 
 - **Bookmarks** (`src/Bookmarks.cpp`, `bookmarks.json`): bookmarks bar + Other bookmarks, folders. Star in the address bar and Ctrl+D (add; menu to rename/remove when already bookmarked). Bookmarks bar under the navigation bar (setting `BookmarksBar`, Ctrl+Shift+B): folders open as native menus (with "Open all"), overflow under », right-click menu (open, new/background tab, rename, delete, manage, hide bar), Ctrl/middle click opens in the background.

@@ -124,3 +124,85 @@ ul.notes li {
   width: 72px;
   height: 72px;
 }
+
+/* ---- Color palettes (Settings › Appearance) --------------------------------- */
+:root[data-palette="midnight"][data-theme="dark"] {
+  --bg: #0d1117;
+  --surface: #1b2230;
+  --surface-hover: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-dim: #8b949e;
+}
+:root[data-palette="midnight"][data-theme="light"] {
+  --bg: #dfe6f0;
+  --surface: #f6f9fc;
+  --surface-hover: #eaf0f7;
+  --border: #c3cedc;
+  --text: #0d1b2a;
+  --text-dim: #4a5a70;
+}
+:root[data-palette="nord"][data-theme="dark"] {
+  --bg: #2e3440;
+  --surface: #3b4252;
+  --surface-hover: #353c4a;
+  --border: #4c566a;
+  --text: #eceff4;
+  --text-dim: #a3abb9;
+}
+:root[data-palette="nord"][data-theme="light"] {
+  --bg: #d8dee9;
+  --surface: #eceff4;
+  --surface-hover: #e5e9f0;
+  --border: #b8c1d1;
+  --text: #2e3440;
+  --text-dim: #4c566a;
+}
+:root[data-palette="forest"][data-theme="dark"] {
+  --bg: #161d17;
+  --surface: #233025;
+  --surface-hover: #1d261e;
+  --border: #34453a;
+  --text: #e5efe3;
+  --text-dim: #94a892;
+}
+:root[data-palette="forest"][data-theme="light"] {
+  --bg: #dfe8dc;
+  --surface: #f4f8f2;
+  --surface-hover: #e9f0e6;
+  --border: #c2d1c0;
+  --text: #1c2a1d;
+  --text-dim: #4f6450;
+}
+:root[data-palette="rose"][data-theme="dark"] {
+  --bg: #1f171b;
+  --surface: #30242a;
+  --surface-hover: #281e23;
+  --border: #4a3640;
+  --text: #f3e7ec;
+  --text-dim: #b39aa6;
+}
+:root[data-palette="rose"][data-theme="light"] {
+  --bg: #f0e1e6;
+  --surface: #fdf6f8;
+  --surface-hover: #f6eaee;
+  --border: #dcc3cd;
+  --text: #2d1a22;
+  --text-dim: #6e5260;
+}
+:root[data-palette="sepia"][data-theme="dark"] {
+  --bg: #1e1a14;
+  --surface: #2f2920;
+  --surface-hover: #27221a;
+  --border: #4a4030;
+  --text: #f0e6d6;
+  --text-dim: #b0a28a;
+}
+:root[data-palette="sepia"][data-theme="light"] {
+  --bg: #eae0cc;
+  --surface: #f8f2e6;
+  --surface-hover: #f1e9d8;
+  --border: #d6c8aa;
+  --text: #2e2618;
+  --text-dim: #6b5d45;
+}

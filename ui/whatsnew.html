@@ -22,14 +22,33 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.6.0</span>
+      <span class="version">Version 0.7.0</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">The everyday basics</h2>
-    <p><b>Bookmarks</b>, <b>history</b>, <b>find in page</b> and <b>permission prompts</b> are here, and the address bar now suggests pages from your history and bookmarks as you type.</p>
+    <h2 style="margin-top:0">Make it yours</h2>
+    <p><b>Tab groups</b> (one row like Chrome, or two rows like Vivaldi), <b>vertical tabs</b>, <b>site icons</b>, <b>color palettes</b>, <b>your own CSS</b> and a <b>new tab page</b> with shortcuts.</p>
   </div>
+
+  <h2>New in 0.7</h2>
+  <ul class="notes">
+    <li><b>Tab groups.</b> Right-click a tab › <b>Add tab to new group</b>. Right-click a group to name it, change its color, collapse it, add a tab or close it. Links you open from a grouped tab join its group, and groups come back with your tabs. Choose how they look in <a href="prism://settings#tabs">Settings › Tabs</a>:
+      <ul>
+        <li><b>One row:</b> each group is a colored label followed by its tabs; click the label to collapse it.</li>
+        <li><b>Two rows:</b> your groups on top, the selected group's tabs below. The selected group always comes first, so <kbd>Ctrl</kbd> <kbd>1</kbd> goes through its tabs; <kbd>Ctrl</kbd> <kbd>2</kbd>–<kbd>9</kbd> pick the others as shown. Drag a group to give it a new place.</li>
+      </ul>
+    </li>
+    <li><b>Drag tabs</b> to reorder them, or next to a grouped tab to add them to that group.</li>
+    <li><b>Vertical tabs:</b> put your tabs in a list on the left (<a href="prism://settings#tabs">Settings › Tabs</a>), with groups as folders. The button at the top narrows it to icons.</li>
+    <li><b>Site icons</b> in tabs, the bookmarks bar, History, Bookmarks and on the new tab page. Prism downloads them itself, without cookies, and keeps them on your PC.</li>
+    <li><b>Right-click a tab</b> for New tab to the right, Reload, Duplicate, Close other tabs and Close tabs to the right.</li>
+    <li><b>Colors:</b> six palettes for Prism's toolbar and pages, Prism, Midnight, Nord, Forest, Rosé and Sepia, each in dark and light (<a href="prism://settings#appearance">Settings › Appearance</a>).</li>
+    <li><b>Your own CSS</b> (<a href="prism://settings#customcss">Settings › Custom CSS</a>): restyle Prism's interface, or any website, site by site.</li>
+    <li><b>New tab page:</b> shortcuts to your most visited sites (or your bookmarks bar) and your own background picture. A <b>Home button</b> is available too.</li>
+    <li><b>Extensions menu:</b> the puzzle button now lists your extensions. Choose which ones get a button in the toolbar, or right-click a button › <b>Hide from toolbar</b>.</li>
+    <li><b>Fixed:</b> with many tabs open, the + button was cut off.</li>
+  </ul>
 
   <h2>New in 0.6</h2>
   <ul class="notes">
@@ -86,7 +105,7 @@
     <tr><td><kbd>Ctrl</kbd> <kbd>T</kbd></td><td>New tab</td></tr>
     <tr><td><kbd>Ctrl</kbd> <kbd>W</kbd></td><td>Close tab</td></tr>
     <tr><td><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>T</kbd></td><td>Reopen closed tab</td></tr>
-    <tr><td><kbd>Ctrl</kbd> <kbd>Tab</kbd> / <kbd>Ctrl</kbd> <kbd>1</kbd>&ndash;<kbd>9</kbd></td><td>Switch tabs</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>Tab</kbd> / <kbd>Ctrl</kbd> <kbd>1</kbd>&ndash;<kbd>9</kbd></td><td>Switch tabs (with two-row groups: groups, and the tabs of the selected one)</td></tr>
     <tr><td><kbd>Ctrl</kbd> <kbd>L</kbd></td><td>Go to the address bar</td></tr>
     <tr><td><kbd>Ctrl</kbd> <kbd>F</kbd> / <kbd>F3</kbd></td><td>Find in page / next match</td></tr>
     <tr><td><kbd>Ctrl</kbd> <kbd>D</kbd></td><td>Bookmark this page</td></tr>
@@ -102,9 +121,8 @@
 
   <h2>Coming next</h2>
   <ul class="notes dim">
-    <li><b>0.7:</b> custom themes and CSS, tab groups (Chrome and Vivaldi style), vertical tabs.</li>
     <li><b>0.8:</b> stronger privacy: fingerprinting protection, HTTPS-only, per-site settings, tracking-parameter removal.</li>
-    <li><b>0.9:</b> Prism's own WebKit build: printing, full network filtering, more extension features.</li>
+    <li><b>0.9:</b> Prism's own WebKit build: printing, camera and microphone, full network filtering, more extension features.</li>
   </ul>
 </main>
 </body>

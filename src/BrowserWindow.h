@@ -20,6 +20,15 @@ struct PermissionPrompt {
     wk::Ref<WKTypeRef> request;
 };
 
+// A named, colored group of tabs. A group's tabs are always next to each
+// other in the window's tab list.
+struct TabGroup {
+    int id { 0 };
+    std::wstring name;
+    std::wstring color; // #rrggbb
+    bool collapsed { false };
+};
+
 struct Tab {
     BrowserWindow* window { };
     int id { };
@@ -42,6 +51,9 @@ struct Tab {
     int findStep { 0 };           // what the search in progress does: 0 new, 1 next, -1 previous
 
     std::vector<PermissionPrompt> prompts;
+
+    int groupId { 0 };          // 0 = not in a group
+    unsigned long long lastActive { 0 }; // when it was last the selected tab
 };
 
 class BrowserWindow {
@@ -49,6 +61,10 @@ public:
     // Opens a new window. `startURLs` are opened as tabs (empty = new tab page);
     // `activeIndex` picks the selected one (-1 = the last).
     static BrowserWindow* open(const std::vector<std::wstring>& startURLs, int activeIndex = -1);
+    // The same, with tab groups: `tabGroups[i]` is the index into `groups`
+    // (plus one; 0 = no group) of tab i.
+    static BrowserWindow* open(const std::vector<std::wstring>& startURLs, int activeIndex,
+        const std::vector<TabGroup>& groups, const std::vector<int>& tabGroups);
 
     // Reopens the windows and tabs from last time. `extraURLs` are added to
     // the first window. Returns false if there was nothing to restore.
@@ -57,6 +73,8 @@ public:
     // Re-applies settings (theme, accent, tab size, ...) to every window.
     static void settingsChanged();
     static void refreshToolbars();
+    // Sends your interface CSS (usercss::interfaceCSS) to every toolbar.
+    static void applyInterfaceCSS();
 
     // Runs `script` in every open tab showing prism://<name>.
     static void evaluateInInternalPages(const std::wstring& name, const std::string& script);
@@ -96,6 +114,9 @@ private:
     LRESULT handleMessage(UINT, WPARAM, LPARAM);
 
     void createToolbar();
+    void createSidebar();
+    void destroySidebar();
+    int sidebarWidth() const; // device pixels, 0 without vertical tabs
     void layout();
     double scaleFactor() const;
     int toolbarHeight() const;
@@ -148,6 +169,31 @@ private:
     static void didFindString(WKPageRef, WKStringRef, unsigned, const void*);
     static void didFailToFindString(WKPageRef, WKStringRef, const void*);
     void attachClients(Tab*);
+    static void sidebarDecidePolicyForNavigationAction(WKPageRef, WKNavigationActionRef, WKFramePolicyListenerRef, WKTypeRef, const void*);
+    void requestIcon(Tab*);
+
+    // Tab groups
+    TabGroup* findGroup(int id);
+    void normalizeGroups();
+    int createGroup(Tab*);
+    void addTabToGroup(Tab*, int groupId);
+    void removeTabFromGroup(Tab*);
+    void closeGroup(int id);
+    void ungroup(int id);
+    void setGroupCollapsed(int id, bool collapsed);
+    void moveTabTo(int tabId, int index, int groupId);
+    // Groups and ungrouped tabs, in order ("units" of the Vivaldi-style
+    // strip): a group id (> 0) or minus a tab id.
+    std::vector<int> units() const;
+    int unitOf(const Tab*) const;
+    std::vector<int> displayedUnits() const;
+    void selectUnit(int unit, bool cycle);
+    void moveUnit(int unit, int index);
+    void showTabMenu(int tabId, POINT screen);
+    void showGroupMenu(int groupId, POINT screen);
+    void showExtensionsMenu(POINT screen);
+    void showHiddenActionMenu(const std::string& extensionId, int x, int y);
+    void closeTabs(const std::vector<int>& ids);
 
     // Find in page
     void openFind();
@@ -178,6 +224,13 @@ private:
     WKPageRef m_toolbarPage { };
     HWND m_toolbarHwnd { };
     bool m_toolbarReady { false };
+    wk::Ref<WKViewRef> m_sidebarView;
+    WKPageRef m_sidebarPage { };
+    HWND m_sidebarHwnd { };
+    bool m_sidebarReady { false };
+    std::vector<TabGroup> m_groups;
+    std::vector<TabGroup> m_pendingGroups;
+    std::vector<int> m_pendingTabGroups;
     std::vector<std::unique_ptr<Tab>> m_tabs;
     std::vector<std::wstring> m_closedURLs;
     int m_activeTabId { 0 };

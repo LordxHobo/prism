@@ -29,6 +29,10 @@ struct Match {
 // (visited often and recently, address starting with what was typed).
 std::vector<Match> search(const std::wstring& text, size_t limit);
 
+// The most visited sites (one page per site, front pages preferred) for
+// the new tab page. Sites in `hidden` are left out.
+std::vector<Match> topSites(size_t count, const std::vector<std::wstring>& hidden);
+
 // Deletes everything.
 void clear();
 

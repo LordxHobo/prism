@@ -9,6 +9,7 @@
 #include <cwctype>
 #include <initializer_list>
 #include <iterator>
+#include <vector>
 #include <windows.h>
 
 namespace settings {
@@ -157,6 +158,93 @@ std::wstring permissionDefault(const std::wstring& permission)
     return value == L"block" ? L"block" : L"ask";
 }
 
+bool verticalTabs()
+{
+    return util::readSetting(L"TabLayout", L"horizontal") == L"vertical";
+}
+
+bool verticalTabsCollapsed()
+{
+    return util::readSetting(L"VerticalTabsCollapsed", L"0") == L"1";
+}
+
+std::wstring groupStyle()
+{
+    return util::readSetting(L"GroupStyle", L"chrome") == L"vivaldi" ? L"vivaldi" : L"chrome";
+}
+
+std::wstring palette()
+{
+    std::wstring value = util::readSetting(L"Palette", L"default");
+    return isOneOf(value, { L"default", L"midnight", L"nord", L"forest", L"rose", L"sepia" }) ? value : L"default";
+}
+
+bool showHomeButton()
+{
+    return util::readSetting(L"HomeButton", L"0") == L"1";
+}
+
+namespace {
+
+std::vector<std::string> hiddenActions()
+{
+    std::string list = util::toUTF8(util::readSetting(L"HiddenActions", L""));
+    std::vector<std::string> ids;
+    size_t start = 0;
+    while (start < list.size()) {
+        size_t comma = list.find(',', start);
+        std::string id = list.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+        if (!id.empty())
+            ids.push_back(id);
+        if (comma == std::string::npos)
+            break;
+        start = comma + 1;
+    }
+    return ids;
+}
+
+} // namespace
+
+bool isActionHidden(const std::string& extensionId)
+{
+    for (auto& id : hiddenActions()) {
+        if (id == extensionId)
+            return true;
+    }
+    return false;
+}
+
+void setActionHidden(const std::string& extensionId, bool hidden)
+{
+    if (extensionId.empty() || extensionId.find(',') != std::string::npos)
+        return;
+    std::vector<std::string> ids;
+    for (auto& id : hiddenActions()) {
+        if (id != extensionId)
+            ids.push_back(id);
+    }
+    if (hidden)
+        ids.push_back(extensionId);
+    std::string list;
+    for (auto& id : ids)
+        list += (list.empty() ? "" : ",") + id;
+    util::writeSetting(L"HiddenActions", util::fromUTF8(list));
+}
+
+std::string hiddenActionsJSON()
+{
+    std::string json = "[";
+    for (auto& id : hiddenActions())
+        json += (json.size() > 1 ? "," : "") + util::jsonString(util::fromUTF8(id));
+    return json + "]";
+}
+
+std::wstring newTabShortcuts()
+{
+    std::wstring value = util::readSetting(L"NewTabShortcuts", L"top");
+    return isOneOf(value, { L"top", L"bookmarks", L"off" }) ? value : L"top";
+}
+
 std::string toJSON()
 {
     std::string json = "{";
@@ -180,6 +268,11 @@ std::string toJSON()
     json += ",\"bookmarksBar\":" + jsonBool(showBookmarksBar());
     json += ",\"locationDefault\":" + util::jsonString(permissionDefault(L"location"));
     json += ",\"notificationsDefault\":" + util::jsonString(permissionDefault(L"notifications"));
+    json += ",\"tabLayout\":" + util::jsonString(verticalTabs() ? L"vertical" : L"horizontal");
+    json += ",\"groupStyle\":" + util::jsonString(groupStyle());
+    json += ",\"palette\":" + util::jsonString(palette());
+    json += ",\"homeButton\":" + jsonBool(showHomeButton());
+    json += ",\"newTabShortcuts\":" + util::jsonString(newTabShortcuts());
     json += ",\"dataDir\":" + util::jsonString(util::dataDirectory());
     json += "}";
     return json;
@@ -235,6 +328,30 @@ bool set(const std::wstring& key, const std::wstring& value)
         if (!isOneOf(value, { L"0", L"1" }))
             return false;
         util::writeSetting(L"BookmarksBar", value);
+    } else if (key == L"tabLayout") {
+        if (!isOneOf(value, { L"horizontal", L"vertical" }))
+            return false;
+        util::writeSetting(L"TabLayout", value);
+    } else if (key == L"verticalTabsCollapsed") {
+        if (!isOneOf(value, { L"0", L"1" }))
+            return false;
+        util::writeSetting(L"VerticalTabsCollapsed", value);
+    } else if (key == L"groupStyle") {
+        if (!isOneOf(value, { L"chrome", L"vivaldi" }))
+            return false;
+        util::writeSetting(L"GroupStyle", value);
+    } else if (key == L"palette") {
+        if (!isOneOf(value, { L"default", L"midnight", L"nord", L"forest", L"rose", L"sepia" }))
+            return false;
+        util::writeSetting(L"Palette", value);
+    } else if (key == L"homeButton") {
+        if (!isOneOf(value, { L"0", L"1" }))
+            return false;
+        util::writeSetting(L"HomeButton", value);
+    } else if (key == L"newTabShortcuts") {
+        if (!isOneOf(value, { L"top", L"bookmarks", L"off" }))
+            return false;
+        util::writeSetting(L"NewTabShortcuts", value);
     } else if (key == L"locationDefault" || key == L"notificationsDefault") {
         if (!isOneOf(value, { L"ask", L"block" }))
             return false;
