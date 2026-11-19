@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.2
+
+- tabs.* now report extension pages by the address `runtime.getURL()` gives (`http://<id>.localhost:<port>/<path>`) instead of `chrome-extension://<id>/<path>`, so extensions that look up their own tabs by URL find them. AdNauseam's first-run "Let's go!" sends `closeExtPage`, which looks for a tab whose URL starts with `vAPI.getURL('firstrun.html')`; it never matched, so the page stayed open.
+- `displayURL()` maps the http extension addresses (not only old file:// ones) to `chrome-extension://<id>/<path>` for the address bar.
+
 ## 0.7.1
 
 - Background tabs are not "in the window" (`WKViewSetIsInWindow(false)`; only the selected tab is). WebKit then doesn't let them start media (`Page::setCanStartMedia`), like Safari: YouTube opened in the background or restored tabs wait until shown; already playing media continues.

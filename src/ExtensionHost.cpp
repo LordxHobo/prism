@@ -171,10 +171,12 @@ bool canSee(const Extension& ext, int tabId, const std::string& url)
 std::string tabJSON(const Extension& ext, const tabs::Info& tab)
 {
     std::string url = util::toUTF8(tab.url);
-    // Extension pages show as chrome-extension:// addresses.
+    // Extension pages are reported by the same address runtime.getURL()
+    // gives, so extensions can find their own tabs (AdNauseam closes its
+    // welcome page that way). Older file:// addresses are mapped too.
     std::string path;
     if (Extension* owner = internal::extensionForURL(url, &path))
-        url = "chrome-extension://" + owner->id + "/" + path;
+        url = internal::baseURL(*owner) + path;
     bool visible = canSee(ext, tab.id, util::toUTF8(tab.url));
     std::string json = "{\"id\":" + std::to_string(tab.id);
     json += ",\"windowId\":" + std::to_string(tab.windowId);
@@ -2097,7 +2099,9 @@ std::wstring displayURL(const std::wstring& url)
 {
     std::string path;
     Extension* ext = internal::extensionForURL(util::toUTF8(url), &path);
-    if (!ext || url.rfind(L"file:", 0) != 0)
+    // The extension's own http://<id>.localhost address and older file://
+    // addresses both show as chrome-extension://<id>/<path>.
+    if (!ext || url.rfind(L"chrome-extension:", 0) == 0 || url.rfind(L"moz-extension:", 0) == 0)
         return url;
     return util::fromUTF8("chrome-extension://" + ext->id + "/" + path);
 }
