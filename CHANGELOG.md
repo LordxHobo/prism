@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.1
+
+- curl error 60 (peer certificate not verified) on an https page: once per site and session, Prism makes a WinHTTP HEAD request to the same address. WebKit's curl uses `CURLSSLOPT_NATIVE_CA` on Windows, which only reads root certificates already in the Windows store; Schannel's chain building downloads missing roots from Microsoft's trusted program (automatic root update). If WinHTTP succeeds, `engine::restartNetworkProcess()` (`WKWebsiteDataStoreTerminateNetworkProcess`, new optional binding) makes WebKit read the store again and the page loads again; otherwise the error page shows. HTTPS-first's fallback to http only happens after that.
+- Error page for error 60: "Prism can't verify <site>'s certificate", with tips (date and time, Windows Update, inspecting networks).
+
 ## 0.8.0
 
 - `src/Privacy.cpp`: per-site overrides in `site-privacy.json` (`{site: {https, params, fingerprinting}}`; a site's override also covers its subdomains; "www." is ignored). Settings `HttpsMode` (off | first | only, default first), `StripTrackingParams`, `Fingerprinting` (both default on).

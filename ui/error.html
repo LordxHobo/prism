@@ -92,6 +92,16 @@ if (kind === 'blocked') {
   tips.push('Reload the page to try again.');
   tips.push('If it keeps happening, the page may not work with Prism yet.');
   $('details').textContent = 'Web process ended (reason ' + code + ').';
+} else if (code === '60') {
+  // curl: the certificate couldn't be verified.
+  document.title = 'Certificate not trusted: ' + host;
+  $('icon').textContent = '\u{1F512}';
+  $('heading').textContent = 'Prism can\u2019t verify ' + host + '\u2019s certificate';
+  $('summary').textContent = 'The site\u2019s security certificate isn\u2019t signed by an authority Windows trusts, so Prism didn\u2019t open it.';
+  tips.push('Check that your PC\u2019s date and time are right.');
+  tips.push('Run Windows Update: it keeps the list of trusted certificate authorities current.');
+  tips.push('If this happens on a network you don\u2019t control (work, school, hotel), it may be inspecting secure connections.');
+  $('details').textContent = (message ? message + ' ' : '') + '(error ' + code + ')' + (url ? ' \u2014 ' + url : '');
 } else {
   document.title = host ? 'Can’t reach ' + host : 'Can’t reach this page';
   $('heading').textContent = host ? 'Can’t reach ' + host : 'Can’t reach this page';

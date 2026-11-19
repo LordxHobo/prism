@@ -10,6 +10,7 @@
 #include "Engine.h"
 #include "Extensions.h"
 #include "History.h"
+#include "Http.h"
 #include "Icons.h"
 #include "Permissions.h"
 #include "Privacy.h"
@@ -24,6 +25,8 @@
 #include "Version.h"
 
 #include <algorithm>
+#include <set>
+#include <thread>
 #include <cmath>
 #include <cstdio>
 #include <cwctype>
@@ -1934,6 +1937,40 @@ void BrowserWindow::didFailProvisionalNavigation(WKPageRef, WKNavigationRef, WKE
     std::wstring failingURL = toWide(Ref<WKURLRef>::adopt(WKErrorCopyFailingURL(error)).get());
     std::wstring description = toWide(Ref<WKStringRef>::adopt(WKErrorCopyLocalizedDescription(error)).get());
 
+    // 60 = curl couldn't verify the site's certificate. WebKit's curl only
+    // trusts the root certificates already in Windows' store, and Windows
+    // adds missing (but trusted) roots only when its own networking meets
+    // them. So: connect once with Windows' networking (WinHTTP), which adds
+    // the root if Microsoft trusts it, then restart WebKit's network process
+    // so it reads the store again, and load the page again. Once per site.
+    static std::set<std::wstring> certificateChecked;
+    std::wstring certificateSite = lower(hostOf(failingURL));
+    if (code == 60 && lower(failingURL.substr(0, 8)) == L"https://" && certificateChecked.insert(certificateSite).second) {
+        HWND hwnd = tab->window->m_hwnd;
+        int tabId = tab->id;
+        std::thread([hwnd, tabId, failingURL, description, code] {
+            http::Request request;
+            request.method = L"HEAD";
+            request.url = failingURL;
+            http::Response response;
+            std::wstring problem;
+            bool trusted = http::request(request, response, problem, 4096);
+            util::postToMainThread([hwnd, tabId, failingURL, description, code, trusted] {
+                BrowserWindow* window = BrowserWindow::fromHWND(hwnd);
+                Tab* tab = window ? window->findTab(tabId) : nullptr;
+                if (!tab)
+                    return;
+                if (!trusted) {
+                    showLoadError(tab, failingURL, description, code);
+                    return;
+                }
+                engine::restartNetworkProcess();
+                window->navigate(tab, failingURL);
+            });
+        }).detach();
+        return;
+    }
+
     // An address Prism switched to https didn't load: the site has no
     // (working) HTTPS. "HTTPS first" opens the http address; "HTTPS only"
     // asks first.
@@ -1952,6 +1989,11 @@ void BrowserWindow::didFailProvisionalNavigation(WKPageRef, WKNavigationRef, WKE
         }
         return;
     }
+    showLoadError(tab, failingURL, description, code);
+}
+
+void BrowserWindow::showLoadError(Tab* tab, const std::wstring& failingURL, const std::wstring& description, int code)
+{
     std::wstring query = L"kind=network&url=" + util::urlEncode(failingURL)
         + L"&message=" + util::urlEncode(description) + L"&code=" + std::to_wstring(code);
 

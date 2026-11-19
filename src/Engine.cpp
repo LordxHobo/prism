@@ -281,6 +281,12 @@ void addUserScript(const std::string& group, const std::string& source)
     registerUserScript(source);
 }
 
+void restartNetworkProcess()
+{
+    if (s_dataStore && WKWebsiteDataStoreTerminateNetworkProcess)
+        WKWebsiteDataStoreTerminateNetworkProcess(s_dataStore.get());
+}
+
 WKContextRef context()
 {
     return s_context.get();

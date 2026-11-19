@@ -22,6 +22,10 @@ bool initialize(std::wstring& error);
 // The one browsing context every page belongs to.
 WKContextRef context();
 
+// Restarts WebKit's network process (it starts again with the next load),
+// e.g. so it reads certificates Windows has just added.
+void restartNetworkProcess();
+
 // Where extension content scripts are registered (shared by all pages).
 WKUserContentControllerRef userContentController();
 

@@ -177,6 +177,7 @@ private:
     void attachClients(Tab*);
     static void sidebarDecidePolicyForNavigationAction(WKPageRef, WKNavigationActionRef, WKFramePolicyListenerRef, WKTypeRef, const void*);
     void requestIcon(Tab*);
+    static void showLoadError(Tab*, const std::wstring& failingURL, const std::wstring& description, int code);
 
     // Tab groups
     TabGroup* findGroup(int id);

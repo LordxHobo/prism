@@ -526,7 +526,8 @@ typedef struct WKNotificationProviderV0 {
     X(WKNotificationCopyTitle, WKStringRef, (WKNotificationRef)) \
     X(WKNotificationCopyBody, WKStringRef, (WKNotificationRef)) \
     X(WKNotificationGetSecurityOrigin, WKSecurityOriginRef, (WKNotificationRef)) \
-    X(WKNotificationGetID, uint64_t, (WKNotificationRef))
+    X(WKNotificationGetID, uint64_t, (WKNotificationRef)) \
+    X(WKWebsiteDataStoreTerminateNetworkProcess, void, (WKWebsiteDataStoreRef))
 
 namespace wk {
 
