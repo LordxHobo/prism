@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1
+
+- Shields runtime (`ui/shields-runtime.js`): videos in hidden ads are stopped. Capture-phase `play` / `playing` listeners: a `<video>` inside an element matching one of Shields' hide selectors (the valid ones, joined for `closest`) is paused and muted at once; a connected `<video>` with no layout box or one under 2×2 px is checked again after 400 ms and stopped if it's still playing with no size. Skipped within 1.5 s of a trusted pointerdown/keydown. Videos already playing are checked when new hide rules arrive. Audio elements aren't touched. Tested in WebKitGTK 2.52 (hidden ad tile and zero-size player stopped; visible video and a player sized 150 ms late kept playing).
+
 ## 0.9.0
 
 - **PrismBundle.dll** (`bundle/`), a WebKit injected bundle: set with `WKContextConfigurationSetInjectedBundlePath` when the DLL is next to Prism.exe. In each content process it looks up WebKit's C API in WebKit2.dll (`bundle/BundleApi.h`), sets a resource load client on every page and, in `willSendRequestForFrame`, asks Prism with `WKBundlePostSynchronousMessage("prism:check", "<page id>\t<kind>\t<first party URL>\t<URL>")`; "1" cancels the load (returns null). Not asked: main-frame documents and their redirects (checked in decidePolicy), non-http(s) and local addresses, requests whose first party isn't an http(s) site (Prism's own and extension pages). Answers are cached per kind + first party + URL (8192 entries), cleared when Prism posts `prism:filter "<1|0>\t<generation>"` with a new generation; "0" turns asking off. The page id is `WKBundlePageGetWebPageProxyIdentifierForTesting`, announced with `WKBundlePagePostMessage("prism:page")`.

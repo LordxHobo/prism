@@ -8,7 +8,8 @@
 // 2. asks Prism about the page's class names and ids, and hides any that
 //    generic filters target ("generic hiding"),
 // 3. checks the page's images and frames against the network filters and
-//    hides the ads that come from the site's own servers.
+//    hides the ads that come from the site's own servers,
+// 4. stops videos that play inside hidden ads.
 // Scriptlets run separately, before this, in the same user script.
 (function (config) {
   'use strict';
@@ -66,11 +67,103 @@
     if (!selectors || !selectors.length) return;
     let added = '';
     for (const selector of selectors) {
-      if (validSelector(selector)) added += selector + '{display:none!important}\n';
+      if (validSelector(selector)) {
+        added += selector + '{display:none!important}\n';
+        hiddenSelectors.push(selector);
+      }
     }
     if (!added) return;
     cssText += added;
+    hiddenUnion = null;
     ensureStyle();
+    stopHiddenVideos();
+  }
+
+  // ---- Videos in hidden ads ------------------------------------------------
+  // Hiding an ad doesn't stop a video playing in it (YouTube's home page ad
+  // tile autoplays like a preview). A video that starts playing inside
+  // something Shields hid, or with no visible size (a preview player over a
+  // hidden tile), is paused and muted. Videos you start yourself (a click or
+  // key press just before) are left alone.
+  const hiddenSelectors = [];
+  let hiddenUnion = null;
+  const closestFn = Element.prototype.closest;
+  const getClientRectsFn = Element.prototype.getClientRects;
+  const mediaProto = win.HTMLMediaElement ? win.HTMLMediaElement.prototype : null;
+  const pauseFn = mediaProto ? mediaProto.pause : null;
+  const mutedSetter = mediaProto ? (Object.getOwnPropertyDescriptor(mediaProto, 'muted') || {}).set : null;
+  const pausedGetter = mediaProto ? (Object.getOwnPropertyDescriptor(mediaProto, 'paused') || {}).get : null;
+  const nowFn = Date.now;
+  let lastUserInput = 0;
+
+  function insideHiddenAd(element) {
+    if (!hiddenSelectors.length) return false;
+    if (hiddenUnion === null) hiddenUnion = hiddenSelectors.join(',');
+    try {
+      return !!apply(closestFn, element, [hiddenUnion]);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function hasNoVisibleSize(element) {
+    if (!element.isConnected) return false; // new Audio()/Video() players
+    const rects = apply(getClientRectsFn, element, []);
+    if (!rects.length) return true;
+    for (let i = 0; i < rects.length; i++) {
+      if (rects[i].width >= 2 && rects[i].height >= 2) return false;
+    }
+    return true;
+  }
+
+  function shouldStop(element) {
+    if (!pauseFn || !element || element.tagName !== 'VIDEO') return false;
+    if (nowFn() - lastUserInput < 1500) return false;
+    return insideHiddenAd(element) || hasNoVisibleSize(element);
+  }
+
+  // Players can start a moment before they get their size, so a video with
+  // no size gets another look before it's stopped.
+  function checkPlaying(element) {
+    if (!pauseFn || !element || element.tagName !== 'VIDEO') return;
+    if (nowFn() - lastUserInput < 1500) return;
+    if (insideHiddenAd(element)) {
+      stop(element);
+      return;
+    }
+    if (!hasNoVisibleSize(element)) return;
+    setTimeoutFn(() => {
+      if (pausedGetter && apply(pausedGetter, element, [])) return;
+      if (shouldStop(element)) stop(element);
+    }, 400);
+  }
+
+  function stop(element) {
+    try {
+      if (mutedSetter) apply(mutedSetter, element, [true]);
+      apply(pauseFn, element, []);
+    } catch (e) { }
+  }
+
+  function stopHiddenVideos() {
+    if (!pauseFn || !hiddenSelectors.length) return;
+    const videos = apply(querySelectorAllFn, doc, ['video']);
+    for (let i = 0; i < videos.length; i++) {
+      const video = videos[i];
+      if (pausedGetter && apply(pausedGetter, video, [])) continue;
+      if (shouldStop(video)) stop(video);
+    }
+  }
+
+  if (pauseFn) {
+    const listen = win.addEventListener.bind(win);
+    const noteInput = (event) => { if (event.isTrusted) lastUserInput = nowFn(); };
+    listen('pointerdown', noteInput, true);
+    listen('keydown', noteInput, true);
+    // Media events don't bubble, but they do pass through the capture phase.
+    const onPlay = (event) => checkPlaying(event.target);
+    listen('play', onPlay, true);
+    listen('playing', onPlay, true);
   }
 
   hideSelectors(config.hide);
