@@ -28,6 +28,22 @@
   const isBackground = /\/_prism_background\.html$/i.test(location.pathname);
   const manifest = config.manifest || {};
 
+  // ---- requestIdleCallback ------------------------------------------------------------
+  // WebKit doesn't have it (Safari never shipped it), but extensions written
+  // for Chrome and Firefox call it, e.g. AdNauseam whenever a tab changes.
+  if (typeof window.requestIdleCallback !== 'function') {
+    const requestIdleCallback = function requestIdleCallback(callback) {
+      if (typeof callback !== 'function') throw new TypeError('requestIdleCallback: callback is not a function');
+      return setTimeout(() => {
+        const start = performance.now();
+        callback(Object.freeze({ didTimeout: false, timeRemaining: () => Math.max(0, 50 - (performance.now() - start)) }));
+      }, 1);
+    };
+    const cancelIdleCallback = function cancelIdleCallback(handle) { clearTimeout(handle); };
+    Object.defineProperty(window, 'requestIdleCallback', { value: requestIdleCallback, writable: true, configurable: true });
+    Object.defineProperty(window, 'cancelIdleCallback', { value: cancelIdleCallback, writable: true, configurable: true });
+  }
+
   // ---- Talking to Prism -----------------------------------------------------------
   function call(op, data) {
     const message = Object.assign({}, data || {}, { op });
@@ -316,7 +332,7 @@
     setUninstallURL: resolved(undefined),
     requestUpdateCheck: resolved({ status: 'no_update' }),
     getPlatformInfo: resolved({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' }),
-    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.5.4', buildID: '0' }),
+    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.5.5', buildID: '0' }),
     getContexts: resolved([]),
     getBackgroundPage: notYet('Reaching the background page directly'),
     getPackageDirectoryEntry: notYet('getPackageDirectoryEntry'),

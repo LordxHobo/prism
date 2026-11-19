@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.5
+
+- `requestIdleCallback`/`cancelIdleCallback` for extensions (WebKit doesn't have them; Safari never shipped them). Extension pages always get them. In websites they're added only when an enabled extension's content scripts (or `scripting.executeScript` code) mention them, so pages don't gain a detectable feature otherwise. Simple version: runs after ~1 ms with a 50 ms `timeRemaining()`; `timeout` is ignored. AdNauseam's background threw `self.requestIdleCallback is not a function` on every `tabs.onUpdated`.
+
 ## 0.5.4
 
 - Extension errors include the error's name and message: WebKit's `error.stack` leaves them out, so unhandled rejections only showed a stack.

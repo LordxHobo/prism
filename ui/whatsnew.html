@@ -22,7 +22,7 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.5.4</span>
+      <span class="version">Version 0.5.5</span>
     </div>
   </header>
 
@@ -30,6 +30,11 @@
     <h2 style="margin-top:0">Extensions, for real this time</h2>
     <p>Extensions now run all their parts: the background part that works behind the scenes, their <b>toolbar button and popup</b>, and their <b>options page</b>. Dark Reader, uBlock Origin Lite's popup and similar extensions should work like in Chrome or Firefox.</p>
   </div>
+
+  <h2>Fixed in 0.5.5</h2>
+  <ul class="notes">
+    <li>Extensions that use <code>requestIdleCallback</code>, which WebKit doesn't have, no longer fail. AdNauseam showed an error every time a tab changed.</li>
+  </ul>
 
   <h2>Fixed in 0.5.4</h2>
   <ul class="notes">

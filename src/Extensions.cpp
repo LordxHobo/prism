@@ -695,7 +695,13 @@ std::string buildUserScript(const Extension& ext)
         else
             scripts += std::string(i ? ",\n" : "") + "function (chrome, browser) {\n" + joinFiles(ext.dir, entry.js, "\n;\n") + "\n}";
     }
-    config += "]}";
+    config += "]";
+    // WebKit has no requestIdleCallback. The runtime adds one to the page
+    // only when the extension's scripts use it, so websites don't get an
+    // extra feature to detect when they don't need to.
+    if (scripts.find("IdleCallback") != std::string::npos)
+        config += ",\"idleCallback\":true";
+    config += "}";
     return "/* Prism: " + ext.name + " */\n" + g_runtimeSource + "(" + config + ", [\n" + scripts + "\n]);\n";
 }
 
@@ -1682,6 +1688,8 @@ std::string injectionScript(const Extension& ext, const std::string& code)
     config += ",\"manifest\":" + ext.manifestJSON;
     config += ",\"messages\":" + ext.messagesJSON;
     config += ",\"injected\":true";
+    if (code.find("IdleCallback") != std::string::npos)
+        config += ",\"idleCallback\":true";
     config += ",\"entries\":[{\"matches\":[\"<all_urls>\"],\"excludeMatches\":[],\"includeGlobs\":[],\"excludeGlobs\":[],\"allFrames\":false,\"runAt\":\"document_start\",\"css\":\"\"}]}";
     return g_runtimeSource + "(" + config + ", [function (chrome, browser) {\n" + code + "\n}])";
 }

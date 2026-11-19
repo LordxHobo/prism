@@ -42,6 +42,9 @@
   const appendChildFn = Node.prototype.appendChild;
   const regExpTest = RegExp.prototype.test;
   const setTimeoutFn = win.setTimeout.bind(win);
+  const clearTimeoutFn = win.clearTimeout.bind(win);
+  const performanceRef = win.performance;
+  const performanceNow = performanceRef.now.bind(performanceRef);
   const consoleError = console.error.bind(console);
   const MapCtor = Map;
   const mapGet = Map.prototype.get;
@@ -463,6 +466,22 @@
     const run = runAt === 'document_end' ? task : () => setTimeoutFn(task, 0);
     if (doc.readyState === 'loading') apply(addEventListenerFn, doc, ['DOMContentLoaded', run, { once: true }]);
     else run();
+  }
+
+  // WebKit has no requestIdleCallback (Safari never shipped it). Extensions
+  // written for Chrome and Firefox call it, so add a simple one, but only
+  // when this extension's scripts use it (see Extensions.cpp).
+  if (config.idleCallback && typeof win.requestIdleCallback !== 'function') {
+    const requestIdleCallback = function requestIdleCallback(callback) {
+      if (typeof callback !== 'function') throw new TypeError('requestIdleCallback: callback is not a function');
+      return setTimeoutFn(() => {
+        const start = performanceNow();
+        callback(freeze({ didTimeout: false, timeRemaining: () => Math.max(0, 50 - (performanceNow() - start)) }));
+      }, 1);
+    };
+    const cancelIdleCallback = function cancelIdleCallback(handle) { clearTimeoutFn(handle); };
+    defineProperty(win, 'requestIdleCallback', { value: requestIdleCallback, writable: true, configurable: true });
+    defineProperty(win, 'cancelIdleCallback', { value: cancelIdleCallback, writable: true, configurable: true });
   }
 
   const entries = config.entries || [];
