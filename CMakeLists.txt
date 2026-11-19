@@ -3,7 +3,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 cmake_minimum_required(VERSION 3.21)
-project(Prism VERSION 0.5.3 LANGUAGES CXX RC)
+project(Prism VERSION 0.5.4 LANGUAGES CXX RC)
 
 if(NOT WIN32)
     message(FATAL_ERROR "Prism currently builds for Windows only.")

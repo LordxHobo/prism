@@ -98,22 +98,34 @@
   const notYet = (what) => withCallback(() => Promise.reject(new Error(what + " isn't supported in Prism yet.")));
 
   // ---- Errors: shown on Prism's Extensions page ----------------------------------------------
+  // WebKit's error.stack leaves out the message itself: put both in.
+  const describe = (value) => {
+    if (value instanceof Error || (value && typeof value === 'object' && 'message' in value && 'stack' in value)) {
+      const head = (value.name || 'Error') + ': ' + value.message;
+      if (!value.stack) return head;
+      return String(value.stack).startsWith(head) ? String(value.stack) : head + '\n' + value.stack;
+    }
+    if (value && typeof value === 'object') {
+      try { return JSON.stringify(value); } catch (error) { return String(value); }
+    }
+    return String(value);
+  };
   const report = (message, source) => {
     try {
       call('log', { message: String(message).slice(0, 2000), source: String(source || location.pathname).slice(0, 300) }).catch(() => {});
     } catch (error) { /* never let reporting break the page */ }
   };
   window.addEventListener('error', (event) => {
-    report(event.message || (event.error && event.error.message) || 'Error', (event.filename || '').replace(base, '/') + (event.lineno ? ':' + event.lineno : ''));
+    const text = event.error ? describe(event.error) : (event.message || 'Error');
+    report(text, (event.filename || '').replace(base, '/') + (event.lineno ? ':' + event.lineno : ''));
   });
   window.addEventListener('unhandledrejection', (event) => {
-    const reason = event.reason;
-    report('Unhandled promise rejection: ' + ((reason && (reason.stack || reason.message)) || reason), location.pathname);
+    report('Unhandled promise rejection: ' + describe(event.reason), location.pathname);
   });
   const consoleError = console.error.bind(console);
   console.error = (...args) => {
     consoleError(...args);
-    report(args.map((arg) => (arg && arg.stack) || (typeof arg === 'object' ? (() => { try { return JSON.stringify(arg); } catch (e) { return String(arg); } })() : String(arg))).join(' '), location.pathname);
+    report(args.map(describe).join(' '), location.pathname);
   };
 
   // ---- Messages, ports and events from Prism -----------------------------------------
@@ -304,7 +316,7 @@
     setUninstallURL: resolved(undefined),
     requestUpdateCheck: resolved({ status: 'no_update' }),
     getPlatformInfo: resolved({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' }),
-    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.5.3', buildID: '0' }),
+    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.5.4', buildID: '0' }),
     getContexts: resolved([]),
     getBackgroundPage: notYet('Reaching the background page directly'),
     getPackageDirectoryEntry: notYet('getPackageDirectoryEntry'),
@@ -722,7 +734,16 @@
   const webNavigation = {
     onBeforeNavigate: quiet(), onCommitted: quiet(), onDOMContentLoaded: quiet(), onCompleted: quiet(), onErrorOccurred: quiet(),
     onCreatedNavigationTarget: quiet(), onReferenceFragmentUpdated: quiet(), onHistoryStateUpdated: quiet(), onTabReplaced: quiet(),
-    getFrame: resolved(null), getAllFrames: resolved(null),
+    // Prism knows each tab's page (frame 0), not its frames yet.
+    getFrame: withCallback((details) => {
+      if (!details || details.frameId !== 0) return null;
+      return call('tabs.get', { tabId: details.tabId }).then((tab) => ({
+        url: tab.url || '', parentFrameId: -1, errorOccurred: false, frameId: 0, documentLifecycle: 'active', frameType: 'outermost_frame',
+      }), () => null);
+    }),
+    getAllFrames: withCallback((details) => call('tabs.get', { tabId: details && details.tabId }).then((tab) => [{
+      url: tab.url || '', parentFrameId: -1, errorOccurred: false, frameId: 0, processId: 0, documentLifecycle: 'active', frameType: 'outermost_frame',
+    }], () => null)),
   };
 
   const idle = { queryState: resolved('active'), setDetectionInterval: () => {}, onStateChanged: quiet() };
