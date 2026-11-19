@@ -140,6 +140,23 @@ bool clearOnExit()
     return util::readSetting(L"ClearOnExit", L"0") == L"1";
 }
 
+bool saveHistory()
+{
+    return util::readSetting(L"SaveHistory", L"1") == L"1";
+}
+
+bool showBookmarksBar()
+{
+    return util::readSetting(L"BookmarksBar", L"1") == L"1";
+}
+
+std::wstring permissionDefault(const std::wstring& permission)
+{
+    const wchar_t* key = permission == L"location" ? L"LocationDefault" : L"NotificationsDefault";
+    std::wstring value = util::readSetting(key, L"ask");
+    return value == L"block" ? L"block" : L"ask";
+}
+
 std::string toJSON()
 {
     std::string json = "{";
@@ -159,6 +176,10 @@ std::string toJSON()
     json += ",\"tabStyle\":" + util::jsonString(compactTabs() ? L"compact" : L"normal");
     json += ",\"cookiePolicy\":" + util::jsonString(strictCookies() ? L"strict" : L"standard");
     json += ",\"clearOnExit\":" + jsonBool(clearOnExit());
+    json += ",\"saveHistory\":" + jsonBool(saveHistory());
+    json += ",\"bookmarksBar\":" + jsonBool(showBookmarksBar());
+    json += ",\"locationDefault\":" + util::jsonString(permissionDefault(L"location"));
+    json += ",\"notificationsDefault\":" + util::jsonString(permissionDefault(L"notifications"));
     json += ",\"dataDir\":" + util::jsonString(util::dataDirectory());
     json += "}";
     return json;
@@ -206,6 +227,18 @@ bool set(const std::wstring& key, const std::wstring& value)
         if (!isOneOf(value, { L"0", L"1" }))
             return false;
         util::writeSetting(L"ClearOnExit", value);
+    } else if (key == L"saveHistory") {
+        if (!isOneOf(value, { L"0", L"1" }))
+            return false;
+        util::writeSetting(L"SaveHistory", value);
+    } else if (key == L"bookmarksBar") {
+        if (!isOneOf(value, { L"0", L"1" }))
+            return false;
+        util::writeSetting(L"BookmarksBar", value);
+    } else if (key == L"locationDefault" || key == L"notificationsDefault") {
+        if (!isOneOf(value, { L"ask", L"block" }))
+            return false;
+        util::writeSetting(key == L"locationDefault" ? L"LocationDefault" : L"NotificationsDefault", value);
     } else
         return false;
     return true;

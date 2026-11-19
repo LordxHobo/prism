@@ -36,6 +36,16 @@ bool strictCookies();
 // Delete cookies, site data and caches when Prism closes.
 bool clearOnExit();
 
+// Keep a list of visited pages (prism://history, address-bar suggestions).
+bool saveHistory();
+
+// Show the bookmarks bar under the address bar (Ctrl+Shift+B).
+bool showBookmarksBar();
+
+// What happens when a site asks for something ("ask" or "block"):
+// "location" and "notifications".
+std::wstring permissionDefault(const std::wstring& permission);
+
 // All settings as a JSON object (UTF-8), for the settings page.
 std::string toJSON();
 

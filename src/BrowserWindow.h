@@ -13,6 +13,13 @@
 class BrowserWindow;
 namespace tabs { struct Info; }
 
+// A site's question waiting for an answer in the bar under the address bar.
+struct PermissionPrompt {
+    std::wstring kind;   // "location" or "notifications"
+    std::wstring origin; // "https://example.com"
+    wk::Ref<WKTypeRef> request;
+};
+
 struct Tab {
     BrowserWindow* window { };
     int id { };
@@ -26,6 +33,15 @@ struct Tab {
     bool crashed { false };
     bool extensionPages { false }; // made with engine::extensionPageConfiguration()
     std::wstring savedURL; // what the session file has for this tab
+
+    // Find in page (Ctrl+F)
+    bool findOpen { false };
+    std::wstring findQuery;
+    long long findMatches { -1 }; // -1 = not searched yet
+    long long findIndex { 0 };    // which match is selected, from 1
+    int findStep { 0 };           // what the search in progress does: 0 new, 1 next, -1 previous
+
+    std::vector<PermissionPrompt> prompts;
 };
 
 class BrowserWindow {
@@ -124,7 +140,36 @@ private:
     static void contextMenuDidCreateDownload(WKPageRef, WKDownloadRef, const void*);
     static void toolbarDecidePolicyForNavigationAction(WKPageRef, WKNavigationActionRef, WKFramePolicyListenerRef, WKTypeRef, const void*);
     static void toolbarPrompt(WKPageRef, WKStringRef, WKStringRef, WKFrameRef, WKSecurityOriginRef, WKPageRunJavaScriptPromptResultListenerRef, const void*);
+    static void didCommitNavigation(WKPageRef, WKNavigationRef, WKTypeRef, const void*);
+    static void didSameDocumentNavigation(WKPageRef, WKNavigationRef, WKSameDocumentNavigationType, WKTypeRef, const void*);
+    static void decidePolicyForGeolocation(WKPageRef, WKFrameRef, WKSecurityOriginRef, WKGeolocationPermissionRequestRef, const void*);
+    static void decidePolicyForNotifications(WKPageRef, WKSecurityOriginRef, WKNotificationPermissionRequestRef, const void*);
+    static void printFrame(WKPageRef, WKFrameRef, const void*);
+    static void didFindString(WKPageRef, WKStringRef, unsigned, const void*);
+    static void didFailToFindString(WKPageRef, WKStringRef, const void*);
     void attachClients(Tab*);
+
+    // Find in page
+    void openFind();
+    void closeFind(Tab*);
+    void findInPage(Tab*, int step);
+
+    // Permission prompts
+    void queuePrompt(Tab*, const std::wstring& kind, const std::wstring& origin, WKTypeRef request);
+    void answerPrompt(Tab*, const std::wstring& answer);
+    void denyPrompts(Tab*);
+
+    // Address-bar suggestions
+    std::string suggest(const std::wstring& argument);
+
+    // Bookmarks
+    POINT toolbarPoint(const std::wstring& coordinates) const;
+    void bookmarkButton(const std::wstring& coordinates);
+    void openBookmarkURL(const std::wstring& url, const std::wstring& mode);
+    void showBookmarkFolder(long long folderId, POINT screen);
+    void showBookmarkMenu(long long id, POINT screen);
+    void showBookmarkOverflow(const std::vector<long long>& ids, POINT screen);
+    void toggleBookmarksBar();
     void startDownload(WKDownloadRef);
 
     HWND m_hwnd { };

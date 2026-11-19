@@ -281,6 +281,11 @@ void addUserScript(const std::string& group, const std::string& source)
     registerUserScript(source);
 }
 
+WKContextRef context()
+{
+    return s_context.get();
+}
+
 WKPageConfigurationRef pageConfiguration()
 {
     return s_pageConfiguration.get();

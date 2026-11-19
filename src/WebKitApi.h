@@ -58,6 +58,38 @@ typedef const struct OpaqueWKUserContentController* WKUserContentControllerRef;
 typedef const struct OpaqueWKUserScript* WKUserScriptRef;
 typedef const struct OpaqueWKScriptMessage* WKScriptMessageRef;
 typedef const struct OpaqueWKCompletionListener* WKCompletionListenerRef;
+typedef const struct OpaqueWKArray* WKArrayRef;
+typedef const struct OpaqueWKDictionary* WKDictionaryRef;
+typedef struct OpaqueWKDictionary* WKMutableDictionaryRef;
+typedef const struct OpaqueWKBoolean* WKBooleanRef;
+typedef const struct OpaqueWKGeolocationManager* WKGeolocationManagerRef;
+typedef const struct OpaqueWKGeolocationPermissionRequest* WKGeolocationPermissionRequestRef;
+typedef const struct OpaqueWKGeolocationPosition* WKGeolocationPositionRef;
+typedef const struct OpaqueWKNotification* WKNotificationRef;
+typedef const struct OpaqueWKNotificationManager* WKNotificationManagerRef;
+typedef const struct OpaqueWKNotificationPermissionRequest* WKNotificationPermissionRequestRef;
+
+// Find in page (WKFindOptions.h).
+typedef uint32_t WKFindOptions;
+enum {
+    kWKFindOptionsCaseInsensitive = 1 << 0,
+    kWKFindOptionsAtWordStarts = 1 << 1,
+    kWKFindOptionsTreatMedialCapitalAsWordStart = 1 << 2,
+    kWKFindOptionsBackwards = 1 << 3,
+    kWKFindOptionsWrapAround = 1 << 4,
+    kWKFindOptionsShowOverlay = 1 << 5,
+    kWKFindOptionsShowFindIndicator = 1 << 6,
+    kWKFindOptionsShowHighlight = 1 << 7
+};
+
+// WKPageLoadTypes.h
+typedef uint32_t WKSameDocumentNavigationType;
+enum {
+    kWKSameDocumentNavigationAnchorNavigation,
+    kWKSameDocumentNavigationSessionStatePush,
+    kWKSameDocumentNavigationSessionStateReplace,
+    kWKSameDocumentNavigationSessionStatePop
+};
 
 // When a user script runs (WKUserScriptInjectionTime.h).
 enum _WKUserScriptInjectionTime {
@@ -90,6 +122,10 @@ typedef void (*WKPageRunJavaScriptAlertCallback)(WKPageRef page, WKStringRef ale
 typedef void (*WKPageRunJavaScriptConfirmCallback)(WKPageRef page, WKStringRef message, WKFrameRef frame, WKSecurityOriginRef securityOrigin, WKPageRunJavaScriptConfirmResultListenerRef listener, const void* clientInfo);
 typedef void (*WKPageRunJavaScriptPromptCallback)(WKPageRef page, WKStringRef message, WKStringRef defaultValue, WKFrameRef frame, WKSecurityOriginRef securityOrigin, WKPageRunJavaScriptPromptResultListenerRef listener, const void* clientInfo);
 
+typedef void (*WKPageDecidePolicyForGeolocationPermissionRequestCallback)(WKPageRef page, WKFrameRef frame, WKSecurityOriginRef origin, WKGeolocationPermissionRequestRef permissionRequest, const void* clientInfo);
+typedef void (*WKPageDecidePolicyForNotificationPermissionRequestCallback)(WKPageRef page, WKSecurityOriginRef origin, WKNotificationPermissionRequestRef permissionRequest, const void* clientInfo);
+typedef void (*WKPagePrintFrameCallback)(WKPageRef page, WKFrameRef frame, const void* clientInfo);
+
 // Navigation client (WKPageNavigationClient.h)
 typedef void (*WKPageNavigationDecidePolicyForNavigationActionCallback)(WKPageRef page, WKNavigationActionRef navigationAction, WKFramePolicyListenerRef listener, WKTypeRef userData, const void* clientInfo);
 typedef void (*WKPageNavigationDecidePolicyForNavigationResponseCallback)(WKPageRef page, WKNavigationResponseRef navigationResponse, WKFramePolicyListenerRef listener, WKTypeRef userData, const void* clientInfo);
@@ -98,6 +134,26 @@ typedef void (*WKPageNavigationWebProcessDidTerminateCallback)(WKPageRef page, u
 typedef void (*WKPageNavigationActionDidBecomeDownloadCallback)(WKPageRef page, WKNavigationActionRef navigationAction, WKDownloadRef download, const void* clientInfo);
 typedef void (*WKPageNavigationResponseDidBecomeDownloadCallback)(WKPageRef page, WKNavigationResponseRef navigationResponse, WKDownloadRef download, const void* clientInfo);
 typedef void (*WKPageNavigationContextMenuDidCreateDownloadCallback)(WKPageRef page, WKDownloadRef download, const void* clientInfo);
+typedef void (*WKPageNavigationDidCommitNavigationCallback)(WKPageRef page, WKNavigationRef navigation, WKTypeRef userData, const void* clientInfo);
+typedef void (*WKPageNavigationDidSameDocumentNavigationCallback)(WKPageRef page, WKNavigationRef navigation, WKSameDocumentNavigationType navigationType, WKTypeRef userData, const void* clientInfo);
+
+// Find client (WKPageFindClient.h)
+typedef void (*WKPageDidFindStringCallback)(WKPageRef page, WKStringRef string, unsigned matchCount, const void* clientInfo);
+typedef void (*WKPageDidFailToFindStringCallback)(WKPageRef page, WKStringRef string, const void* clientInfo);
+typedef void (*WKPageDidCountStringMatchesCallback)(WKPageRef page, WKStringRef string, unsigned matchCount, const void* clientInfo);
+
+// Geolocation provider (WKGeolocationManager.h)
+typedef void (*WKGeolocationProviderStartUpdatingCallback)(WKGeolocationManagerRef geolocationManager, const void* clientInfo);
+typedef void (*WKGeolocationProviderStopUpdatingCallback)(WKGeolocationManagerRef geolocationManager, const void* clientInfo);
+
+// Notification provider (WKNotificationProvider.h)
+typedef void (*WKNotificationProviderShowCallback)(WKPageRef page, WKNotificationRef notification, const void* clientInfo);
+typedef void (*WKNotificationProviderCancelCallback)(WKNotificationRef notification, const void* clientInfo);
+typedef void (*WKNotificationProviderDidDestroyNotificationCallback)(WKNotificationRef notification, const void* clientInfo);
+typedef void (*WKNotificationProviderAddNotificationManagerCallback)(WKNotificationManagerRef manager, const void* clientInfo);
+typedef void (*WKNotificationProviderRemoveNotificationManagerCallback)(WKNotificationManagerRef manager, const void* clientInfo);
+typedef WKDictionaryRef (*WKNotificationProviderNotificationPermissionsCallback)(const void* clientInfo);
+typedef void (*WKNotificationProviderClearNotificationsCallback)(WKArrayRef notificationIDs, const void* clientInfo);
 
 // State client (WKPageStateClient.h)
 typedef void (*WKPageStateClientWillChangeCallback)(const void* clientInfo);
@@ -150,12 +206,12 @@ typedef struct WKPageUIClientV6 {
     void* pageDidScroll;
     void* exceededDatabaseQuota;
     void* runOpenPanel;
-    void* decidePolicyForGeolocationPermissionRequest;
+    WKPageDecidePolicyForGeolocationPermissionRequestCallback decidePolicyForGeolocationPermissionRequest;
     void* headerHeight;
     void* footerHeight;
     void* drawHeader;
     void* drawFooter;
-    void* printFrame;
+    WKPagePrintFrameCallback printFrame;
     void* runModal;
     void* unused1;
     void* saveDataToFileInDownloadsFolder;
@@ -164,7 +220,7 @@ typedef struct WKPageUIClientV6 {
     // Version 1.
     void* createNewPage_deprecatedForUseWithV1;
     void* mouseDidMoveOverElement;
-    void* decidePolicyForNotificationPermissionRequest;
+    WKPageDecidePolicyForNotificationPermissionRequestCallback decidePolicyForNotificationPermissionRequest;
     void* unavailablePluginButtonClicked_deprecatedForUseWithV1;
 
     // Version 2.
@@ -212,12 +268,12 @@ typedef struct WKPageNavigationClientV3 {
     void* didStartProvisionalNavigation;
     void* didReceiveServerRedirectForProvisionalNavigation;
     WKPageNavigationDidFailProvisionalNavigationCallback didFailProvisionalNavigation;
-    void* didCommitNavigation;
+    WKPageNavigationDidCommitNavigationCallback didCommitNavigation;
     void* didFinishNavigation;
     void* didFailNavigation;
     void* didFailProvisionalLoadInSubframe;
     void* didFinishDocumentLoad;
-    void* didSameDocumentNavigation;
+    WKPageNavigationDidSameDocumentNavigationCallback didSameDocumentNavigation;
     void* renderingProgressDidChange;
     void* canAuthenticateAgainstProtectionSpace;
     void* didReceiveAuthenticationChallenge;
@@ -289,6 +345,51 @@ typedef struct WKDownloadClientV0 {
     WKDownloadDidFinish didFinish;
     WKDownloadDidFailWithError didFailWithError;
 } WKDownloadClientV0;
+
+typedef struct WKPageFindClientBase {
+    int version;
+    const void* clientInfo;
+} WKPageFindClientBase;
+
+typedef struct WKPageFindClientV0 {
+    WKPageFindClientBase base;
+
+    // Version 0.
+    WKPageDidFindStringCallback didFindString;
+    WKPageDidFailToFindStringCallback didFailToFindString;
+    WKPageDidCountStringMatchesCallback didCountStringMatches;
+} WKPageFindClientV0;
+
+typedef struct WKGeolocationProviderBase {
+    int version;
+    const void* clientInfo;
+} WKGeolocationProviderBase;
+
+typedef struct WKGeolocationProviderV0 {
+    WKGeolocationProviderBase base;
+
+    // Version 0.
+    WKGeolocationProviderStartUpdatingCallback startUpdating;
+    WKGeolocationProviderStopUpdatingCallback stopUpdating;
+} WKGeolocationProviderV0;
+
+typedef struct WKNotificationProviderBase {
+    int version;
+    const void* clientInfo;
+} WKNotificationProviderBase;
+
+typedef struct WKNotificationProviderV0 {
+    WKNotificationProviderBase base;
+
+    // Version 0.
+    WKNotificationProviderShowCallback show;
+    WKNotificationProviderCancelCallback cancel;
+    WKNotificationProviderDidDestroyNotificationCallback didDestroyNotification;
+    WKNotificationProviderAddNotificationManagerCallback addNotificationManager;
+    WKNotificationProviderRemoveNotificationManagerCallback removeNotificationManager;
+    WKNotificationProviderNotificationPermissionsCallback notificationPermissions;
+    WKNotificationProviderClearNotificationsCallback clearNotifications;
+} WKNotificationProviderV0;
 
 } // extern "C"
 
@@ -399,7 +500,33 @@ typedef struct WKDownloadClientV0 {
     X(WKPageSetApplicationNameForUserAgent, void, (WKPageRef, WKStringRef)) \
     X(WKPageSetCustomBackingScaleFactor, void, (WKPageRef, double)) \
     X(WKPageGetInspector, WKInspectorRef, (WKPageRef)) \
-    X(WKInspectorShow, void, (WKInspectorRef))
+    X(WKInspectorShow, void, (WKInspectorRef)) \
+    X(WKPageFindString, void, (WKPageRef, WKStringRef, WKFindOptions, unsigned)) \
+    X(WKPageHideFindUI, void, (WKPageRef)) \
+    X(WKPageSetPageFindClient, void, (WKPageRef, const WKPageFindClientBase*)) \
+    X(WKSecurityOriginCopyToString, WKStringRef, (WKSecurityOriginRef)) \
+    X(WKSecurityOriginCreateFromString, WKSecurityOriginRef, (WKStringRef)) \
+    X(WKMutableDictionaryCreate, WKMutableDictionaryRef, (void)) \
+    X(WKDictionarySetItem, bool, (WKMutableDictionaryRef, WKStringRef, WKTypeRef)) \
+    X(WKBooleanCreate, WKBooleanRef, (bool)) \
+    X(WKContextGetGeolocationManager, WKGeolocationManagerRef, (WKContextRef)) \
+    X(WKGeolocationManagerSetProvider, void, (WKGeolocationManagerRef, const WKGeolocationProviderBase*)) \
+    X(WKGeolocationManagerProviderDidChangePosition, void, (WKGeolocationManagerRef, WKGeolocationPositionRef)) \
+    X(WKGeolocationManagerProviderDidFailToDeterminePositionWithErrorMessage, void, (WKGeolocationManagerRef, WKStringRef)) \
+    X(WKGeolocationPositionCreate, WKGeolocationPositionRef, (double, double, double, double)) \
+    X(WKGeolocationPermissionRequestAllow, void, (WKGeolocationPermissionRequestRef)) \
+    X(WKGeolocationPermissionRequestDeny, void, (WKGeolocationPermissionRequestRef)) \
+    X(WKContextGetNotificationManager, WKNotificationManagerRef, (WKContextRef)) \
+    X(WKNotificationManagerSetProvider, void, (WKNotificationManagerRef, const WKNotificationProviderBase*)) \
+    X(WKNotificationManagerProviderDidShowNotification, void, (WKNotificationManagerRef, uint64_t)) \
+    X(WKNotificationManagerProviderDidClickNotification, void, (WKNotificationManagerRef, uint64_t)) \
+    X(WKNotificationManagerProviderDidUpdateNotificationPolicy, void, (WKNotificationManagerRef, WKSecurityOriginRef, bool)) \
+    X(WKNotificationPermissionRequestAllow, void, (WKNotificationPermissionRequestRef)) \
+    X(WKNotificationPermissionRequestDeny, void, (WKNotificationPermissionRequestRef)) \
+    X(WKNotificationCopyTitle, WKStringRef, (WKNotificationRef)) \
+    X(WKNotificationCopyBody, WKStringRef, (WKNotificationRef)) \
+    X(WKNotificationGetSecurityOrigin, WKSecurityOriginRef, (WKNotificationRef)) \
+    X(WKNotificationGetID, uint64_t, (WKNotificationRef))
 
 namespace wk {
 

@@ -22,63 +22,37 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.5.5</span>
+      <span class="version">Version 0.6.0</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Extensions, for real this time</h2>
-    <p>Extensions now run all their parts: the background part that works behind the scenes, their <b>toolbar button and popup</b>, and their <b>options page</b>. Dark Reader, uBlock Origin Lite's popup and similar extensions should work like in Chrome or Firefox.</p>
+    <h2 style="margin-top:0">The everyday basics</h2>
+    <p><b>Bookmarks</b>, <b>history</b>, <b>find in page</b> and <b>permission prompts</b> are here, and the address bar now suggests pages from your history and bookmarks as you type.</p>
   </div>
 
-  <h2>Fixed in 0.5.5</h2>
+  <h2>New in 0.6</h2>
   <ul class="notes">
-    <li>Extensions that use <code>requestIdleCallback</code>, which WebKit doesn't have, no longer fail. AdNauseam showed an error every time a tab changed.</li>
-  </ul>
-
-  <h2>Fixed in 0.5.4</h2>
-  <ul class="notes">
-    <li>Errors on the Extensions page now include what went wrong, not only where.</li>
-    <li>Extensions that ask which page a tab shows (uBlock Origin–based ones like AdNauseam do) now get an answer.</li>
-  </ul>
-
-  <h2>New in 0.5.3</h2>
-  <ul class="notes">
-    <li><b>Extensions built on uBlock Origin</b> (like AdNauseam) start properly: Prism now has the <code>chrome.privacy</code> API they read at startup (it reports Prism's own settings) and a few constants they check.</li>
-    <li><b>Errors on the Extensions page:</b> when an extension's background part, popup or options page hits an error, its card shows a red “errors” badge, and <b>Details</b> lists what went wrong. A screenshot of that is the quickest way to get something fixed.</li>
-  </ul>
-
-  <h2>Fixed in 0.5.2</h2>
-  <ul class="notes">
-    <li><b>Extension popups and dashboards that stayed empty</b> or said “not a website” (like uBlock Origin Lite's) should now work. Extensions can now find their own files the way they do in Chrome, so their background part starts properly.</li>
-    <li>Each extension now has its own address on your PC (shown as <code>chrome-extension://…</code>), with its own storage, separate from other extensions and websites. Websites only get the files an extension chooses to share.</li>
-    <li>Extension pages no longer have access to other files on your PC (0.5.1 needed that as a stopgap).</li>
-    <li>Extensions can talk to the sites they have permission for (like Bitwarden to its server), without sending your cookies for those sites.</li>
-  </ul>
-
-  <h2>Fixed in 0.5.1</h2>
-  <ul class="notes">
-    <li><b>Extension popups that stayed empty</b> (like uBlock Origin Lite's, which only showed the word “cogs”) now work. Extensions built from JavaScript modules couldn't load their own scripts; their background part didn't start either.</li>
-    <li>Extension options pages always open in a tab made for extension pages. Other files on your PC never open in one.</li>
-  </ul>
-
-  <h2>New in 0.5</h2>
-  <ul class="notes">
-    <li><b>Toolbar buttons</b> for extensions, next to the Extensions button, with their badges (like a count). Click for the popup; right-click for <b>Options</b> or <b>Manage extension</b>.</li>
-    <li><b>Background parts</b> of extensions run, including Chrome's newer service workers, and they can talk to the pages they work on and to their popups.</li>
-    <li><b>Options pages</b> open in a tab, from the right-click menu or the new <b>Options</b> button on the <a href="prism://extensions">Extensions page</a>.</li>
-    <li><b>More of the extension API:</b> tabs, windows, toolbar buttons, running scripts in pages, alarms, and asking for extra permissions (Prism asks you first).</li>
-    <li><b>Privacy:</b> an extension only sees which sites your tabs show if you allowed it to (its "tabs" or site permissions), or for the tab where you clicked its button.</li>
-    <li><b>Extensions page:</b> each extension lists what doesn't work in Prism yet, instead of "Partly works" with no details.</li>
-    <li><b>Fixed:</b> the shield's "blocked" counter stopped updating after a while.</li>
+    <li><b>Bookmarks.</b> Click the star in the address bar (or press <kbd>Ctrl</kbd> <kbd>D</kbd>) to bookmark a page. Your bookmarks bar sits under the address bar (<kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>B</kbd> shows or hides it); folders open as menus, and bookmarks that don't fit are under ». Right-click one to rename or delete it.</li>
+    <li><b><a href="prism://bookmarks">Bookmarks page</a></b> (<kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>O</kbd>): folders, search, drag to reorder or move, and editing. <b>Import</b> from Chrome, Edge, Brave, Vivaldi or Opera in one click, or from an HTML file (Firefox and most browsers can export one). <b>Export</b> to HTML too.</li>
+    <li><b><a href="prism://history">History</a></b> (<kbd>Ctrl</kbd> <kbd>H</kbd>): every page you visited in the last 90 days, by day, with search. Remove single pages, or clear the last hour, day, week, four weeks or everything. It stays on your PC, and you can turn it off in <a href="prism://settings#privacy">Settings › Privacy</a>.</li>
+    <li><b>Address-bar suggestions</b> from your history and bookmarks. Use <kbd>&uarr;</kbd> <kbd>&darr;</kbd> to pick one. What you type isn't sent anywhere until you press <kbd>Enter</kbd>.</li>
+    <li><b>Find in page</b> (<kbd>Ctrl</kbd> <kbd>F</kbd>), with a match count. <kbd>Enter</kbd> or <kbd>F3</kbd> goes to the next match, <kbd>Shift</kbd> for the previous one.</li>
+    <li><b>Permission prompts.</b> When a site wants your <b>location</b> or to show <b>notifications</b>, a bar under the address bar asks. Allow or Block is remembered for that site; ✕ just says no this time. Notifications appear as Windows notifications; click one to go to its tab. Change your answers, or block all requests, in <a href="prism://settings#permissions">Settings › Site permissions</a>.</li>
   </ul>
 
   <h2>Good to know</h2>
   <ul class="notes dim">
-    <li>Not yet: right-click menu items from extensions, extension keyboard shortcuts, changing or blocking requests with webRequest, offscreen documents, and desktop notifications. Extensions that need these partly work.</li>
-    <li>Content scripts still run in the page itself (not a separate, protected copy like in Chrome), until Prism has its own WebKit build (0.9).</li>
-    <li>After turning an extension on or off, reload open tabs to apply it to them.</li>
-    <li>Bookmarks, history, find in page and printing are next, in 0.6.</li>
+    <li><b>Printing</b> isn't available yet: the Windows version of WebKit has no way to print pages. It comes with Prism's own WebKit build in 0.9. Until then, <kbd>Ctrl</kbd> <kbd>P</kbd> says so.</li>
+    <li><b>Camera and microphone</b> aren't available yet either, for the same reason (also planned with Prism's own WebKit build).</li>
+    <li><b>Location</b> comes from Windows. If a site can't find you, check that Location is on in Windows Settings › Privacy &amp; security › Location, including "Let desktop apps access your location".</li>
+    <li>Content scripts still run in the page itself, and extension right-click menu items, keyboard shortcuts and webRequest blocking aren't supported yet (0.9).</li>
+  </ul>
+
+  <h2>Earlier: 0.5</h2>
+  <ul class="notes">
+    <li><b>Extensions, part 2:</b> toolbar buttons with popups and badges, background parts (including service workers), options pages, messaging, and much more of the extension API. Each extension has its own address and storage, and only sees your tabs if you allowed it to.</li>
+    <li>0.5.1–0.5.5 fixed popups that stayed empty, extensions built on uBlock Origin (like AdNauseam), and added an error list per extension on the <a href="prism://extensions">Extensions page</a>.</li>
   </ul>
 
   <h2>Earlier: 0.4</h2>
@@ -114,6 +88,11 @@
     <tr><td><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>T</kbd></td><td>Reopen closed tab</td></tr>
     <tr><td><kbd>Ctrl</kbd> <kbd>Tab</kbd> / <kbd>Ctrl</kbd> <kbd>1</kbd>&ndash;<kbd>9</kbd></td><td>Switch tabs</td></tr>
     <tr><td><kbd>Ctrl</kbd> <kbd>L</kbd></td><td>Go to the address bar</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>F</kbd> / <kbd>F3</kbd></td><td>Find in page / next match</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>D</kbd></td><td>Bookmark this page</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>B</kbd></td><td>Show or hide the bookmarks bar</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>O</kbd></td><td>Bookmarks</td></tr>
+    <tr><td><kbd>Ctrl</kbd> <kbd>H</kbd></td><td>History</td></tr>
     <tr><td><kbd>Alt</kbd> <kbd>&larr;</kbd> / <kbd>Alt</kbd> <kbd>&rarr;</kbd></td><td>Back / forward</td></tr>
     <tr><td><kbd>Ctrl</kbd> <kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd></td><td>Zoom in / out / reset</td></tr>
     <tr><td><kbd>Ctrl</kbd> <kbd>N</kbd></td><td>New window</td></tr>
@@ -123,9 +102,9 @@
 
   <h2>Coming next</h2>
   <ul class="notes dim">
-    <li><b>0.4:</b> extension toolbar buttons, popups, options pages and background tasks (Bitwarden, Dark Reader).</li>
-    <li><b>0.5:</b> bookmarks, history, find in page, printing, permission prompts.</li>
-    <li><b>0.6:</b> tab groups (Chrome and Vivaldi style), vertical tabs, custom themes and CSS.</li>
+    <li><b>0.7:</b> custom themes and CSS, tab groups (Chrome and Vivaldi style), vertical tabs.</li>
+    <li><b>0.8:</b> stronger privacy: fingerprinting protection, HTTPS-only, per-site settings, tracking-parameter removal.</li>
+    <li><b>0.9:</b> Prism's own WebKit build: printing, full network filtering, more extension features.</li>
   </ul>
 </main>
 </body>

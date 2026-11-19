@@ -4,6 +4,8 @@
 
 #include "Dialogs.h"
 
+#include <shobjidl.h>
+
 namespace dialogs {
 
 namespace {
@@ -140,6 +142,53 @@ std::optional<std::wstring> prompt(HWND owner, const std::wstring& title, const 
     if (!state.accepted)
         return std::nullopt;
     return state.result;
+}
+
+namespace {
+
+std::optional<std::wstring> runFileDialog(bool save, HWND owner, const std::wstring& title, const std::wstring& fileName, const std::wstring& filterName, const std::wstring& pattern)
+{
+    IFileDialog* dialog = nullptr;
+    if (FAILED(CoCreateInstance(save ? CLSID_FileSaveDialog : CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))))
+        return std::nullopt;
+    DWORD options = 0;
+    dialog->GetOptions(&options);
+    dialog->SetOptions(options | FOS_FORCEFILESYSTEM | (save ? FOS_OVERWRITEPROMPT : FOS_FILEMUSTEXIST));
+    dialog->SetTitle(title.c_str());
+    COMDLG_FILTERSPEC filters[] = { { filterName.c_str(), pattern.c_str() }, { L"All files", L"*.*" } };
+    dialog->SetFileTypes(2, filters);
+    if (save) {
+        dialog->SetFileName(fileName.c_str());
+        size_t dot = fileName.rfind(L'.');
+        if (dot != std::wstring::npos)
+            dialog->SetDefaultExtension(fileName.c_str() + dot + 1);
+    }
+    std::optional<std::wstring> result;
+    if (SUCCEEDED(dialog->Show(owner))) {
+        IShellItem* item = nullptr;
+        if (SUCCEEDED(dialog->GetResult(&item))) {
+            PWSTR path = nullptr;
+            if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+                result = std::wstring(path);
+                CoTaskMemFree(path);
+            }
+            item->Release();
+        }
+    }
+    dialog->Release();
+    return result;
+}
+
+} // namespace
+
+std::optional<std::wstring> openFile(HWND owner, const std::wstring& title, const std::wstring& filterName, const std::wstring& pattern)
+{
+    return runFileDialog(false, owner, title, L"", filterName, pattern);
+}
+
+std::optional<std::wstring> saveFile(HWND owner, const std::wstring& title, const std::wstring& fileName, const std::wstring& filterName, const std::wstring& pattern)
+{
+    return runFileDialog(true, owner, title, fileName, filterName, pattern);
 }
 
 } // namespace dialogs

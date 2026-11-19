@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>History</title>
+<script src="pages.js"></script>
+<link rel="stylesheet" href="pages.css">
+<link rel="stylesheet" href="library.css">
+</head>
+<body>
+<main class="wide">
+  <header class="top">
+    <h1>History</h1>
+    <div class="tools">
+      <input id="search" type="search" spellcheck="false" placeholder="Search history" aria-label="Search history">
+      <select id="clearRange" aria-label="What to clear">
+        <option value="hour">Last hour</option>
+        <option value="day">Last 24 hours</option>
+        <option value="week">Last 7 days</option>
+        <option value="month">Last 4 weeks</option>
+        <option value="all">Everything</option>
+      </select>
+      <button class="button secondary" id="clear">Clear</button>
+    </div>
+  </header>
+
+  <p class="notice" id="notSaving" hidden>Prism isn't saving new history. You can turn it back on in <a href="prism://settings#privacy">Settings › Privacy</a>.</p>
+
+  <div id="list" class="list"></div>
+  <p class="empty dim" id="empty" hidden></p>
+  <div class="more"><button class="button secondary" id="more" hidden>Show more</button></div>
+</main>
+<script src="history.js"></script>
+</body>
+</html>

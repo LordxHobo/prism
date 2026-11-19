@@ -6,10 +6,15 @@
 
 #include "Dialogs.h"
 #include "Blocker.h"
+#include "Bookmarks.h"
 #include "Engine.h"
 #include "Extensions.h"
+#include "History.h"
+#include "Permissions.h"
 #include "Shields.h"
 #include "ShieldsPanel.h"
+#include "Suggestions.h"
+#include "Json.h"
 #include "Tabs.h"
 #include "Settings.h"
 #include "Util.h"
@@ -35,6 +40,10 @@ constexpr UINT_PTR kStatsTimer = 2;
 // Must match --toolbar-height in ui/toolbar.css (normal and compact).
 constexpr int kToolbarCSSHeight = 76;
 constexpr int kCompactToolbarCSSHeight = 66;
+// Rows that appear under the address bar; must match ui/toolbar.css.
+constexpr int kBookmarksBarCSSHeight = 30;
+constexpr int kInfobarCSSHeight = 40;
+constexpr int kFindbarCSSHeight = 38;
 bool s_sessionDirty = false;
 
 std::vector<BrowserWindow*> s_windows;
@@ -89,7 +98,8 @@ bool systemUsesDarkTheme()
 // Internal prism:// pages that may be opened from the address bar.
 bool isKnownInternalPage(const std::wstring& name)
 {
-    return name == L"newtab" || name == L"whatsnew" || name == L"settings" || name == L"extensions";
+    return name == L"newtab" || name == L"whatsnew" || name == L"settings" || name == L"extensions"
+        || name == L"history" || name == L"bookmarks";
 }
 
 struct DownloadInfo {
@@ -243,7 +253,11 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
     }
     case WM_SIZE:
+        suggestions::hide();
         layout();
+        return 0;
+    case WM_MOVE:
+        suggestions::hide();
         return 0;
     case WM_GETMINMAXINFO: {
         auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
@@ -275,6 +289,8 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     case WM_ACTIVATE:
+        if (LOWORD(wParam) == WA_INACTIVE)
+            suggestions::hide();
         if (LOWORD(wParam) != WA_INACTIVE) {
             focusContent();
             if (s_lastFocusedWindowId != m_id) {
@@ -343,10 +359,18 @@ static void detachClients(WKPageRef page)
     navigationClient.base.version = 3;
     WKPageSetPageNavigationClient(page, &navigationClient.base);
     WKPageSetPageStateClient(page, nullptr);
+    if (WKPageSetPageFindClient) {
+        WKPageFindClientV0 findClient = { };
+        WKPageSetPageFindClient(page, &findClient.base);
+    }
 }
 
 void BrowserWindow::onDestroy()
 {
+    suggestions::hide();
+    m_toolbarReady = false;
+    for (auto& tab : m_tabs)
+        denyPrompts(tab.get());
     detachClients(m_toolbarPage);
     for (auto& tab : m_tabs)
         detachClients(tab->page);
@@ -386,7 +410,16 @@ int BrowserWindow::toolbarHeight() const
 
 int BrowserWindow::toolbarCSSHeight() const
 {
-    return settings::compactTabs() ? kCompactToolbarCSSHeight : kToolbarCSSHeight;
+    int height = settings::compactTabs() ? kCompactToolbarCSSHeight : kToolbarCSSHeight;
+    if (settings::showBookmarksBar())
+        height += kBookmarksBarCSSHeight;
+    if (Tab* tab = activeTab()) {
+        if (!tab->prompts.empty())
+            height += kInfobarCSSHeight;
+        if (tab->findOpen)
+            height += kFindbarCSSHeight;
+    }
+    return height;
 }
 
 void BrowserWindow::applyScaleFactor()
@@ -479,6 +512,14 @@ void BrowserWindow::toolbarPrompt(WKPageRef, WKStringRef message, WKStringRef, W
 {
     auto* window = windowFromClientInfo(clientInfo);
     std::wstring text = toWide(message);
+    // Suggestions are answered straight away (the toolbar needs the list);
+    // everything else answers first, so menus and dialogs opened by a
+    // command don't keep the toolbar waiting.
+    if (text.rfind(L"prism:suggest\n", 0) == 0) {
+        std::string answer = window->suggest(text.substr(14));
+        WKPageRunJavaScriptPromptResultListenerCall(listener, stringUTF8(answer).get());
+        return;
+    }
     WKPageRunJavaScriptPromptResultListenerCall(listener, nullptr);
 
     if (text.rfind(L"prism:", 0) != 0)
@@ -574,6 +615,70 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
             extensions::showActionMenu(m_hwnd, id, x, y);
     } else if (command == L"focusContent") {
         focusContent();
+    } else if (command == L"suggestSelect") {
+        suggestions::select(_wtoi(argument.c_str()));
+    } else if (command == L"suggestClose") {
+        suggestions::hide();
+    } else if (command == L"find") {
+        if (tab) {
+            tab->findQuery = argument;
+            findInPage(tab, 0);
+        }
+    } else if (command == L"findNext" || command == L"findPrevious") {
+        if (tab)
+            findInPage(tab, command == L"findNext" ? 1 : -1);
+    } else if (command == L"findClose") {
+        if (tab)
+            closeFind(tab);
+        focusContent();
+    } else if (command == L"permission") {
+        if (tab)
+            answerPrompt(tab, argument);
+    } else if (command == L"bookmarkButton") {
+        bookmarkButton(argument);
+    } else if (command == L"bookmarkOpen") {
+        // "<id>\n<current|foreground|background>"
+        size_t newline = argument.find(L'\n');
+        const bookmarks::Node* node = bookmarks::find(_wtoi64(argument.substr(0, newline).c_str()));
+        if (node && !node->folder)
+            openBookmarkURL(node->url, newline == std::wstring::npos ? L"current" : argument.substr(newline + 1));
+    } else if (command == L"bookmarkFolder" || command == L"bookmarkMenu") {
+        // "<id>\n<x>,<y>"
+        size_t newline = argument.find(L'\n');
+        long long id = _wtoi64(argument.substr(0, newline).c_str());
+        POINT point = toolbarPoint(newline == std::wstring::npos ? L"" : argument.substr(newline + 1));
+        if (command == L"bookmarkFolder")
+            showBookmarkFolder(id, point);
+        else
+            showBookmarkMenu(id, point);
+    } else if (command == L"bookmarkOverflow") {
+        // "<x>,<y>\n<id>,<id>,..."
+        size_t newline = argument.find(L'\n');
+        std::vector<long long> ids;
+        std::wstring list = newline == std::wstring::npos ? L"" : argument.substr(newline + 1);
+        for (size_t start = 0; start < list.size();) {
+            size_t comma = list.find(L',', start);
+            ids.push_back(_wtoi64(list.substr(start, comma == std::wstring::npos ? std::wstring::npos : comma - start).c_str()));
+            if (comma == std::wstring::npos)
+                break;
+            start = comma + 1;
+        }
+        showBookmarkOverflow(ids, toolbarPoint(argument.substr(0, newline)));
+    } else if (command == L"bookmarksBarMenu") {
+        POINT point = toolbarPoint(argument);
+        HMENU menu = CreatePopupMenu();
+        AppendMenuW(menu, MF_STRING, 1, L"Hide bookmarks bar\tCtrl+Shift+B");
+        AppendMenuW(menu, MF_STRING, 2, L"Manage bookmarks\tCtrl+Shift+O");
+        int choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, point.x, point.y, 0, m_hwnd, nullptr);
+        DestroyMenu(menu);
+        if (choice == 1)
+            toggleBookmarksBar();
+        else if (choice == 2)
+            openInternalPage(L"bookmarks");
+    } else if (command == L"history") {
+        openInternalPage(L"history");
+    } else if (command == L"bookmarks") {
+        openInternalPage(L"bookmarks");
     }
 }
 
@@ -597,6 +702,9 @@ void BrowserWindow::pushState()
     json += ",\"blocked\":" + std::to_string(blocker::blockedCount());
     json += ",\"active\":" + std::to_string(m_activeTabId);
     json += ",\"actions\":" + extensions::actionsJSON(m_activeTabId);
+    json += ",\"bookmarksBar\":" + std::string(settings::showBookmarksBar() ? "true" : "false");
+    if (settings::showBookmarksBar())
+        json += ",\"bookmarks\":" + bookmarks::barJSON();
     json += ",\"tabs\":[";
     for (size_t i = 0; i < m_tabs.size(); ++i) {
         Tab* tab = m_tabs[i].get();
@@ -616,6 +724,18 @@ void BrowserWindow::pushState()
         json += ",\"zoom\":" + std::string(zoom);
         json += ",\"store\":" + std::string(extensions::isStoreURL(tab->url) ? "true" : "false");
         json += ",\"shields\":" + std::string(shields::isActiveFor(tab->url) ? "true" : "false");
+        bool bookmarkable = !engine::isInternalURL(tab->url) && !tab->extensionPages
+            && (schemeOf(tab->url) == L"http" || schemeOf(tab->url) == L"https" || schemeOf(tab->url) == L"file");
+        json += ",\"bookmarkable\":" + std::string(bookmarkable ? "true" : "false");
+        // Only the active tab shows the star.
+        bool bookmarked = bookmarkable && tab->id == m_activeTabId && bookmarks::findURL(tab->url);
+        json += ",\"bookmarked\":" + std::string(bookmarked ? "true" : "false");
+        json += ",\"find\":{\"open\":" + std::string(tab->findOpen ? "true" : "false") + ",\"query\":" + util::jsonString(tab->findQuery)
+            + ",\"matches\":" + std::to_string(tab->findMatches) + ",\"index\":" + std::to_string(tab->findIndex) + "}";
+        if (!tab->prompts.empty()) {
+            auto& prompt = tab->prompts.front();
+            json += ",\"prompt\":{\"kind\":" + util::jsonString(prompt.kind) + ",\"site\":" + util::jsonString(permissions::displayName(prompt.origin)) + "}";
+        }
         json += "}";
     }
     json += "]}";
@@ -742,6 +862,11 @@ void BrowserWindow::attachClients(Tab* tab)
     uiClient.runJavaScriptAlert = runJavaScriptAlert;
     uiClient.runJavaScriptConfirm = runJavaScriptConfirm;
     uiClient.runJavaScriptPrompt = runJavaScriptPrompt;
+    uiClient.printFrame = printFrame;
+    if (WKGeolocationPermissionRequestAllow && WKGeolocationPermissionRequestDeny && WKSecurityOriginCopyToString)
+        uiClient.decidePolicyForGeolocationPermissionRequest = decidePolicyForGeolocation;
+    if (WKNotificationPermissionRequestAllow && WKNotificationPermissionRequestDeny && WKSecurityOriginCopyToString)
+        uiClient.decidePolicyForNotificationPermissionRequest = decidePolicyForNotifications;
     WKPageSetPageUIClient(tab->page, &uiClient.base);
 
     WKPageNavigationClientV3 navigationClient = { };
@@ -754,7 +879,18 @@ void BrowserWindow::attachClients(Tab* tab)
     navigationClient.navigationActionDidBecomeDownload = navigationActionDidBecomeDownload;
     navigationClient.navigationResponseDidBecomeDownload = navigationResponseDidBecomeDownload;
     navigationClient.contextMenuDidCreateDownload = contextMenuDidCreateDownload;
+    navigationClient.didCommitNavigation = didCommitNavigation;
+    navigationClient.didSameDocumentNavigation = didSameDocumentNavigation;
     WKPageSetPageNavigationClient(tab->page, &navigationClient.base);
+
+    if (WKPageSetPageFindClient) {
+        WKPageFindClientV0 findClient = { };
+        findClient.base.version = 0;
+        findClient.base.clientInfo = tab;
+        findClient.didFindString = didFindString;
+        findClient.didFailToFindString = didFailToFindString;
+        WKPageSetPageFindClient(tab->page, &findClient.base);
+    }
 
     WKPageStateClientV0 stateClient = { };
     stateClient.base.version = 0;
@@ -774,6 +910,7 @@ void BrowserWindow::selectTab(int id)
     if (!next)
         return;
     Tab* previous = activeTab();
+    suggestions::hide();
     m_activeTabId = id;
     layout();
     ShowWindow(next->hwnd, SW_SHOW);
@@ -810,6 +947,7 @@ void BrowserWindow::closeTab(int id)
     }
 
     bool wasActive = tab->id == m_activeTabId;
+    denyPrompts(tab);
     extensions::tabRemoved(tab->id, m_id, m_tabs.size() == 1);
     detachClients(tab->page);
     scheduleSessionSave();
@@ -899,6 +1037,8 @@ void BrowserWindow::tabStateChanged(const void* clientInfo)
         tab->url = active;
     tab->progress = WKPageGetEstimatedProgress(tab->page);
     tab->loading = tab->progress > 0 && tab->progress < 1;
+    if (!tab->extensionPages)
+        history::updateTitle(tab->url, tab->title);
     tab->window->tabChanged(tab);
 }
 
@@ -1136,6 +1276,14 @@ std::string BrowserWindow::handleSettingsCommand(const std::wstring& command, co
     if (command == L"clearData") {
         bool cookies = argument.find(L"cookies") != std::wstring::npos;
         bool cache = argument.find(L"cache") != std::wstring::npos;
+        if (argument.find(L"history") != std::wstring::npos) {
+            history::clear();
+            m_closedURLs.clear();
+            if (!cookies && !cache) {
+                showToast(L"History cleared");
+                return "true";
+            }
+        }
         if (!cookies && !cache)
             return "false";
         HWND hwnd = m_hwnd;
@@ -1216,6 +1364,8 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
         std::wstring frameURL = toWide(Ref<WKURLRef>::adopt(WKFrameCopyURL(frame)).get());
         bool isSettings = engine::isInternalPage(frameURL, L"settings");
         bool isExtensions = engine::isInternalPage(frameURL, L"extensions");
+        bool isHistory = engine::isInternalPage(frameURL, L"history");
+        bool isBookmarks = engine::isInternalPage(frameURL, L"bookmarks");
         // The "blocked" page can allow the site it's showing, and nothing else.
         if (engine::isInternalPage(frameURL, L"error") && message.rfind(L"prism:allowSite\n", 0) == 0) {
             std::wstring site = message.substr(16);
@@ -1226,7 +1376,7 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
             WKPageRunJavaScriptPromptResultListenerCall(listener, stringUTF8(allowed ? "true" : "false").get());
             return;
         }
-        if (isSettings || isExtensions) {
+        if (isSettings || isExtensions || isHistory || isBookmarks) {
             std::wstring body = message.substr(6);
             size_t newline = body.find(L'\n');
             std::wstring command = body.substr(0, newline);
@@ -1235,7 +1385,18 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
             if (isSettings && command.rfind(L"shields.", 0) == 0) {
                 answer = shields::handleCommand(command.substr(8), argument);
                 refreshToolbars();
-            } else if (isSettings)
+            } else if (isSettings && command.rfind(L"permissions.", 0) == 0)
+                answer = permissions::handleCommand(command.substr(12), argument);
+            else if ((isHistory || isBookmarks) && command == L"open") {
+                // "<url>\n<current|foreground|background>"
+                size_t split = argument.find(L'\n');
+                tab->window->openBookmarkURL(argument.substr(0, split), split == std::wstring::npos ? L"current" : argument.substr(split + 1));
+                answer = "true";
+            } else if (isHistory)
+                answer = history::handleCommand(command, argument);
+            else if (isBookmarks)
+                answer = bookmarks::handleCommand(command, argument, tab->window->m_hwnd);
+            else if (isSettings)
                 answer = tab->window->handleSettingsCommand(command, argument);
             else
                 answer = extensions::handleCommand(command, argument, tab->window->m_hwnd);
@@ -1412,12 +1573,20 @@ void BrowserWindow::startDownload(WKDownloadRef download)
 
 void BrowserWindow::showMenu(int x, int y)
 {
-    enum { NewTab = 1, NewWindow, ReopenTab, ZoomIn, ZoomOut, ZoomReset, DevTools, Downloads, Extensions, Settings, WhatsNew, About };
+    enum { NewTab = 1, NewWindow, ReopenTab, ZoomIn, ZoomOut, ZoomReset, DevTools, Downloads, Extensions, Settings, WhatsNew, About,
+        History, Bookmarks, BookmarksBar, Find, Print };
 
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, NewTab, L"New tab\tCtrl+T");
     AppendMenuW(menu, MF_STRING, NewWindow, L"New window\tCtrl+N");
     AppendMenuW(menu, MF_STRING | (m_closedURLs.empty() ? MF_GRAYED : 0), ReopenTab, L"Reopen closed tab\tCtrl+Shift+T");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, History, L"History\tCtrl+H");
+    AppendMenuW(menu, MF_STRING, Bookmarks, L"Bookmarks\tCtrl+Shift+O");
+    AppendMenuW(menu, MF_STRING | (settings::showBookmarksBar() ? MF_CHECKED : 0), BookmarksBar, L"Show bookmarks bar\tCtrl+Shift+B");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, Find, L"Find in page\tCtrl+F");
+    AppendMenuW(menu, MF_STRING, Print, L"Print\tCtrl+P");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, ZoomIn, L"Zoom in\tCtrl++");
     AppendMenuW(menu, MF_STRING, ZoomOut, L"Zoom out\tCtrl+-");
@@ -1450,6 +1619,11 @@ void BrowserWindow::showMenu(int x, int y)
     case Extensions: openInternalPage(L"extensions"); break;
     case Settings: openInternalPage(L"settings"); break;
     case WhatsNew: openInternalPage(L"whatsnew"); break;
+    case History: openInternalPage(L"history"); break;
+    case Bookmarks: openInternalPage(L"bookmarks"); break;
+    case BookmarksBar: toggleBookmarksBar(); break;
+    case Find: openFind(); break;
+    case Print: printFrame(nullptr, nullptr, activeTab()); break;
     case About: {
         std::wstring text = L"Prism " PRISM_VERSION_WSTRING L"\n\n"
             L"A private, independent web browser built on WebKit.\n"
@@ -1535,6 +1709,36 @@ bool BrowserWindow::handleShortcut(const MSG& msg)
         case 'L':
             focusAddressBar();
             return true;
+        case 'F':
+            if (shift) return false;
+            openFind();
+            return true;
+        case 'G':
+            if (tab && tab->findOpen && !tab->findQuery.empty())
+                findInPage(tab, shift ? -1 : 1);
+            else
+                openFind();
+            return true;
+        case 'P':
+            if (shift) return false;
+            printFrame(nullptr, nullptr, tab);
+            return true;
+        case 'H':
+            if (shift) return false;
+            openInternalPage(L"history");
+            return true;
+        case 'D':
+            if (shift) return false;
+            runToolbarScript("window.prism && prism.clickBookmarkButton();");
+            return true;
+        case 'B':
+            if (!shift) return false;
+            toggleBookmarksBar();
+            return true;
+        case 'O':
+            if (!shift) return false;
+            openInternalPage(L"bookmarks");
+            return true;
         case 'R':
             if (tab) WKPageReload(tab->page);
             return true;
@@ -1589,6 +1793,12 @@ bool BrowserWindow::handleShortcut(const MSG& msg)
     }
 
     switch (key) {
+    case VK_F3:
+        if (tab && tab->findOpen && !tab->findQuery.empty())
+            findInPage(tab, shift ? -1 : 1);
+        else
+            openFind();
+        return true;
     case VK_F5:
         if (tab) WKPageReload(tab->page);
         return true;
@@ -1606,6 +1816,488 @@ bool BrowserWindow::handleShortcut(const MSG& msg)
         return true;
     }
     return false;
+}
+
+// ---------------------------------------------------------------------------
+// History
+
+void BrowserWindow::didCommitNavigation(WKPageRef page, WKNavigationRef, WKTypeRef, const void* clientInfo)
+{
+    Tab* tab = tabFromClientInfo(clientInfo);
+    // A new page: the old page's questions go away, and find starts over.
+    tab->window->denyPrompts(tab);
+    if (tab->findOpen) {
+        tab->findMatches = -1;
+        tab->findIndex = 0;
+    }
+    if (!tab->extensionPages)
+        history::recordVisit(toWide(Ref<WKURLRef>::adopt(WKPageCopyActiveURL(page)).get()), L"");
+}
+
+void BrowserWindow::didSameDocumentNavigation(WKPageRef page, WKNavigationRef, WKSameDocumentNavigationType type, WKTypeRef, const void* clientInfo)
+{
+    // Sites that change pages without loading a new one (history.pushState)
+    // get a history entry for each page, like a normal link.
+    Tab* tab = tabFromClientInfo(clientInfo);
+    if (type == kWKSameDocumentNavigationSessionStatePush && !tab->extensionPages)
+        history::recordVisit(toWide(Ref<WKURLRef>::adopt(WKPageCopyActiveURL(page)).get()), L"");
+}
+
+// ---------------------------------------------------------------------------
+// Printing: not possible with the stock Windows WebKit, which has no way to
+// draw pages for a printer (its print code is macOS and Linux only).
+
+void BrowserWindow::printFrame(WKPageRef, WKFrameRef, const void* clientInfo)
+{
+    if (Tab* tab = tabFromClientInfo(clientInfo))
+        tab->window->showToast(L"Printing isn't available yet. It comes with Prism's own WebKit build (v0.9).");
+}
+
+// ---------------------------------------------------------------------------
+// Find in page
+
+void BrowserWindow::openFind()
+{
+    Tab* tab = activeTab();
+    if (!tab || !WKPageFindString)
+        return;
+    if (!tab->findOpen) {
+        tab->findOpen = true;
+        tab->findMatches = -1;
+        tab->findIndex = 0;
+        pushState();
+        layout();
+    }
+    SetFocus(m_toolbarHwnd);
+    runToolbarScript("window.prism && prism.focusFind();");
+    // Search again for what's in the box (the page may have changed).
+    if (!tab->findQuery.empty())
+        findInPage(tab, 0);
+}
+
+void BrowserWindow::closeFind(Tab* tab)
+{
+    if (!tab->findOpen)
+        return;
+    tab->findOpen = false;
+    tab->findMatches = -1;
+    tab->findIndex = 0;
+    if (WKPageHideFindUI)
+        WKPageHideFindUI(tab->page);
+    if (tab->id == m_activeTabId) {
+        pushState();
+        layout();
+    }
+}
+
+void BrowserWindow::findInPage(Tab* tab, int step)
+{
+    if (!WKPageFindString)
+        return;
+    if (tab->findQuery.empty()) {
+        if (WKPageHideFindUI)
+            WKPageHideFindUI(tab->page);
+        tab->findMatches = -1;
+        tab->findIndex = 0;
+        pushState();
+        return;
+    }
+    tab->findStep = step;
+    WKFindOptions options = kWKFindOptionsCaseInsensitive | kWKFindOptionsWrapAround | kWKFindOptionsShowHighlight | kWKFindOptionsShowFindIndicator;
+    if (step < 0)
+        options |= kWKFindOptionsBackwards;
+    WKPageFindString(tab->page, string(tab->findQuery).get(), options, 1000);
+}
+
+void BrowserWindow::didFindString(WKPageRef, WKStringRef text, unsigned matchCount, const void* clientInfo)
+{
+    Tab* tab = tabFromClientInfo(clientInfo);
+    if (toWide(text) != tab->findQuery)
+        return; // an older search
+    // More than the maximum (1000) comes back as -1.
+    long long count = matchCount == static_cast<unsigned>(-1) ? 1001 : static_cast<long long>(matchCount);
+    tab->findMatches = count;
+    if (tab->findStep == 0 || tab->findIndex <= 0 || tab->findIndex > count)
+        tab->findIndex = count ? 1 : 0;
+    else
+        tab->findIndex = ((tab->findIndex - 1 + tab->findStep) % count + count) % count + 1;
+    tab->findStep = 0;
+    if (tab->id == tab->window->m_activeTabId)
+        tab->window->pushState();
+}
+
+void BrowserWindow::didFailToFindString(WKPageRef, WKStringRef text, const void* clientInfo)
+{
+    Tab* tab = tabFromClientInfo(clientInfo);
+    if (toWide(text) != tab->findQuery)
+        return;
+    tab->findMatches = 0;
+    tab->findIndex = 0;
+    tab->findStep = 0;
+    if (tab->id == tab->window->m_activeTabId)
+        tab->window->pushState();
+}
+
+// ---------------------------------------------------------------------------
+// Permission prompts (location, notifications)
+
+void BrowserWindow::decidePolicyForGeolocation(WKPageRef, WKFrameRef, WKSecurityOriginRef origin, WKGeolocationPermissionRequestRef request, const void* clientInfo)
+{
+    Tab* tab = tabFromClientInfo(clientInfo);
+    std::wstring site = permissions::originString(origin);
+    std::wstring decision = permissions::decision(site, L"location");
+    if (decision == L"allow")
+        WKGeolocationPermissionRequestAllow(request);
+    else if (decision == L"block" || tab->extensionPages || site.empty() || site == L"null")
+        WKGeolocationPermissionRequestDeny(request);
+    else
+        tab->window->queuePrompt(tab, L"location", site, request);
+}
+
+void BrowserWindow::decidePolicyForNotifications(WKPageRef, WKSecurityOriginRef origin, WKNotificationPermissionRequestRef request, const void* clientInfo)
+{
+    Tab* tab = tabFromClientInfo(clientInfo);
+    std::wstring site = permissions::originString(origin);
+    std::wstring decision = permissions::decision(site, L"notifications");
+    if (decision == L"allow")
+        WKNotificationPermissionRequestAllow(request);
+    else if (decision == L"block" || tab->extensionPages || site.empty() || site == L"null")
+        WKNotificationPermissionRequestDeny(request);
+    else
+        tab->window->queuePrompt(tab, L"notifications", site, request);
+}
+
+static void answerRequest(const PermissionPrompt& prompt, bool allow)
+{
+    if (prompt.kind == L"location") {
+        auto request = static_cast<WKGeolocationPermissionRequestRef>(prompt.request.get());
+        allow ? WKGeolocationPermissionRequestAllow(request) : WKGeolocationPermissionRequestDeny(request);
+    } else {
+        auto request = static_cast<WKNotificationPermissionRequestRef>(prompt.request.get());
+        allow ? WKNotificationPermissionRequestAllow(request) : WKNotificationPermissionRequestDeny(request);
+    }
+}
+
+void BrowserWindow::queuePrompt(Tab* tab, const std::wstring& kind, const std::wstring& origin, WKTypeRef request)
+{
+    // A site asking over and over only gets one question at a time.
+    if (tab->prompts.size() >= 8) {
+        answerRequest({ kind, origin, Ref<WKTypeRef>::retain(request) }, false);
+        return;
+    }
+    tab->prompts.push_back({ kind, origin, Ref<WKTypeRef>::retain(request) });
+    if (tab->id == m_activeTabId && tab->prompts.size() == 1) {
+        pushState();
+        layout();
+    }
+}
+
+void BrowserWindow::answerPrompt(Tab* tab, const std::wstring& answer)
+{
+    if (tab->prompts.empty())
+        return;
+    // "allow" and "block" are remembered for the site; "dismiss" only says
+    // no this time.
+    PermissionPrompt first = tab->prompts.front();
+    bool allow = answer == L"allow";
+    if (answer == L"allow" || answer == L"block")
+        permissions::set(first.origin, first.kind, allow);
+    std::vector<PermissionPrompt> remaining;
+    for (auto& prompt : tab->prompts) {
+        if (prompt.kind == first.kind && prompt.origin == first.origin)
+            answerRequest(prompt, allow);
+        else
+            remaining.push_back(prompt);
+    }
+    tab->prompts = std::move(remaining);
+    if (tab->id == m_activeTabId) {
+        pushState();
+        layout();
+        if (tab->prompts.empty())
+            focusContent();
+    }
+}
+
+void BrowserWindow::denyPrompts(Tab* tab)
+{
+    if (tab->prompts.empty())
+        return;
+    for (auto& prompt : tab->prompts)
+        answerRequest(prompt, false);
+    tab->prompts.clear();
+    if (tab->id == m_activeTabId && m_toolbarReady) {
+        pushState();
+        layout();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Address-bar suggestions
+
+static std::wstring searchEngineName()
+{
+    std::wstring host = lower(hostOf(engine::searchURLTemplate()));
+    if (host.rfind(L"www.", 0) == 0)
+        host = host.substr(4);
+    static const std::pair<const wchar_t*, const wchar_t*> names[] = {
+        { L"duckduckgo.com", L"DuckDuckGo" }, { L"startpage.com", L"Startpage" }, { L"search.brave.com", L"Brave Search" },
+        { L"ecosia.org", L"Ecosia" }, { L"google.com", L"Google" }, { L"bing.com", L"Bing" },
+    };
+    for (auto& [domain, name] : names) {
+        if (host == domain)
+            return name;
+    }
+    return host;
+}
+
+std::string BrowserWindow::suggest(const std::wstring& argument)
+{
+    // {"text": "...", "go": "<where Enter goes>", "search": bool,
+    //  "left": x, "bottom": y, "width": w}  (CSS pixels in the toolbar)
+    json::Value request;
+    json::parse(util::toUTF8(argument), request);
+    std::wstring text = util::fromUTF8(request["text"].asString());
+    std::wstring go = util::fromUTF8(request["go"].asString());
+    auto items = suggestions::build(text, go, request["search"].asBool(), searchEngineName());
+
+    double scale = scaleFactor();
+    POINT corner = { static_cast<LONG>(request["left"].asNumber() * scale), static_cast<LONG>(request["bottom"].asNumber() * scale) };
+    ClientToScreen(m_toolbarHwnd, &corner);
+    RECT anchor = { corner.x, corner.y + static_cast<LONG>(4 * scale), corner.x + static_cast<LONG>(request["width"].asNumber() * scale), corner.y };
+    suggestions::Style style;
+    style.dark = m_darkTheme;
+    style.scale = scale;
+    std::wstring accent = settings::accent();
+    unsigned long rgb = wcstoul(accent.c_str() + 1, nullptr, 16);
+    style.accent = RGB((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
+
+    HWND hwnd = m_hwnd;
+    suggestions::show(m_hwnd, anchor, style, items, [hwnd](const suggestions::Item& item) {
+        auto* window = BrowserWindow::fromHWND(hwnd);
+        if (!window)
+            return;
+        window->runToolbarScript("window.prism && prism.suggestionsClosed();");
+        if (Tab* tab = window->activeTab()) {
+            window->navigate(tab, item.url);
+            window->focusContent();
+        }
+    });
+    return suggestions::isVisible() ? suggestions::itemsJSON(items) : "[]";
+}
+
+// ---------------------------------------------------------------------------
+// Bookmarks
+
+POINT BrowserWindow::toolbarPoint(const std::wstring& coordinates) const
+{
+    int x = 0, y = 0;
+    swscanf_s(coordinates.c_str(), L"%d,%d", &x, &y);
+    double scale = scaleFactor();
+    POINT point = { static_cast<LONG>(x * scale), static_cast<LONG>(y * scale) };
+    ClientToScreen(m_toolbarHwnd, &point);
+    return point;
+}
+
+void BrowserWindow::toggleBookmarksBar()
+{
+    settings::set(L"bookmarksBar", settings::showBookmarksBar() ? L"0" : L"1");
+    settingsChanged();
+    evaluateInInternalPages(L"settings", "window.prismSettingsChanged && prismSettingsChanged();");
+}
+
+void BrowserWindow::openBookmarkURL(const std::wstring& url, const std::wstring& mode)
+{
+    if (mode == L"background")
+        newTab(url, false);
+    else if (mode == L"foreground")
+        newTab(url, true);
+    else if (Tab* tab = activeTab()) {
+        navigate(tab, url);
+        focusContent();
+    }
+}
+
+void BrowserWindow::bookmarkButton(const std::wstring& coordinates)
+{
+    // The star in the address bar: bookmark this page, or (when it already
+    // is) rename or remove it.
+    Tab* tab = activeTab();
+    if (!tab || engine::isInternalURL(tab->url) || tab->extensionPages || tab->url.empty())
+        return;
+    const bookmarks::Node* existing = bookmarks::findURL(tab->url);
+    if (!existing) {
+        if (bookmarks::add(tab->url, tab->title))
+            showToast(settings::showBookmarksBar() ? L"Added to the bookmarks bar" : L"Bookmarked. Ctrl+Shift+B shows the bookmarks bar.");
+        return;
+    }
+    long long id = existing->id;
+    std::wstring title = existing->title;
+    POINT point = toolbarPoint(coordinates);
+    HMENU menu = CreatePopupMenu();
+    AppendMenuW(menu, MF_STRING, 1, L"Rename…");
+    AppendMenuW(menu, MF_STRING, 2, L"Remove bookmark");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, 3, L"Manage bookmarks");
+    int choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTALIGN, point.x, point.y, 0, m_hwnd, nullptr);
+    DestroyMenu(menu);
+    if (choice == 1) {
+        if (auto name = dialogs::prompt(m_hwnd, L"Rename bookmark", L"Name:", title); name && !name->empty())
+            bookmarks::rename(id, *name);
+    } else if (choice == 2) {
+        bookmarks::remove(id);
+        showToast(L"Bookmark removed");
+    } else if (choice == 3)
+        openInternalPage(L"bookmarks");
+}
+
+namespace {
+
+// What a bookmark menu item does when chosen.
+struct BookmarkCommand {
+    std::wstring url;            // open this
+    std::vector<std::wstring> all; // or open all of these in new tabs
+};
+
+std::wstring menuText(std::wstring text)
+{
+    if (text.size() > 60)
+        text = text.substr(0, 58) + L"…";
+    std::wstring escaped;
+    for (wchar_t c : text) {
+        escaped += c;
+        if (c == L'&')
+            escaped += L'&'; // a single & would underline the next letter
+    }
+    return escaped.empty() ? L"(no name)" : escaped;
+}
+
+void appendBookmarkItems(HMENU menu, const bookmarks::Node& folder, std::vector<BookmarkCommand>& commands, int depth)
+{
+    std::vector<std::wstring> urls;
+    for (auto& child : folder.children) {
+        if (child->folder) {
+            HMENU submenu = CreatePopupMenu();
+            if (depth < 20)
+                appendBookmarkItems(submenu, *child, commands, depth + 1);
+            if (!GetMenuItemCount(submenu))
+                AppendMenuW(submenu, MF_STRING | MF_GRAYED, 0, L"(empty)");
+            AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(submenu), menuText(child->title).c_str());
+        } else {
+            commands.push_back({ child->url, { } });
+            urls.push_back(child->url);
+            AppendMenuW(menu, MF_STRING, commands.size(), menuText(child->title.empty() ? child->url : child->title).c_str());
+        }
+    }
+    if (urls.size() >= 2) {
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        commands.push_back({ L"", urls });
+        AppendMenuW(menu, MF_STRING, commands.size(), (L"Open all " + std::to_wstring(urls.size()) + L" in new tabs").c_str());
+    }
+}
+
+} // namespace
+
+static void runBookmarkCommand(BrowserWindow* window, const BookmarkCommand& command)
+{
+    if (!command.url.empty()) {
+        window->navigate(window->activeTab(), command.url);
+        return;
+    }
+    // A lot of tabs at once is easy to do by accident.
+    if (command.all.size() > 15) {
+        std::wstring question = L"Open " + std::to_wstring(command.all.size()) + L" tabs?";
+        if (MessageBoxW(window->hwnd(), question.c_str(), L"Prism", MB_YESNO | MB_ICONQUESTION) != IDYES)
+            return;
+    }
+    for (size_t i = 0; i < command.all.size(); ++i)
+        window->newTab(command.all[i], i == 0);
+}
+
+void BrowserWindow::showBookmarkFolder(long long folderId, POINT screen)
+{
+    const bookmarks::Node* folder = bookmarks::find(folderId);
+    if (!folder || !folder->folder)
+        return;
+    std::vector<BookmarkCommand> commands;
+    HMENU menu = CreatePopupMenu();
+    appendBookmarkItems(menu, *folder, commands, 0);
+    if (!GetMenuItemCount(menu))
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L"(empty)");
+    int choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, screen.x, screen.y, 0, m_hwnd, nullptr);
+    DestroyMenu(menu);
+    if (choice > 0 && static_cast<size_t>(choice) <= commands.size() && activeTab())
+        runBookmarkCommand(this, commands[static_cast<size_t>(choice) - 1]);
+}
+
+void BrowserWindow::showBookmarkOverflow(const std::vector<long long>& ids, POINT screen)
+{
+    // The bookmarks that don't fit on the bar.
+    std::vector<BookmarkCommand> commands;
+    HMENU menu = CreatePopupMenu();
+    for (long long id : ids) {
+        const bookmarks::Node* node = bookmarks::find(id);
+        if (!node)
+            continue;
+        if (node->folder) {
+            HMENU submenu = CreatePopupMenu();
+            appendBookmarkItems(submenu, *node, commands, 0);
+            if (!GetMenuItemCount(submenu))
+                AppendMenuW(submenu, MF_STRING | MF_GRAYED, 0, L"(empty)");
+            AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(submenu), menuText(node->title).c_str());
+        } else {
+            commands.push_back({ node->url, { } });
+            AppendMenuW(menu, MF_STRING, commands.size(), menuText(node->title.empty() ? node->url : node->title).c_str());
+        }
+    }
+    int choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTALIGN, screen.x, screen.y, 0, m_hwnd, nullptr);
+    DestroyMenu(menu);
+    if (choice > 0 && static_cast<size_t>(choice) <= commands.size() && activeTab())
+        runBookmarkCommand(this, commands[static_cast<size_t>(choice) - 1]);
+}
+
+void BrowserWindow::showBookmarkMenu(long long id, POINT screen)
+{
+    // Right-click on the bookmarks bar.
+    const bookmarks::Node* node = bookmarks::find(id);
+    if (!node)
+        return;
+    bool folder = node->folder;
+    std::wstring url = node->url;
+    std::wstring title = node->title;
+    enum { Open = 1, OpenNewTab, OpenBackground, Rename, Remove, Manage, HideBar };
+    HMENU menu = CreatePopupMenu();
+    if (!folder) {
+        AppendMenuW(menu, MF_STRING, Open, L"Open");
+        AppendMenuW(menu, MF_STRING, OpenNewTab, L"Open in new tab");
+        AppendMenuW(menu, MF_STRING, OpenBackground, L"Open in background tab");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    }
+    AppendMenuW(menu, MF_STRING, Rename, L"Rename…");
+    AppendMenuW(menu, MF_STRING, Remove, folder ? L"Delete folder" : L"Delete");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, Manage, L"Manage bookmarks");
+    AppendMenuW(menu, MF_STRING, HideBar, L"Hide bookmarks bar");
+    int choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, screen.x, screen.y, 0, m_hwnd, nullptr);
+    DestroyMenu(menu);
+    switch (choice) {
+    case Open: openBookmarkURL(url, L"current"); break;
+    case OpenNewTab: openBookmarkURL(url, L"foreground"); break;
+    case OpenBackground: openBookmarkURL(url, L"background"); break;
+    case Rename:
+        if (auto name = dialogs::prompt(m_hwnd, folder ? L"Rename folder" : L"Rename bookmark", L"Name:", title); name && !name->empty())
+            bookmarks::rename(id, *name);
+        break;
+    case Remove:
+        if (folder && bookmarks::find(id) && !bookmarks::find(id)->children.empty()) {
+            std::wstring question = L"Delete the folder \"" + title + L"\" and everything in it?";
+            if (MessageBoxW(m_hwnd, question.c_str(), L"Prism", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES)
+                break;
+        }
+        bookmarks::remove(id);
+        break;
+    case Manage: openInternalPage(L"bookmarks"); break;
+    case HideBar: toggleBookmarksBar(); break;
+    }
 }
 
 // ---------------------------------------------------------------------------

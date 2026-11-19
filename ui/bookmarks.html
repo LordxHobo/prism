@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bookmarks</title>
+<script src="pages.js"></script>
+<link rel="stylesheet" href="pages.css">
+<link rel="stylesheet" href="library.css">
+</head>
+<body>
+<main class="wide">
+  <header class="top">
+    <h1>Bookmarks</h1>
+    <div class="tools">
+      <input id="search" type="search" spellcheck="false" placeholder="Search bookmarks" aria-label="Search bookmarks">
+      <button class="button secondary" id="addBookmark">Add bookmark</button>
+      <button class="button secondary" id="addFolder">Add folder</button>
+      <div class="menu">
+        <button class="button secondary" id="moreButton" aria-haspopup="true">Import and export</button>
+        <div class="popup" id="morePopup" hidden role="menu"></div>
+      </div>
+    </div>
+  </header>
+  <p class="status dim" id="status" role="status"></p>
+
+  <div class="library">
+    <nav class="folders" id="folders" aria-label="Folders"></nav>
+    <section>
+      <p class="path dim" id="path"></p>
+      <div class="list" id="list"></div>
+      <p class="empty dim" id="empty" hidden></p>
+    </section>
+  </div>
+</main>
+<script src="bookmarks.js"></script>
+</body>
+</html>

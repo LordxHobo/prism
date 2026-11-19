@@ -19,6 +19,9 @@ void deleteProfileIfRequested();
 
 bool initialize(std::wstring& error);
 
+// The one browsing context every page belongs to.
+WKContextRef context();
+
 // Where extension content scripts are registered (shared by all pages).
 WKUserContentControllerRef userContentController();
 

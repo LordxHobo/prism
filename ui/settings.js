@@ -78,6 +78,44 @@ function render(settings) {
   renderSegmented('cookiePolicy', settings.cookiePolicy);
   $('cookieHelp').textContent = COOKIE_HELP[settings.cookiePolicy] || '';
   $('clearOnExit').checked = !!settings.clearOnExit;
+  $('saveHistory').checked = !!settings.saveHistory;
+  $('bookmarksBar').checked = !!settings.bookmarksBar;
+  renderSegmented('locationDefault', settings.locationDefault);
+  renderSegmented('notificationsDefault', settings.notificationsDefault);
+}
+
+// ---- Site permissions ---------------------------------------------------------
+
+const PERMISSION_NAMES = { location: 'Location', notifications: 'Notifications' };
+
+function renderPermissions() {
+  const list = $('permissionSites');
+  const sites = ask('permissions.list') || [];
+  list.textContent = '';
+  let count = 0;
+  for (const site of sites) {
+    for (const kind of ['location', 'notifications']) {
+      if (site[kind] === null || site[kind] === undefined) continue;
+      count++;
+      const row = document.createElement('li');
+      const name = document.createElement('span');
+      name.textContent = site.name + ' · ' + PERMISSION_NAMES[kind] + ': ' + (site[kind] ? 'allowed' : 'blocked');
+      const remove = document.createElement('button');
+      remove.textContent = 'Remove';
+      remove.addEventListener('click', () => {
+        ask('permissions.remove', site.origin + '\n' + kind);
+        renderPermissions();
+      });
+      row.append(name, remove);
+      list.appendChild(row);
+    }
+  }
+  if (!count) {
+    const none = document.createElement('li');
+    none.className = 'none';
+    none.textContent = 'No sites have asked yet.';
+    list.appendChild(none);
+  }
 }
 
 // ---- Controls ---------------------------------------------------------------
@@ -92,7 +130,7 @@ for (const [color, name] of ACCENTS) {
   $('accent').appendChild(button);
 }
 
-for (const id of ['startup', 'theme', 'accent', 'tabStyle', 'cookiePolicy']) {
+for (const id of ['startup', 'theme', 'accent', 'tabStyle', 'cookiePolicy', 'locationDefault', 'notificationsDefault']) {
   $(id).addEventListener('click', (event) => {
     const button = event.target.closest('button');
     if (button) setSetting(id, button.dataset.value);
@@ -128,6 +166,13 @@ $('changeDownloads').addEventListener('click', () => {
 });
 $('openDownloads').addEventListener('click', () => ask('openDownloads'));
 
+$('saveHistory').addEventListener('change', () => {
+  setSetting('saveHistory', $('saveHistory').checked ? '1' : '0');
+});
+$('bookmarksBar').addEventListener('change', () => {
+  setSetting('bookmarksBar', $('bookmarksBar').checked ? '1' : '0');
+});
+
 $('clearOnExit').addEventListener('change', () => {
   setSetting('clearOnExit', $('clearOnExit').checked ? '1' : '0');
 });
@@ -136,6 +181,7 @@ $('clearNow').addEventListener('click', () => {
   const what = [];
   if ($('clearCookies').checked) what.push('cookies');
   if ($('clearCache').checked) what.push('cache');
+  if ($('clearHistory').checked) what.push('history');
   if (!what.length) {
     $('clearStatus').textContent = 'Pick what to clear first.';
     return;
@@ -290,6 +336,14 @@ if (initial) {
   document.body.insertAdjacentHTML('afterbegin', '<p class="card" style="margin:16px">Open this page in Prism to change settings.</p>');
 }
 renderShields(ask('shields.get'));
+renderPermissions();
+
+// Prism calls this when a setting changes elsewhere (Ctrl+Shift+B, the menu).
+window.prismSettingsChanged = () => {
+  const settings = ask('get');
+  if (settings) render(settings);
+  renderPermissions();
+};
 const startSection = new URLSearchParams(location.search).get('section');
 if (startSection) requestAnimationFrame(() => window.prismShowSection(startSection));
 updateCurrentSection();

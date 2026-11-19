@@ -17,6 +17,7 @@
     <a href="#general" class="current">General</a>
     <a href="#appearance">Appearance</a>
     <a href="#privacy">Privacy</a>
+    <a href="#permissions">Site permissions</a>
     <a href="#shields">Shields</a>
     <a href="#about">About</a>
   </nav>
@@ -99,6 +100,16 @@
           <button data-value="compact" role="radio">Compact</button>
         </div>
       </div>
+
+      <div class="row">
+        <div class="label">
+          <label for="bookmarksBar" class="title">Show bookmarks bar</label>
+          <p class="dim">Your bookmarks under the address bar. <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>B</kbd> turns it on and off.</p>
+        </div>
+        <div class="control">
+          <label class="switch"><input type="checkbox" id="bookmarksBar"><span></span></label>
+        </div>
+      </div>
     </section>
 
     <section id="privacy">
@@ -127,6 +138,16 @@
 
       <div class="row">
         <div class="label">
+          <label for="saveHistory" class="title">Save browsing history</label>
+          <p class="dim">Keeps the pages you visit for 90 days, on this PC only, for <a href="prism://history">History</a> and address-bar suggestions. Turning it off doesn't delete what's already saved.</p>
+        </div>
+        <div class="control">
+          <label class="switch"><input type="checkbox" id="saveHistory"><span></span></label>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="label">
           <label for="clearOnExit" class="title">Clear browsing data when Prism closes</label>
           <p class="dim">Deletes cookies, site data and cached files every time you close Prism. You'll be signed out of websites. Your open tabs still come back if “Continue where you left off” is on.</p>
         </div>
@@ -139,11 +160,46 @@
         <h2>Clear browsing data now</h2>
         <label class="check"><input type="checkbox" id="clearCookies" checked> Cookies and site data <span class="dim">(signs you out of most sites)</span></label>
         <label class="check"><input type="checkbox" id="clearCache" checked> Cached images and files</label>
+        <label class="check"><input type="checkbox" id="clearHistory"> Browsing history</label>
         <div class="buttons">
           <button class="button" id="clearNow">Clear now</button>
           <span class="dim" id="clearStatus" role="status"></span>
         </div>
       </div>
+    </section>
+
+    <section id="permissions">
+      <h1>Site permissions</h1>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Location</span>
+          <p class="dim">Sites like maps can ask where you are. Prism gets your location from Windows, which needs “Let desktop apps access your location” turned on.</p>
+        </div>
+        <div class="control segmented" id="locationDefault" role="radiogroup">
+          <button data-value="ask" role="radio">Ask</button>
+          <button data-value="block" role="radio">Block</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Notifications</span>
+          <p class="dim">Sites can ask to show Windows notifications.</p>
+        </div>
+        <div class="control segmented" id="notificationsDefault" role="radiogroup">
+          <button data-value="ask" role="radio">Ask</button>
+          <button data-value="block" role="radio">Block</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Your answers</h2>
+        <p class="dim">What you chose when a site asked. Remove one to be asked again.</p>
+        <ul class="entries" id="permissionSites"></ul>
+      </div>
+
+      <p class="dim small">Camera and microphone aren't available yet: the Windows version of WebKit that Prism uses is built without them.</p>
     </section>
 
     <section id="shields">

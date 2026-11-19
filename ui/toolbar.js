@@ -23,11 +23,24 @@ const elements = {
   toast: $('toast'),
   menu: $('menu'),
   progress: $('progress'),
+  star: $('star'),
+  bookmarksbar: $('bookmarksbar'),
+  bookmarkItems: $('bookmarkItems'),
+  bookmarksEmpty: $('bookmarksEmpty'),
+  bookmarkMore: $('bookmarkMore'),
+  infobar: $('infobar'),
+  infoIcon: $('infoIcon'),
+  infoText: $('infoText'),
+  findbar: $('findbar'),
+  findfield: $('findfield'),
+  findInput: $('findInput'),
+  findCount: $('findCount'),
 };
 
-// Commands go to Prism through window.prompt(); Prism answers immediately.
+// Commands go to Prism through window.prompt(); Prism answers immediately
+// (with a result for the commands that have one).
 function send(command, argument = '') {
-  window.prompt('prism:' + command + '\n' + argument);
+  return window.prompt('prism:' + command + '\n' + argument);
 }
 
 const params = new URLSearchParams(location.search);
@@ -83,24 +96,29 @@ function tabBadge(tab) {
   return (tabTitle(tab)[0] || '•');
 }
 
-// Turns what was typed into a URL: an address, or a search.
-function resolveInput(text) {
+// Turns what was typed into where to go: an address, or a search.
+function resolveTarget(text) {
   text = text.trim();
   if (!text) return null;
 
   // Already a full URL (https://..., prism://..., file:///...).
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return text;
-  if (/^(about|data|mailto):/i.test(text)) return text;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return { url: text, search: false };
+  if (/^(about|data|mailto):/i.test(text)) return { url: text, search: false };
 
   // localhost, IP addresses, and anything that looks like a domain name.
   const hostLike = /^(localhost|\[[0-9a-f:]+\]|(\d{1,3}\.){3}\d{1,3}|([a-z0-9-]+\.)+[a-z][a-z0-9-]{1,62})(:\d{1,5})?([/?#].*)?$/i;
   if (!/\s/.test(text) && hostLike.test(text)) {
     const local = /^(localhost|127\.|10\.|192\.168\.|\[)/i.test(text);
-    return (local ? 'http://' : 'https://') + text;
+    return { url: (local ? 'http://' : 'https://') + text, search: false };
   }
 
   const template = (state && state.search) || 'https://duckduckgo.com/?q=%s';
-  return template.replace('%s', encodeURIComponent(text));
+  return { url: template.replace('%s', encodeURIComponent(text)), search: true };
+}
+
+function resolveInput(text) {
+  const target = resolveTarget(text);
+  return target && target.url;
 }
 
 // ---- Rendering ---------------------------------------------------------------
@@ -247,6 +265,138 @@ function renderNavigation() {
   elements.progress.style.width = loading ? Math.max(5, Math.round(tab.progress * 100)) + '%' : '0';
 }
 
+// ---- Bookmark star and bookmarks bar -----------------------------------------------
+
+function renderStar() {
+  const tab = activeTab();
+  const show = !!(tab && tab.bookmarkable);
+  elements.star.hidden = !show;
+  elements.star.classList.toggle('on', !!(tab && tab.bookmarked));
+  elements.star.title = tab && tab.bookmarked ? 'Edit bookmark (Ctrl+D)' : 'Bookmark this page (Ctrl+D)';
+}
+
+function bookmarkMark(item) {
+  if (item.folder) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.innerHTML = '<path d="M2 4.5c0-.6.4-1 1-1h3.2l1.5 1.5H13c.6 0 1 .4 1 1V12c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1z"/>';
+    return svg;
+  }
+  const mark = document.createElement('span');
+  mark.className = 'mark';
+  let letter = '•';
+  try {
+    letter = new URL(item.url).hostname.replace(/^www\./, '')[0] || letter;
+  } catch (e) { /* not a URL */ }
+  mark.textContent = letter;
+  return mark;
+}
+
+let bookmarksKey = '';
+
+function renderBookmarksBar() {
+  const show = !!(state && state.bookmarksBar);
+  elements.bookmarksbar.hidden = !show;
+  if (!show) return;
+  const list = state.bookmarks || [];
+  const key = JSON.stringify(list);
+  elements.bookmarksEmpty.hidden = list.length > 0;
+  if (key === bookmarksKey) return;
+  bookmarksKey = key;
+  const container = elements.bookmarkItems;
+  container.textContent = '';
+  for (const item of list) {
+    const button = document.createElement('button');
+    button.className = 'bookmark';
+    button.dataset.id = item.id;
+    button.title = item.folder ? item.title : (item.title ? item.title + '\n' : '') + item.url;
+    const label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = item.title || item.url;
+    button.append(bookmarkMark(item), label);
+    button.addEventListener('click', (event) => {
+      if (item.folder) {
+        const rect = button.getBoundingClientRect();
+        send('bookmarkFolder', item.id + '\n' + Math.round(rect.left) + ',' + Math.round(rect.bottom + 2));
+      } else {
+        const mode = event.ctrlKey ? 'background' : event.shiftKey ? 'foreground' : 'current';
+        send('bookmarkOpen', item.id + '\n' + mode);
+      }
+    });
+    button.addEventListener('auxclick', (event) => {
+      if (event.button === 1 && !item.folder) send('bookmarkOpen', item.id + '\nbackground');
+    });
+    button.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      send('bookmarkMenu', item.id + '\n' + Math.round(event.clientX) + ',' + Math.round(event.clientY));
+    });
+    container.appendChild(button);
+  }
+  updateBookmarkOverflow();
+}
+
+// Bookmarks that don't fit are hidden and listed under ».
+function updateBookmarkOverflow() {
+  const container = elements.bookmarkItems;
+  const limit = container.getBoundingClientRect().right;
+  const hidden = [];
+  for (const button of container.children) {
+    button.classList.remove('overflowing');
+    if (button.getBoundingClientRect().right > limit + 0.5) {
+      button.classList.add('overflowing');
+      hidden.push(button.dataset.id);
+    }
+  }
+  elements.bookmarkMore.hidden = hidden.length === 0;
+  elements.bookmarkMore.dataset.ids = hidden.join(',');
+}
+
+window.addEventListener('resize', () => {
+  if (state && state.bookmarksBar) updateBookmarkOverflow();
+});
+
+// ---- Permission bar -----------------------------------------------------------------
+
+const PROMPT_TEXT = {
+  location: ' wants to know your location',
+  notifications: ' wants to show notifications',
+};
+const PROMPT_ICONS = {
+  location: '<path d="M8 14.5s4.5-4.2 4.5-8a4.5 4.5 0 0 0-9 0c0 3.8 4.5 8 4.5 8z"/><circle cx="8" cy="6.5" r="1.6"/>',
+  notifications: '<path d="M4 11V7a4 4 0 0 1 8 0v4l1.2 1.5H2.8z"/><path d="M6.5 14a1.6 1.6 0 0 0 3 0"/>',
+};
+
+function renderInfobar() {
+  const tab = activeTab();
+  const prompt = tab && tab.prompt;
+  elements.infobar.hidden = !prompt;
+  if (!prompt) return;
+  elements.infoIcon.innerHTML = PROMPT_ICONS[prompt.kind] || '';
+  elements.infoText.textContent = '';
+  const site = document.createElement('b');
+  site.textContent = prompt.site;
+  elements.infoText.append(site, PROMPT_TEXT[prompt.kind] || ' wants a permission');
+}
+
+// ---- Find bar -------------------------------------------------------------------------
+
+function renderFindbar() {
+  const tab = activeTab();
+  const find = tab && tab.find;
+  const open = !!(find && find.open);
+  elements.findbar.hidden = !open;
+  if (!open) return;
+  if (document.activeElement !== elements.findInput)
+    elements.findInput.value = find.query || '';
+  let text = '';
+  if (find.query && find.matches === 0) text = 'No matches';
+  else if (find.query && find.matches > 0)
+    text = (find.index || 1) + ' of ' + (find.matches > 1000 ? '1000+' : find.matches);
+  elements.findCount.textContent = text;
+  elements.findfield.classList.toggle('nomatch', !!find.query && find.matches === 0);
+}
+
 // ---- Called by Prism -----------------------------------------------------------
 
 window.prism = {
@@ -266,6 +416,10 @@ window.prism = {
     renderTabs();
     renderNavigation();
     renderActions();
+    renderStar();
+    renderBookmarksBar();
+    renderInfobar();
+    renderFindbar();
     prism.stats(state.blocked || 0);
   },
 
@@ -284,6 +438,24 @@ window.prism = {
   focusAddress() {
     elements.address.focus();
     elements.address.select();
+  },
+
+  focusFind() {
+    elements.findInput.focus();
+    elements.findInput.select();
+  },
+
+  // Ctrl+D
+  clickBookmarkButton() {
+    if (!elements.star.hidden) elements.star.click();
+  },
+
+  // A suggestion was clicked (Prism opens it).
+  suggestionsClosed() {
+    suggestions = [];
+    selected = -1;
+    editing = false;
+    elements.address.blur();
   },
 };
 
@@ -332,8 +504,60 @@ $('tabstrip').addEventListener('dblclick', (event) => {
   if (event.target.id === 'tabstrip' || event.target.id === 'tabs') send('newtab');
 });
 
+// ---- Suggestions while typing -------------------------------------------------------
+// Prism shows the list (from history and bookmarks) under the address bar;
+// the arrow keys move through it from here.
+
+let suggestions = [];
+let selected = -1;
+let typed = '';
+
+function closeSuggestions() {
+  if (suggestions.length) send('suggestClose');
+  suggestions = [];
+  selected = -1;
+}
+
+function requestSuggestions() {
+  const text = elements.address.value;
+  const target = text.trim() ? resolveTarget(text) : null;
+  if (!target) {
+    closeSuggestions();
+    return;
+  }
+  const rect = elements.form.getBoundingClientRect();
+  const request = {
+    text: text.trim(),
+    go: target.url,
+    search: target.search,
+    left: Math.round(rect.left),
+    bottom: Math.round(rect.bottom),
+    width: Math.round(rect.width),
+  };
+  try {
+    suggestions = JSON.parse(send('suggest', JSON.stringify(request)) || '[]');
+  } catch (e) {
+    suggestions = [];
+  }
+  selected = -1;
+}
+
+function moveSelection(delta) {
+  const count = suggestions.length;
+  if (!count) return;
+  // -1 is "what I typed".
+  selected = selected + delta;
+  if (selected < -1) selected = count - 1;
+  if (selected >= count) selected = -1;
+  const item = suggestions[selected];
+  elements.address.value = !item || item.kind === 'search' ? typed : item.url;
+  send('suggestSelect', String(selected));
+}
+
 elements.address.addEventListener('input', () => {
   editing = true;
+  typed = elements.address.value;
+  requestSuggestions();
 });
 
 elements.address.addEventListener('focus', () => {
@@ -342,11 +566,23 @@ elements.address.addEventListener('focus', () => {
 });
 
 elements.address.addEventListener('blur', () => {
+  closeSuggestions();
   editing = false;
   if (state) renderNavigation();
 });
 
 elements.address.addEventListener('keydown', (event) => {
+  if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && suggestions.length) {
+    event.preventDefault();
+    moveSelection(event.key === 'ArrowDown' ? 1 : -1);
+    return;
+  }
+  if (event.key === 'Escape' && suggestions.length) {
+    // First Escape closes the list and puts back what was typed.
+    elements.address.value = typed;
+    closeSuggestions();
+    return;
+  }
   if (event.key === 'Escape') {
     editing = false;
     renderNavigation();
@@ -357,11 +593,46 @@ elements.address.addEventListener('keydown', (event) => {
 
 elements.form.addEventListener('submit', (event) => {
   event.preventDefault();
-  const url = resolveInput(elements.address.value);
+  const chosen = selected >= 0 ? suggestions[selected] : null;
+  closeSuggestions();
+  const url = chosen ? chosen.url : resolveInput(elements.address.value);
   if (!url) return;
   editing = false;
   elements.address.blur();
   send('navigate', url);
 });
+
+elements.star.addEventListener('click', () => {
+  const rect = elements.star.getBoundingClientRect();
+  send('bookmarkButton', Math.round(rect.right) + ',' + Math.round(rect.bottom + 4));
+});
+
+elements.bookmarkMore.addEventListener('click', () => {
+  const rect = elements.bookmarkMore.getBoundingClientRect();
+  send('bookmarkOverflow', Math.round(rect.right) + ',' + Math.round(rect.bottom + 2) + '\n' + (elements.bookmarkMore.dataset.ids || ''));
+});
+
+elements.bookmarksbar.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  send('bookmarksBarMenu', Math.round(event.clientX) + ',' + Math.round(event.clientY));
+});
+
+$('permAllow').addEventListener('click', () => send('permission', 'allow'));
+$('permBlock').addEventListener('click', () => send('permission', 'block'));
+$('permDismiss').addEventListener('click', () => send('permission', 'dismiss'));
+
+elements.findInput.addEventListener('input', () => send('find', elements.findInput.value));
+elements.findInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    send(event.shiftKey ? 'findPrevious' : 'findNext');
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    send('findClose');
+  }
+});
+$('findPrev').addEventListener('click', () => send('findPrevious'));
+$('findNext').addEventListener('click', () => send('findNext'));
+$('findClose').addEventListener('click', () => send('findClose'));
 
 send('ready');

@@ -5,10 +5,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "BrowserWindow.h"
+#include "Bookmarks.h"
 #include "Engine.h"
 #include "Extensions.h"
+#include "History.h"
+#include "Permissions.h"
 #include "Settings.h"
 #include "Shields.h"
+#include "Tabs.h"
 #include "Util.h"
 #include "Version.h"
 
@@ -43,6 +47,22 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     shields::initialize([](const std::string& event) {
         BrowserWindow::evaluateInInternalPages(L"settings", "window.prismShieldsEvent && prismShieldsEvent(" + event + ");");
         BrowserWindow::refreshToolbars();
+    });
+
+    // History, bookmarks, and what sites may do (location, notifications).
+    history::load();
+    bookmarks::load();
+    bookmarks::setChangeListener([] {
+        BrowserWindow::refreshToolbars();
+        BrowserWindow::evaluateInInternalPages(L"bookmarks", "window.prismBookmarksChanged && prismBookmarksChanged();");
+    });
+    permissions::initialize(engine::context(), [](WKPageRef page) {
+        // A notification was clicked: show the tab it came from.
+        tabs::Info info;
+        if (tabs::findByPage(page, info)) {
+            tabs::activate(info.id);
+            tabs::focusWindow(info.windowId);
+        }
     });
 
     if (!BrowserWindow::registerWindowClass(instance)) {
@@ -95,6 +115,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+
+    permissions::shutdown();
 
     if (settings::clearOnExit()) {
         // Delete cookies, site data and caches now. Give WebKit up to five
