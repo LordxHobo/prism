@@ -59,6 +59,8 @@ std::string handleCommand(Panel* panel, const std::wstring& command, const std::
     std::wstring site = panel->url;
     if (command == L"get")
         return shields::handleCommand(L"site", site);
+    if (command == L"page")
+        return panel->callbacks.pageStats ? panel->callbacks.pageStats() : "null";
     if (command == L"setSite") {
         shields::handleCommand(L"setSite", site + L"\n" + argument);
         if (panel->callbacks.reloadTab)

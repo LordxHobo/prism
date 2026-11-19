@@ -326,6 +326,31 @@ button {
 
 #shield {
   color: var(--shield);
+  position: relative;
+}
+
+/* Requests blocked on this page. */
+#shieldCount {
+  position: absolute;
+  right: -3px;
+  bottom: 0;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 7px;
+  background: var(--shield);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 13px;
+  text-align: center;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+#shield.off #shieldCount {
+  display: none;
 }
 
 #shield.off {

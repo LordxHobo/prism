@@ -170,6 +170,18 @@ static void forEachSuffix(const std::string& host, Visit visit)
     }
 }
 
+bool isUserAllowed(const std::string& rawHost)
+{
+    std::string host = normalizeHost(rawHost);
+    bool allowed = false;
+    std::lock_guard<std::mutex> lock(s_listsLock);
+    forEachSuffix(host, [&](const std::string& suffix) {
+        allowed = allowed || s_userAllowed.count(suffix);
+        return !allowed;
+    });
+    return allowed;
+}
+
 bool isBlocked(const std::string& rawHost, std::string* owner)
 {
     std::map<std::string, std::shared_ptr<const Lists>> sources;

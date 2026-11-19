@@ -22,14 +22,23 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.8.2</span>
+      <span class="version">Version 0.9.0</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Harder to track</h2>
-    <p><b>HTTPS by default</b>, <b>tracking removed from links</b> and <b>fingerprinting protection</b>, each switchable per site in the Shields panel.</p>
+    <h2 style="margin-top:0">Every request filtered</h2>
+    <p>Prism Shields and blocking extensions now see the <b>full address of every picture, script, frame and request</b> a page makes, not just which site it goes to. Ads and trackers hosted on ordinary sites get blocked too, and the shield shows how many were blocked on the page you're on.</p>
   </div>
+
+  <h2>New in 0.9</h2>
+  <ul class="notes">
+    <li><b>Full network filtering:</b> Prism Shields' filter lists now apply to complete addresses and file types (like <code>example.com/ads/*.js</code>), as in uBlock Origin and Brave.</li>
+    <li><b>Blocked on this page:</b> a number on the shield in the address bar, and the list in the Shields panel (click the shield). You can still allow a domain from there if something breaks.</li>
+    <li><b>Blocking extensions</b> like uBlock Origin Lite now apply their rules to full addresses too. The Extensions page shows how many rules are in use.</li>
+    <li><b>Alt+F4</b> closes the window, even while you're on a web page. <b>Ctrl+Shift+W</b> closes the whole window (Ctrl+W still closes the tab).</li>
+  </ul>
+  <p class="dim">Still to come in 0.9: extensions that block with webRequest (like AdNauseam), extension scripts kept apart from pages, and Prism's own WebKit build for printing, camera and microphone.</p>
 
   <h2>Fixed in 0.8.2</h2>
   <ul class="notes">

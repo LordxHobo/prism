@@ -64,9 +64,17 @@ function render(data) {
   $('blocked').textContent = (state.blocked || 0).toLocaleString();
   $('domains').textContent = (state.domains || 0).toLocaleString();
 
+  // With the page filter running, show what was blocked on this page.
+  const page = ask('page');
+  const perPage = !!(page && page.filtering);
+  $('pageBlocked').parentElement.hidden = !perPage;
+  $('pageBlocked').textContent = perPage ? (page.blocked || 0).toLocaleString() : '0';
+  $('recentTitle').textContent = perPage ? 'Blocked on this page' : 'Recently blocked, all tabs';
+  $('recentEmpty').textContent = perPage ? 'Nothing blocked on this page.' : 'Nothing blocked yet.';
+
   const list = $('recent');
   list.textContent = '';
-  const recent = data.recent || [];
+  const recent = (perPage ? page.hosts : data.recent) || [];
   $('recentEmpty').hidden = recent.length > 0;
   const allowed = new Set(state.allowedDomains || []);
   for (const item of recent) {

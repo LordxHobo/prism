@@ -8,6 +8,7 @@
 #include "Engine.h"
 #include "Http.h"
 #include "Json.h"
+#include "RequestFilter.h"
 #include "Util.h"
 
 #include <algorithm>
@@ -355,8 +356,29 @@ std::list<std::pair<std::string, std::string>> g_hostScripts;
 
 std::string stateJSON();
 
+// Settings used for every request a page makes, read once per change
+// (prism.ini reads are too slow for that).
+struct RequestSettings {
+    bool valid = false;
+    bool on = false;
+    std::vector<std::string> disabledSites;
+};
+RequestSettings g_requestSettings;
+
+const RequestSettings& requestSettings()
+{
+    if (!g_requestSettings.valid) {
+        g_requestSettings.on = shieldsOn();
+        g_requestSettings.disabledSites = disabledSites();
+        g_requestSettings.valid = true;
+    }
+    return g_requestSettings;
+}
+
 void notifyChanged()
 {
+    g_requestSettings.valid = false;
+    requestfilter::rulesChanged();
     if (g_notify)
         g_notify("{\"type\":\"shields\",\"state\":" + stateJSON() + "}");
 }
@@ -648,6 +670,50 @@ void whenReady(std::function<void()> task)
     }
 }
 
+bool filtersRequests()
+{
+    return g_engine && requestSettings().on;
+}
+
+bool blocksRequest(const std::string& url, const std::string& pageURL, const std::string& type)
+{
+    if (!g_engine)
+        return false;
+    const RequestSettings& settings = requestSettings();
+    if (!settings.on)
+        return false;
+    std::string pageHost = hostOf(pageURL);
+    if (pageHost.empty())
+        return false;
+    for (auto& site : settings.disabledSites) {
+        if (pageHost == site || (pageHost.size() > site.size() && pageHost.compare(pageHost.size() - site.size() - 1, std::string::npos, "." + site) == 0))
+            return false;
+    }
+    return g_lib.checkRequest(g_engine, url.c_str(), pageURL.c_str(), type.c_str()) == 1;
+}
+
+void* buildEngine(const std::string& filters)
+{
+    if (!g_lib.loaded || filters.empty())
+        return nullptr;
+    void* builder = g_lib.builderNew();
+    if (!builder)
+        return nullptr;
+    g_lib.builderAddList(builder, filters.data(), filters.size(), 0);
+    return g_lib.builderBuild(builder); // frees the builder
+}
+
+bool engineBlocks(void* engine, const std::string& url, const std::string& pageURL, const std::string& type)
+{
+    return engine && g_lib.checkRequest(engine, url.c_str(), pageURL.c_str(), type.c_str()) == 1;
+}
+
+void freeEngine(void* engine)
+{
+    if (engine && g_lib.loaded)
+        g_lib.engineFree(engine);
+}
+
 bool isActiveFor(const std::wstring& url)
 {
     if (!g_engine || !shieldsOn())
@@ -796,6 +862,7 @@ std::string handleCommand(const std::wstring& command, const std::wstring& argum
 
     if (command == L"setEnabled") {
         util::writeSetting(L"ShieldsEnabled", arg(0) == "1" ? L"1" : L"0");
+        notifyChanged();
         if (arg(0) != "1") {
             blocker::setLists("shields", nullptr);
             engine::updateBlockingProxy();
@@ -869,6 +936,7 @@ std::string handleCommand(const std::wstring& command, const std::wstring& argum
         auto sites = disabledSites();
         sites.erase(std::remove(sites.begin(), sites.end(), arg(0)), sites.end());
         util::writeSetting(L"ShieldsDisabledSites", joinList(sites));
+        notifyChanged();
         return stateJSON();
     }
 

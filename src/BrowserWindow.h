@@ -245,4 +245,5 @@ private:
     std::vector<std::wstring> m_pendingStartURLs;
     int m_pendingActiveIndex { -1 };
     uint64_t m_lastBlockedCount { 0 };
+    uint32_t m_lastBlockedHere { 0 };
 };

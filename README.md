@@ -33,6 +33,7 @@ dist\Prism.exe
 | Part | What it does |
 | --- | --- |
 | `src/` | The Windows app (C++). It creates windows and tabs, and loads WebKit's `WebKit2.dll` at runtime through WebKit's C API. |
+| `bundle/` | `PrismBundle.dll`, which WebKit loads into its page processes. It asks Prism about every request a page makes, so Prism Shields and blocking extensions can filter by full address. |
 | `shields/` | Prism Shields' engine: a small Rust library (`prism_shields.dll`) around Brave's [adblock-rust](https://github.com/brave/adblock-rust), plus the script that bundles uBlock Origin's scriptlets. |
 | `ui/` | The browser interface (tab strip, address bar, bookmarks bar) and Prism's own pages (`prism://newtab`, `prism://history`, `prism://bookmarks`, `prism://settings`, ...), drawn by WebKit itself. |
 | `scripts/` | Downloads the WebKit runtime and builds Prism. |
@@ -48,7 +49,7 @@ dist\Prism.exe
 - [x] Bookmarks, history, find in page, permission prompts (v0.6; printing moves to v0.9)
 - [x] Customization, tab groups and vertical tabs (v0.7)
 - [x] Privacy: fingerprinting protection, HTTPS first/only, per-site settings, tracking-parameter removal (v0.8)
-- [ ] Prism's own WebKit build: printing, full network filtering, extensions part 3 (v0.9)
+- [ ] Full network filtering, extensions part 3, and Prism's own WebKit build for printing, camera and microphone (v0.9)
 - [ ] Polish (v0.10), then 1.0 and Linux
 
 ## License

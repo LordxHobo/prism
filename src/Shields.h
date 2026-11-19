@@ -46,4 +46,19 @@ bool isStarting();
 // after 5 seconds at the latest), so the first pages get their site fixes.
 void whenReady(std::function<void()> task);
 
+// Full-address check of one request a page makes (from PrismBundle.dll).
+// `type` is an adblock request type ("script", "image", "other"...).
+// True if Prism Shields is on for `pageURL` and its lists block the request.
+// True if Prism Shields filters requests at all right now.
+bool filtersRequests();
+
+bool blocksRequest(const std::string& url, const std::string& pageURL, const std::string& type);
+
+// Filter engines for other rule sources (content-blocking extensions),
+// built from adblock-style filter text. buildEngine may be called on any
+// thread; it returns null if Prism Shields' library isn't available.
+void* buildEngine(const std::string& filters);
+bool engineBlocks(void* engine, const std::string& url, const std::string& pageURL, const std::string& type);
+void freeEngine(void* engine);
+
 } // namespace shields

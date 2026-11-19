@@ -171,7 +171,7 @@ $binDir = $webkitDll.DirectoryName
 
 # Remove the WebKit runtime from a previous run (keep Prism's own files).
 Write-Step "Installing the WebKit runtime into dist\"
-$keep = @('Prism.exe', 'Prism.pdb', 'ui', 'prism_shields.dll', 'shields')
+$keep = @('Prism.exe', 'Prism.pdb', 'PrismBundle.dll', 'PrismBundle.pdb', 'ui', 'prism_shields.dll', 'shields')
 Get-ChildItem -Path $Dist | Where-Object { $keep -notcontains $_.Name } | Remove-Item -Recurse -Force
 
 $exclude = @('*.ilk', '*.lib', '*.exp')

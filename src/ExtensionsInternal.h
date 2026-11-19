@@ -51,6 +51,7 @@ struct Extension {
     std::string uiLanguage;
     std::string token;         // proves messages come from this extension
     size_t blockingDomains { 0 };
+    size_t blockingRules { 0 }; // rules applied to every request (RequestFilter)
     std::filesystem::path dir;
 
     // Background: an HTML page (MV2 "page"), a list of scripts (MV2

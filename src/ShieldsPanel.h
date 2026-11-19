@@ -17,6 +17,8 @@ namespace shieldspanel {
 struct Callbacks {
     std::function<void()> reloadTab;
     std::function<void()> openSettings;
+    // JSON of what was blocked on the tab's page ({blocked, hosts, filtering}).
+    std::function<std::string()> pageStats;
 };
 
 // Opens the panel with its top-right corner at `anchor` (screen pixels),

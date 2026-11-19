@@ -7,6 +7,9 @@
 #include "ExtensionServer.h"
 
 #include "Blocker.h"
+#include "DnrFilters.h"
+#include "RequestFilter.h"
+#include "Shields.h"
 #include "BrowserWindow.h"
 #include "Engine.h"
 #include "Http.h"
@@ -516,6 +519,7 @@ std::string supportJSON(const Extension& ext)
     json += ",\"rulesets\":" + std::to_string(ext.rulesets.size());
     json += ",\"rulesetsEnabled\":" + std::to_string(enabledRulesets);
     json += ",\"blockingDomains\":" + std::to_string(ext.blockingDomains);
+    json += ",\"blockingRules\":" + std::to_string(ext.blockingRules);
     json += std::string(",\"background\":") + (ext.hasBackground ? "true" : "false");
     json += std::string(",\"popup\":") + (!ext.actionPopup.empty() ? "true" : "false");
     json += std::string(",\"action\":") + (ext.hasAction ? "true" : "false");
@@ -747,15 +751,27 @@ void rebuildBlocking()
     // Filter lists can be tens of MB: parse them off the UI thread.
     std::thread([work = std::move(work), generation] {
         auto lists = std::make_shared<blocker::Lists>();
-        std::map<std::string, size_t> counts;
+        std::map<std::string, size_t> counts, ruleCounts;
+        std::vector<std::shared_ptr<requestfilter::ExtensionRules>> pathRules;
         for (auto& item : work) {
             uint16_t owner = static_cast<uint16_t>(lists->owners.size());
             lists->owners.push_back(item.owner);
             std::vector<std::string> blocked, allowed;
+            dnr::Conversion conversion;
             for (auto& file : item.files) {
                 json::Value rules;
-                if (json::parse(readText(file), rules))
+                if (json::parse(readText(file), rules)) {
                     blocker::collectDomains(rules, blocked, allowed);
+                    dnr::convert(rules, conversion);
+                }
+            }
+            // The same rules with paths, types and sites, for the page filter.
+            if (void* engine = shields::buildEngine(conversion.filters)) {
+                ruleCounts[item.extensionId] = conversion.converted;
+                auto rules = std::make_shared<requestfilter::ExtensionRules>();
+                rules->owner = item.owner;
+                rules->engine = engine;
+                pathRules.push_back(std::move(rules));
             }
             size_t before = lists->blocked.size();
             for (auto& domain : blocked)
@@ -764,12 +780,15 @@ void rebuildBlocking()
                 lists->allowed.insert(domain);
             counts[item.extensionId] = lists->blocked.size() - before;
         }
-        util::postToMainThread([lists, counts, generation] {
+        util::postToMainThread([lists, counts, ruleCounts, generation, pathRules = std::move(pathRules)]() mutable {
             if (generation != g_blockGeneration)
                 return; // a newer rebuild is on its way
+            requestfilter::setExtensionRules(std::move(pathRules));
             for (auto& ext : g_extensions) {
                 auto found = counts.find(ext->id);
                 ext->blockingDomains = found == counts.end() ? 0 : found->second;
+                auto rules = ruleCounts.find(ext->id);
+                ext->blockingRules = rules == ruleCounts.end() ? 0 : rules->second;
             }
             blocker::setLists("extensions", lists);
             engine::updateBlockingProxy();

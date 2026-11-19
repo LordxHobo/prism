@@ -14,6 +14,7 @@
 #include "Icons.h"
 #include "Permissions.h"
 #include "Privacy.h"
+#include "RequestFilter.h"
 #include "Shields.h"
 #include "ShieldsPanel.h"
 #include "Suggestions.h"
@@ -370,9 +371,12 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         if (wParam == kStatsTimer) {
             // Keep the shield's "blocked" count fresh.
             uint64_t blocked = blocker::blockedCount();
-            if (blocked != m_lastBlockedCount) {
+            Tab* active = activeTab();
+            uint32_t here = active ? requestfilter::blockedOnPage(active->page) : 0;
+            if (blocked != m_lastBlockedCount || here != m_lastBlockedHere) {
                 m_lastBlockedCount = blocked;
-                runToolbarScript("window.prism && prism.stats(" + std::to_string(blocked) + ");");
+                m_lastBlockedHere = here;
+                runToolbarScript("window.prism && prism.stats(" + std::to_string(blocked) + "," + std::to_string(here) + ");");
             }
             return 0;
         }
@@ -753,6 +757,24 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
             if (auto* window = BrowserWindow::fromHWND(hwnd))
                 window->openInternalPage(L"settings", L"shields");
         };
+        callbacks.pageStats = [hwnd, tabId]() -> std::string {
+            auto* window = BrowserWindow::fromHWND(hwnd);
+            if (!window)
+                return "null";
+            for (auto& candidate : window->m_tabs) {
+                if (candidate->id != tabId)
+                    continue;
+                std::string json = "{\"filtering\":" + std::string(requestfilter::bundleActive() ? "true" : "false");
+                json += ",\"blocked\":" + std::to_string(requestfilter::blockedOnPage(candidate->page)) + ",\"hosts\":[";
+                bool first = true;
+                for (auto& [host, count] : requestfilter::blockedHostsOnPage(candidate->page, 12)) {
+                    json += std::string(first ? "" : ",") + "{\"domain\":" + json::quote(host) + ",\"count\":" + std::to_string(count) + "}";
+                    first = false;
+                }
+                return json + "]}";
+            }
+            return "null";
+        };
         shieldspanel::toggle(m_hwnd, anchor, scale, tab->url, std::move(callbacks));
     } else if (command == L"extensionAction" || command == L"extensionMenu") {
         // "<extension id>\n<x>,<y>" (the button's bottom right, CSS pixels)
@@ -853,6 +875,8 @@ void BrowserWindow::pushState()
     json += ",\"accent\":" + util::jsonString(settings::accent());
     json += ",\"compact\":" + std::string(settings::compactTabs() ? "true" : "false");
     json += ",\"blocked\":" + std::to_string(blocker::blockedCount());
+    if (Tab* active = activeTab())
+        json += ",\"blockedHere\":" + std::to_string(requestfilter::blockedOnPage(active->page));
     json += ",\"active\":" + std::to_string(m_activeTabId);
     json += ",\"actions\":" + extensions::actionsJSON(m_activeTabId);
     json += ",\"palette\":" + util::jsonString(settings::palette());
@@ -1055,6 +1079,7 @@ void BrowserWindow::attachClients(Tab* tab)
     navigationClient.didCommitNavigation = didCommitNavigation;
     navigationClient.didSameDocumentNavigation = didSameDocumentNavigation;
     WKPageSetPageNavigationClient(tab->page, &navigationClient.base);
+    requestfilter::attachPage(tab->page);
 
     if (WKPageSetPageFindClient) {
         WKPageFindClientV0 findClient = { };
@@ -1145,6 +1170,7 @@ void BrowserWindow::closeTab(int id)
     scheduleSessionSave();
     // Destroying the view's window makes WebKit close the page and its process.
     DestroyWindow(tab->hwnd);
+    requestfilter::detachPage(m_tabs[index]->page);
     m_tabs.erase(m_tabs.begin() + index);
     normalizeGroups();
 
@@ -2178,6 +2204,11 @@ bool BrowserWindow::handleShortcut(const MSG& msg)
             return true;
         case 'W':
         case VK_F4:
+            if (shift && key == 'W') {
+                // Ctrl+Shift+W closes the whole window, like Chrome.
+                PostMessageW(m_hwnd, WM_CLOSE, 0, 0);
+                return true;
+            }
             if (tab) closeTab(tab->id);
             return true;
         case VK_TAB:
@@ -2267,6 +2298,11 @@ bool BrowserWindow::handleShortcut(const MSG& msg)
 
     if (alt && !ctrl) {
         switch (key) {
+        case VK_F4:
+            // Web pages take key presses without handing Alt+F4 back to
+            // Windows, so close the window here.
+            PostMessageW(m_hwnd, WM_CLOSE, 0, 0);
+            return true;
         case VK_LEFT:
             if (tab) WKPageGoBack(tab->page);
             return true;
@@ -2316,6 +2352,7 @@ void BrowserWindow::didCommitNavigation(WKPageRef page, WKNavigationRef, WKTypeR
 {
     Tab* tab = tabFromClientInfo(clientInfo);
     tab->upgradedFrom.clear(); // the upgrade worked (or was replaced)
+    requestfilter::pageCommitted(page);
     // A new page: the old page's questions go away, and find starts over.
     tab->window->denyPrompts(tab);
     if (tab->findOpen) {

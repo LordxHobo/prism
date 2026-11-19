@@ -3,7 +3,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 cmake_minimum_required(VERSION 3.21)
-project(Prism VERSION 0.8.2 LANGUAGES CXX RC)
+project(Prism VERSION 0.9.0 LANGUAGES CXX RC)
 
 if(NOT WIN32)
     message(FATAL_ERROR "Prism currently builds for Windows only.")
@@ -21,6 +21,8 @@ add_executable(Prism WIN32
     src/BrowserWindow.h
     src/Dialogs.cpp
     src/Dialogs.h
+    src/DnrFilters.cpp
+    src/DnrFilters.h
     src/Engine.cpp
     src/Engine.h
     src/ExtensionHost.cpp
@@ -46,6 +48,8 @@ add_executable(Prism WIN32
     src/Permissions.h
     src/Privacy.cpp
     src/Privacy.h
+    src/RequestFilter.cpp
+    src/RequestFilter.h
     src/Settings.cpp
     src/Settings.h
     src/Tabs.h
@@ -89,3 +93,23 @@ add_custom_command(TARGET Prism POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/ui" "${PRISM_DIST_DIR}/ui"
     COMMENT "Copying Prism's interface files to dist/ui"
 )
+
+# PrismBundle.dll: loaded by WebKit into its web content processes, where it
+# asks Prism about every request pages make (see bundle/PrismBundle.cpp).
+add_library(PrismBundle SHARED
+    bundle/PrismBundle.cpp
+    bundle/BundleApi.h
+    bundle/RequestKind.h
+)
+target_compile_definitions(PrismBundle PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+if(MSVC)
+    target_compile_options(PrismBundle PRIVATE /W4 /utf-8 /permissive- /Zc:__cplusplus)
+else()
+    target_compile_options(PrismBundle PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+endif()
+set_target_properties(PrismBundle PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "$<1:${PRISM_DIST_DIR}>"
+    PREFIX ""
+)
+target_include_directories(Prism PRIVATE "${CMAKE_SOURCE_DIR}/bundle")
+add_dependencies(Prism PrismBundle)

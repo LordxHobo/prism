@@ -391,6 +391,50 @@ typedef struct WKNotificationProviderV0 {
     WKNotificationProviderClearNotificationsCallback clearNotifications;
 } WKNotificationProviderV0;
 
+// Injected bundle (PrismBundle.dll) messages: WKContextInjectedBundleClient.h,
+// WKPageInjectedBundleClient.h, WKMessageListener.h.
+typedef const struct OpaqueWKMessageListener* WKMessageListenerRef;
+
+typedef void (*WKContextDidReceiveMessageFromInjectedBundleCallback)(WKContextRef, WKStringRef messageName, WKTypeRef messageBody, const void* clientInfo);
+typedef void (*WKContextDidReceiveSynchronousMessageFromInjectedBundleCallback)(WKContextRef, WKStringRef messageName, WKTypeRef messageBody, WKTypeRef* returnData, const void* clientInfo);
+typedef WKTypeRef (*WKContextGetInjectedBundleInitializationUserDataCallback)(WKContextRef, const void* clientInfo);
+typedef void (*WKContextDidReceiveSynchronousMessageFromInjectedBundleWithListenerCallback)(WKContextRef, WKStringRef messageName, WKTypeRef messageBody, WKMessageListenerRef listener, const void* clientInfo);
+
+typedef struct WKContextInjectedBundleClientBase {
+    int version;
+    const void* clientInfo;
+} WKContextInjectedBundleClientBase;
+
+typedef struct WKContextInjectedBundleClientV2 {
+    WKContextInjectedBundleClientBase base;
+
+    // Version 0.
+    WKContextDidReceiveMessageFromInjectedBundleCallback didReceiveMessageFromInjectedBundle;
+    WKContextDidReceiveSynchronousMessageFromInjectedBundleCallback didReceiveSynchronousMessageFromInjectedBundle;
+
+    // Version 1.
+    WKContextGetInjectedBundleInitializationUserDataCallback getInjectedBundleInitializationUserData;
+
+    // Version 2.
+    WKContextDidReceiveSynchronousMessageFromInjectedBundleWithListenerCallback didReceiveSynchronousMessageFromInjectedBundleWithListener;
+} WKContextInjectedBundleClientV2;
+
+typedef void (*WKPageDidReceiveMessageFromInjectedBundleCallback)(WKPageRef, WKStringRef messageName, WKTypeRef messageBody, const void* clientInfo);
+typedef void (*WKPageDidReceiveSynchronousMessageFromInjectedBundleCallback)(WKPageRef, WKStringRef messageName, WKTypeRef messageBody, WKTypeRef* returnData, const void* clientInfo);
+
+typedef struct WKPageInjectedBundleClientBase {
+    int version;
+    const void* clientInfo;
+} WKPageInjectedBundleClientBase;
+
+typedef struct WKPageInjectedBundleClientV0 {
+    WKPageInjectedBundleClientBase base;
+
+    // Version 0.
+    WKPageDidReceiveMessageFromInjectedBundleCallback didReceiveMessageFromInjectedBundle;
+    WKPageDidReceiveSynchronousMessageFromInjectedBundleCallback didReceiveSynchronousMessageFromInjectedBundle;
+} WKPageInjectedBundleClientV0;
+
 } // extern "C"
 
 // ---- Function table -------------------------------------------------------
@@ -527,7 +571,14 @@ typedef struct WKNotificationProviderV0 {
     X(WKNotificationCopyBody, WKStringRef, (WKNotificationRef)) \
     X(WKNotificationGetSecurityOrigin, WKSecurityOriginRef, (WKNotificationRef)) \
     X(WKNotificationGetID, uint64_t, (WKNotificationRef)) \
-    X(WKWebsiteDataStoreTerminateNetworkProcess, void, (WKWebsiteDataStoreRef))
+    X(WKWebsiteDataStoreTerminateNetworkProcess, void, (WKWebsiteDataStoreRef)) \
+    X(WKContextConfigurationCreate, WKContextConfigurationRef, ()) \
+    X(WKContextConfigurationSetInjectedBundlePath, void, (WKContextConfigurationRef, WKStringRef)) \
+    X(WKContextSetInjectedBundleClient, void, (WKContextRef, const WKContextInjectedBundleClientBase*)) \
+    X(WKContextSetInitializationUserDataForInjectedBundle, void, (WKContextRef, WKTypeRef)) \
+    X(WKContextPostMessageToInjectedBundle, void, (WKContextRef, WKStringRef, WKTypeRef)) \
+    X(WKMessageListenerSendReply, void, (WKMessageListenerRef, WKTypeRef)) \
+    X(WKPageSetPageInjectedBundleClient, void, (WKPageRef, const WKPageInjectedBundleClientBase*))
 
 namespace wk {
 

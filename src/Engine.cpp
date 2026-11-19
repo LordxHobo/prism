@@ -6,6 +6,7 @@
 
 #include "Blocker.h"
 #include "Extensions.h"
+#include "RequestFilter.h"
 #include "Shields.h"
 #include "Settings.h"
 #include "Util.h"
@@ -185,7 +186,17 @@ bool initialize(std::wstring& error)
     if (WKPreferencesSetPageVisibilityBasedProcessSuppressionEnabled)
         WKPreferencesSetPageVisibilityBasedProcessSuppressionEnabled(s_backgroundPreferences.get(), false);
 
-    s_context = Ref<WKContextRef>::adopt(WKContextCreateWithConfiguration(nullptr));
+    // PrismBundle.dll runs in WebKit's content processes and lets Prism
+    // filter every request pages make (RequestFilter.h).
+    std::wstring bundle = requestfilter::bundlePath();
+    if (!bundle.empty() && WKContextConfigurationCreate && WKContextConfigurationSetInjectedBundlePath) {
+        Ref<WKContextConfigurationRef> configuration = Ref<WKContextConfigurationRef>::adopt(WKContextConfigurationCreate());
+        WKContextConfigurationSetInjectedBundlePath(configuration.get(), string(bundle).get());
+        s_context = Ref<WKContextRef>::adopt(WKContextCreateWithConfiguration(configuration.get()));
+        requestfilter::initialize(s_context.get());
+    } else {
+        s_context = Ref<WKContextRef>::adopt(WKContextCreateWithConfiguration(nullptr));
+    }
 
     s_pageConfiguration = Ref<WKPageConfigurationRef>::adopt(WKPageConfigurationCreate());
     WKPageConfigurationSetContext(s_pageConfiguration.get(), s_context.get());

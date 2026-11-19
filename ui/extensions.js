@@ -76,8 +76,12 @@ function supportItems(support) {
   const items = [];
   if (support.contentScripts) items.push([true, 'Changes pages it’s made for (content scripts)']);
   if (support.rulesets) {
-    const count = support.blockingDomains ? ' (' + support.blockingDomains.toLocaleString() + ' domains)' : '';
-    items.push([true, 'Blocks ads and trackers by domain' + count]);
+    if (support.blockingRules) {
+      items.push([true, 'Blocks ads and trackers (' + support.blockingRules.toLocaleString() + ' rules)']);
+    } else {
+      const count = support.blockingDomains ? ' (' + support.blockingDomains.toLocaleString() + ' domains)' : '';
+      items.push([true, 'Blocks ads and trackers by domain' + count]);
+    }
   }
   if (support.background) items.push([true, 'Runs in the background']);
   if (support.action) items.push([true, support.popup ? 'Toolbar button with a popup' : 'Toolbar button']);
@@ -240,11 +244,13 @@ function render(data) {
       name.appendChild(errors);
     }
     // Is this extension's ad blocking running right now?
-    if (ext.enabled && ext.support.blockingDomains) {
+    if (ext.enabled && (ext.support.blockingDomains || ext.support.blockingRules)) {
       const blocking = document.createElement('span');
       blocking.className = 'badge blocking' + (data.blockingActive ? '' : ' waiting');
       blocking.textContent = data.blockingActive ? 'Blocking on' : 'Blocking starting…';
-      blocking.title = ext.support.blockingDomains.toLocaleString() + ' ad and tracker domains blocked in every tab';
+      blocking.title = ext.support.blockingRules
+        ? ext.support.blockingRules.toLocaleString() + ' blocking rules applied in every tab'
+        : ext.support.blockingDomains.toLocaleString() + ' ad and tracker domains blocked in every tab';
       name.appendChild(blocking);
     }
     const description = document.createElement('p');

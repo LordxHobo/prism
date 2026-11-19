@@ -56,6 +56,9 @@ void setUserAllowed(std::unordered_set<std::string>);
 // most recent few dozen.
 void noteTopLevelSite(const std::string& host);
 
+// True if you've chosen to always allow `host` (or a parent domain).
+bool isUserAllowed(const std::string& host);
+
 // True if `host` (or a parent domain) is blocked and not allowed.
 // `owner` receives the name of whatever blocks it.
 bool isBlocked(const std::string& host, std::string* owner = nullptr);

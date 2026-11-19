@@ -83,6 +83,7 @@ jobs:
           ./scripts/build-shields.ps1
           if (-not (Test-Path dist/prism_shields.dll)) { throw 'prism_shields.dll is missing' }
           if (-not (Test-Path dist/shields/scriptlets.json)) { throw 'scriptlets.json is missing' }
+          if (-not (Test-Path dist/PrismBundle.dll)) { throw 'PrismBundle.dll is missing' }
 
       - name: Package
         shell: pwsh

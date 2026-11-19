@@ -18,7 +18,8 @@ header { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
 
 .notice { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--text); }
 
-.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.stats { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; margin-top: 12px; }
+.stats div[hidden] { display: none; }
 .stats div { padding: 10px 12px; border-radius: 10px; background: var(--bg); display: flex; flex-direction: column; gap: 2px; }
 .stats b { font-size: 18px; font-variant-numeric: tabular-nums; }
 

@@ -515,6 +515,7 @@ document.addEventListener('mouseup', () => {
 
 let shieldsOn = false;
 let lastBlocked = 0;
+let lastBlockedHere = 0;
 
 // ---- Extension buttons ----------------------------------------------------
 // One per extension with a toolbar button: its icon, a badge (text set by
@@ -584,7 +585,7 @@ function renderNavigation() {
   // The shield is grey where Prism Shields is off (or on Prism's own pages).
   shieldsOn = !!(tab && tab.shields);
   elements.shield.classList.toggle('off', !shieldsOn);
-  prism.stats(lastBlocked);
+  prism.stats(lastBlocked, lastBlockedHere);
 
   // "Add to Prism" on Chrome Web Store / Firefox Add-ons extension pages.
   elements.addExtension.hidden = !(tab && tab.store);
@@ -751,15 +752,21 @@ window.prism = {
     renderBookmarksBar();
     renderInfobar();
     renderFindbar();
-    prism.stats(state.blocked || 0);
+    prism.stats(state.blocked || 0, state.blockedHere || 0);
   },
 
   // How many ads and trackers were blocked (Prism Shields and extensions).
-  stats(blocked) {
+  // `here`: blocked on the current tab's page.
+  stats(blocked, here) {
     lastBlocked = blocked;
+    lastBlockedHere = here || 0;
+    const onPage = lastBlockedHere ? ' ' + lastBlockedHere.toLocaleString() + ' blocked on this page.' : '';
     const count = blocked ? ' ' + blocked.toLocaleString() + ' ads and trackers blocked so far.' : '';
     elements.shield.title = (shieldsOn ? 'Prism Shields is on for this site.' : 'Prism Shields is off for this site.')
-      + count + ' Click for Shields.';
+      + onPage + count + ' Click for Shields.';
+    const badge = $('shieldCount');
+    badge.hidden = !lastBlockedHere;
+    badge.textContent = lastBlockedHere > 99 ? '99+' : String(lastBlockedHere);
   },
 
   toast(text) {
