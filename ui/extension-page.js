@@ -193,6 +193,9 @@
       if (target) target.fire(...(event.args || []));
       break;
     }
+    case 'webRequest':
+      handleWebRequest(event);
+      break;
     }
   }
 
@@ -332,7 +335,7 @@
     setUninstallURL: resolved(undefined),
     requestUpdateCheck: resolved({ status: 'no_update' }),
     getPlatformInfo: resolved({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' }),
-    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.1', buildID: '0' }),
+    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.2', buildID: '0' }),
     getContexts: resolved([]),
     getBackgroundPage: notYet('Reaching the background page directly'),
     getPackageDirectoryEntry: notYet('getPackageDirectoryEntry'),
@@ -731,12 +734,75 @@
     onDisabled: quiet(),
   };
 
-  // webRequest listeners are accepted but don't see anything yet.
-  const webRequestEvent = () => ({ addListener() {}, removeListener() {}, hasListener: () => false, hasListeners: () => false });
+  // webRequest: Prism sends onBeforeRequest (blocking listeners can cancel
+  // or redirect), onCompleted and onErrorOccurred for the requests pages
+  // make. Header events aren't sent (Prism can't see or change headers):
+  // listening to them is harmless.
+  const webRequestListeners = new Map(); // id -> { name, callback, blocking }
+  let nextWebRequestListener = 1;
+  function webRequestEvent(name, sent) {
+    const ids = new Map(); // callback -> id
+    return {
+      addListener(callback, filter, extraInfoSpec) {
+        if (typeof callback !== 'function' || ids.has(callback)) return;
+        const id = nextWebRequestListener++;
+        const blocking = Array.isArray(extraInfoSpec) && extraInfoSpec.includes('blocking');
+        ids.set(callback, id);
+        webRequestListeners.set(id, { name, callback, blocking });
+        if (!sent) return;
+        const urls = filter && Array.isArray(filter.urls) ? filter.urls.map(String) : [];
+        const types = filter && Array.isArray(filter.types) ? filter.types.map(String) : [];
+        const options = { id, event: name, urls, types, blocking };
+        if (filter && typeof filter.tabId === 'number') options.tabId = filter.tabId;
+        ready.then(() => call('webRequest.addListener', options)).catch((error) => console.error(error));
+      },
+      removeListener(callback) {
+        const id = ids.get(callback);
+        if (id === undefined) return;
+        ids.delete(callback);
+        webRequestListeners.delete(id);
+        if (sent) ready.then(() => call('webRequest.removeListener', { id })).catch(() => {});
+      },
+      hasListener(callback) { return ids.has(callback); },
+      hasListeners() { return ids.size > 0; },
+    };
+  }
+
+  function handleWebRequest(event) {
+    const entry = webRequestListeners.get(event.listener);
+    const details = event.details || {};
+    const respond = (response) => {
+      if (!event.blocking) return;
+      const answer = {};
+      if (response && typeof response === 'object') {
+        if (response.cancel === true) answer.cancel = true;
+        if (typeof response.redirectUrl === 'string') answer.redirectUrl = response.redirectUrl;
+      }
+      call('webRequest.respond', { listener: event.listener, requestId: details.requestId, response: answer }).catch(() => {});
+    };
+    if (!entry) {
+      respond(undefined);
+      return;
+    }
+    let result;
+    try {
+      result = entry.callback(details);
+    } catch (error) {
+      console.error(error);
+      respond(undefined);
+      return;
+    }
+    // Firefox lets blocking listeners answer with a promise.
+    if (result && typeof result.then === 'function') result.then(respond, () => respond(undefined));
+    else respond(result);
+  }
+
   const webRequest = {
-    onBeforeRequest: webRequestEvent(), onBeforeSendHeaders: webRequestEvent(), onSendHeaders: webRequestEvent(),
-    onHeadersReceived: webRequestEvent(), onAuthRequired: webRequestEvent(), onResponseStarted: webRequestEvent(),
-    onBeforeRedirect: webRequestEvent(), onCompleted: webRequestEvent(), onErrorOccurred: webRequestEvent(),
+    onBeforeRequest: webRequestEvent('onBeforeRequest', true), onBeforeSendHeaders: webRequestEvent('onBeforeSendHeaders'),
+    onSendHeaders: webRequestEvent('onSendHeaders'), onHeadersReceived: webRequestEvent('onHeadersReceived'),
+    onAuthRequired: webRequestEvent('onAuthRequired'), onResponseStarted: webRequestEvent('onResponseStarted'),
+    onBeforeRedirect: webRequestEvent('onBeforeRedirect'), onCompleted: webRequestEvent('onCompleted', true),
+    onErrorOccurred: webRequestEvent('onErrorOccurred', true),
     handlerBehaviorChanged: resolved(undefined), MAX_HANDLER_BEHAVIOR_CHANGED_CALLS_PER_10_MINUTES: 20,
     ResourceType: {
       MAIN_FRAME: 'main_frame', SUB_FRAME: 'sub_frame', STYLESHEET: 'stylesheet', SCRIPT: 'script', IMAGE: 'image',

@@ -5,7 +5,9 @@
 #include "RequestFilter.h"
 
 #include "Blocker.h"
+#include "Extensions.h"
 #include "Shields.h"
+#include "Tabs.h"
 #include "Util.h"
 
 #include <algorithm>
@@ -63,7 +65,7 @@ std::string hostOf(const std::string& url)
 std::string configText()
 {
     // Nothing to ask when nothing filters: pages skip the round trip.
-    bool filtering = shields::filtersRequests() || !g_extensionRules.empty();
+    bool filtering = shields::filtersRequests() || !g_extensionRules.empty() || extensions::webRequestListening();
     return std::string(filtering ? "1" : "0") + "\t" + std::to_string(g_generation);
 }
 
@@ -96,33 +98,122 @@ void record(uint64_t pageId, const std::string& host)
         ++stats.hosts[host];
 }
 
-// "<page id>\t<kind>\t<page URL>\t<request URL>" -> "1" (block) or "0".
-std::string answer(const std::string& text)
+// webRequest's name for a request type.
+const char* webRequestType(const std::string& kind)
 {
-    size_t a = text.find('\t');
-    size_t b = a == std::string::npos ? a : text.find('\t', a + 1);
-    size_t c = b == std::string::npos ? b : text.find('\t', b + 1);
-    if (c == std::string::npos)
-        return "0";
-    uint64_t pageId = std::strtoull(text.c_str(), nullptr, 10);
-    std::string kind = text.substr(a + 1, b - a - 1);
-    std::string pageURL = text.substr(b + 1, c - b - 1);
-    std::string url = text.substr(c + 1);
-    std::string owner;
-    if (!decide(kind, pageURL, url, &owner))
-        return "0";
-    record(pageId, hostOf(url));
-    return "1";
+    if (kind == "subdocument") return "sub_frame";
+    if (kind == "stylesheet" || kind == "script" || kind == "image" || kind == "font" || kind == "media" || kind == "xmlhttprequest")
+        return kind.c_str();
+    return "other";
 }
 
-void didReceiveSynchronousMessage(WKContextRef, WKStringRef name, WKTypeRef body, WKTypeRef* returnData, const void*)
+WKPageRef pageForId(uint64_t pageId)
 {
+    if (!pageId)
+        return nullptr;
+    for (auto& [page, id] : g_pageIds) {
+        if (id == pageId)
+            return page;
+    }
+    return nullptr;
+}
+
+std::vector<std::string> splitTabs(const std::string& text)
+{
+    std::vector<std::string> parts;
+    size_t start = 0;
+    for (;;) {
+        size_t tab = text.find('\t', start);
+        parts.push_back(text.substr(start, tab == std::string::npos ? std::string::npos : tab - start));
+        if (tab == std::string::npos)
+            return parts;
+        start = tab + 1;
+    }
+}
+
+// The bundle's question:
+// "<page id>\t<kind>\t<page URL>\t<request URL>\t<resource id>\t<frame id>\t<parent frame id>\t<method>\t<frame URL>"
+// The answer: "<0|1|r>\t<flags: n = don't cache>\t<request id to report the end of>\t<redirect URL>".
+void answer(const std::string& text, std::function<void(const std::string&)> reply)
+{
+    std::vector<std::string> parts = splitTabs(text);
+    if (parts.size() < 4) {
+        reply("0");
+        return;
+    }
+    uint64_t pageId = std::strtoull(parts[0].c_str(), nullptr, 10);
+    const std::string& kind = parts[1];
+    const std::string& pageURL = parts[2];
+    const std::string& url = parts[3];
+    std::string host = hostOf(url);
+
+    std::string owner;
+    if (decide(kind, pageURL, url, &owner)) {
+        record(pageId, host);
+        reply("1");
+        return;
+    }
+    if (!extensions::webRequestListening()) {
+        reply("0");
+        return;
+    }
+
+    extensions::WebRequestDetails details;
+    if (WKPageRef page = pageForId(pageId)) {
+        tabs::Info tab;
+        if (tabs::findByPage(page, tab))
+            details.tabId = tab.id;
+    }
+    details.url = url;
+    details.type = webRequestType(kind);
+    if (parts.size() >= 9) {
+        details.frameId = std::atoi(parts[5].c_str());
+        details.parentFrameId = std::atoi(parts[6].c_str());
+        details.method = parts[7];
+        details.documentURL = parts[8];
+    }
+    // The id extensions saw; filled in by webRequestBefore, read when the
+    // answer comes (which can be after this function returns).
+    auto requestId = std::make_shared<std::string>();
+    extensions::webRequestBefore(details, *requestId, [reply, pageId, host, requestId](extensions::WebRequestDecision decision) {
+        // Extensions that saw the request decide each time, so the page
+        // doesn't remember the answer.
+        std::string tail = std::string(requestId->empty() ? "\t" : "\tn") + "\t" + *requestId + "\t";
+        if (decision.cancel) {
+            record(pageId, host);
+            reply("1" + tail);
+        } else if (!decision.redirectURL.empty()) {
+            reply("r" + tail + decision.redirectURL);
+        } else {
+            reply("0" + tail);
+        }
+    });
+}
+
+void didReceiveSynchronousMessageWithListener(WKContextRef, WKStringRef name, WKTypeRef body, WKMessageListenerRef listener, const void*)
+{
+    auto held = Ref<WKMessageListenerRef>::retain(listener);
+    auto reply = [held](const std::string& text) {
+        auto value = Ref<WKStringRef>::adopt(WKStringCreateWithUTF8CString(text.c_str()));
+        WKMessageListenerSendReply(held.get(), value.get());
+    };
     if (toUTF8(name) != "prism:check") {
-        *returnData = nullptr;
+        reply("");
         return;
     }
     g_active = true;
-    *returnData = WKStringCreateWithUTF8CString(answer(bodyText(body)).c_str());
+    answer(bodyText(body), reply);
+}
+
+// "prism:done": "<request id>\t<1 = finished | 0 = failed>\t<error>".
+void didReceiveMessage(WKContextRef, WKStringRef name, WKTypeRef body, const void*)
+{
+    if (toUTF8(name) != "prism:done")
+        return;
+    std::vector<std::string> parts = splitTabs(bodyText(body));
+    if (parts.size() < 2)
+        return;
+    extensions::webRequestEnded(parts[0], parts[1] == "1", parts.size() > 2 ? parts[2] : std::string());
 }
 
 WKTypeRef initializationUserData(WKContextRef, const void*)
@@ -167,8 +258,13 @@ void initialize(WKContextRef context)
         return;
     g_context = context;
     static WKContextInjectedBundleClientV2 client = { };
-    client.base.version = 1; // V1 fields: messages + initialization data
-    client.didReceiveSynchronousMessageFromInjectedBundle = didReceiveSynchronousMessage;
+    // Version 2: questions are answered through a listener, so Prism can
+    // wait for extensions (webRequest) without blocking its own window.
+    // WebKit only uses the listener when the plain synchronous callback is
+    // left empty.
+    client.base.version = 2;
+    client.didReceiveMessageFromInjectedBundle = didReceiveMessage;
+    client.didReceiveSynchronousMessageFromInjectedBundleWithListener = didReceiveSynchronousMessageWithListener;
     client.getInjectedBundleInitializationUserData = initializationUserData;
     WKContextSetInjectedBundleClient(context, &client.base);
     sendConfig();

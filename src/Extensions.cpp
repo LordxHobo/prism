@@ -386,7 +386,7 @@ bool loadExtension(const fs::path& dir, Extension& ext, std::string& error)
         return std::find(ext.permissions.begin(), ext.permissions.end(), permission) != ext.permissions.end();
     };
     if (needs("webRequestBlocking"))
-        ext.unsupported.push_back("Blocking or changing requests with webRequest");
+        ext.unsupported.push_back("Changing request and response headers with webRequest");
     if (needs("contextMenus") || needs("menus"))
         ext.unsupported.push_back("Right-click menu items");
     if (needs("offscreen"))

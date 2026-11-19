@@ -22,6 +22,7 @@
 #include "ExtensionServer.h"
 #include "Http.h"
 #include "Json.h"
+#include "RequestFilter.h"
 #include "Tabs.h"
 #include "Util.h"
 
@@ -299,8 +300,104 @@ void finishPending(int messageId, const std::string& result)
     complete(listener.get(), ok(result));
 }
 
+// ---- webRequest -------------------------------------------------------------------
+// PrismBundle.dll asks Prism about each request a page makes
+// (RequestFilter.cpp). When extensions listen to webRequest events, Prism
+// sends them the request and, for blocking listeners, waits for their
+// answer (cancel or redirect) — up to kWebRequestWait, so a stuck
+// extension can't hang pages.
+
+struct WebRequestListener {
+    int context { 0 };
+    int id { 0 };          // the page's own listener number
+    std::string event;     // "onBeforeRequest", "onCompleted", "onErrorOccurred"
+    std::vector<std::string> urls;
+    std::set<std::string> types;
+    int tabId { -1 };
+    bool blocking { false };
+};
+std::vector<WebRequestListener> g_webRequestListeners;
+
+struct WebRequestPending {
+    std::function<void(WebRequestDecision)> done;
+    std::set<std::pair<int, int>> waiting; // (context, listener) still to answer
+    WebRequestDecision decision;
+    ULONGLONG deadline { 0 };
+};
+std::map<std::string, WebRequestPending> g_webRequestPending;
+
+// Requests to report the end of: request id -> details JSON (without the
+// closing brace), its URL, type and tab.
+struct WebRequestTracked {
+    std::string details;
+    std::string url;
+    std::string type;
+    int tabId { -1 };
+    ULONGLONG since { 0 };
+};
+std::map<std::string, WebRequestTracked> g_webRequestTracked;
+uint64_t g_nextWebRequest = 1;
+UINT_PTR g_webRequestTimer = 0;
+constexpr ULONGLONG kWebRequestWait = 1000;
+
+void finishWebRequest(const std::string& requestId)
+{
+    auto found = g_webRequestPending.find(requestId);
+    if (found == g_webRequestPending.end())
+        return;
+    auto done = std::move(found->second.done);
+    WebRequestDecision decision = found->second.decision;
+    g_webRequestPending.erase(found);
+    if (done)
+        done(decision);
+}
+
+void CALLBACK webRequestTimeouts(HWND, UINT, UINT_PTR, DWORD)
+{
+    ULONGLONG now = GetTickCount64();
+    std::vector<std::string> late;
+    for (auto& [id, pending] : g_webRequestPending) {
+        if (now >= pending.deadline)
+            late.push_back(id);
+    }
+    for (auto& id : late)
+        finishWebRequest(id);
+    // Requests that never reported back (pages closed mid-load).
+    for (auto it = g_webRequestTracked.begin(); it != g_webRequestTracked.end();)
+        it = now - it->second.since > 5 * 60 * 1000 ? g_webRequestTracked.erase(it) : std::next(it);
+    if (g_webRequestPending.empty() && g_webRequestTimer) {
+        KillTimer(nullptr, g_webRequestTimer);
+        g_webRequestTimer = 0;
+    }
+}
+
+void forgetWebRequestListeners(int contextId)
+{
+    bool changed = false;
+    for (auto it = g_webRequestListeners.begin(); it != g_webRequestListeners.end();) {
+        if (it->context == contextId) {
+            it = g_webRequestListeners.erase(it);
+            changed = true;
+        } else
+            ++it;
+    }
+    // Answers it still owed.
+    std::vector<std::string> ready;
+    for (auto& [id, pending] : g_webRequestPending) {
+        for (auto w = pending.waiting.begin(); w != pending.waiting.end();)
+            w = w->first == contextId ? pending.waiting.erase(w) : std::next(w);
+        if (pending.waiting.empty())
+            ready.push_back(id);
+    }
+    for (auto& id : ready)
+        finishWebRequest(id);
+    if (changed)
+        requestfilter::rulesChanged();
+}
+
 void killContext(int id)
 {
+    forgetWebRequestListeners(id);
     auto found = g_contexts.find(id);
     if (found == g_contexts.end())
         return;
@@ -1909,6 +2006,59 @@ void pageOperation(Extension& ext, Context& context, const std::string& op, cons
         return;
     }
 
+    // ---- webRequest ----
+    if (op == "webRequest.addListener") {
+        WebRequestListener entry;
+        entry.context = context.id;
+        entry.id = static_cast<int>(message["id"].asNumber(0));
+        entry.event = message["event"].asString();
+        for (auto& url : message["urls"].items())
+            entry.urls.push_back(url.asString());
+        for (auto& type : message["types"].items())
+            entry.types.insert(type.asString());
+        entry.tabId = message["tabId"].isNumber() ? static_cast<int>(message["tabId"].asNumber()) : -1;
+        entry.blocking = message["blocking"].asBool();
+        if (entry.event == "onBeforeRequest" || entry.event == "onCompleted" || entry.event == "onErrorOccurred") {
+            bool first = g_webRequestListeners.empty();
+            g_webRequestListeners.push_back(std::move(entry));
+            if (first)
+                requestfilter::rulesChanged(); // pages start asking
+        }
+        complete(listener, ok());
+        return;
+    }
+    if (op == "webRequest.removeListener") {
+        int id = static_cast<int>(message["id"].asNumber(0));
+        g_webRequestListeners.erase(std::remove_if(g_webRequestListeners.begin(), g_webRequestListeners.end(),
+            [&](const WebRequestListener& entry) { return entry.context == context.id && entry.id == id; }), g_webRequestListeners.end());
+        complete(listener, ok());
+        return;
+    }
+    if (op == "webRequest.respond") {
+        std::string requestId = message["requestId"].asString();
+        int id = static_cast<int>(message["listener"].asNumber(0));
+        auto found = g_webRequestPending.find(requestId);
+        if (found != g_webRequestPending.end() && found->second.waiting.erase({ context.id, id })) {
+            const json::Value& response = message["response"];
+            if (response.isObject()) {
+                if (response["cancel"].isBool() && response["cancel"].asBool())
+                    found->second.decision.cancel = true;
+                const json::Value& redirect = response["redirectUrl"];
+                if (redirect.isString() && found->second.decision.redirectURL.empty()) {
+                    // chrome-extension:// addresses become the extension's own address.
+                    std::wstring resolved = resolveExtensionURL(util::fromUTF8(redirect.asString()));
+                    std::string target = util::toUTF8(resolved.empty() ? util::fromUTF8(redirect.asString()) : resolved);
+                    if (target.rfind("http://", 0) == 0 || target.rfind("https://", 0) == 0 || target.rfind("data:", 0) == 0)
+                        found->second.decision.redirectURL = target;
+                }
+            }
+            if (found->second.waiting.empty())
+                finishWebRequest(requestId);
+        }
+        complete(listener, ok());
+        return;
+    }
+
     complete(listener, fail("Unsupported operation: " + op));
 }
 
@@ -2125,6 +2275,164 @@ void tabCreated(int tabId)
         return;
     g_tabSnapshots[tabId] = { tab.url, tab.title, tab.loading, true };
     broadcastTabEvent("tabs.onCreated", [&](const Extension& ext) { return "[" + tabJSON(ext, tab) + "]"; });
+}
+
+// ---------------------------------------------------------------------------
+// webRequest
+
+namespace {
+
+std::string originOf(const std::string& url)
+{
+    size_t scheme = url.find("://");
+    if (scheme == std::string::npos)
+        return { };
+    size_t end = url.find_first_of("/?#", scheme + 3);
+    return url.substr(0, end);
+}
+
+// Listeners of `event` in extensions allowed to see `url` (webRequest
+// permission plus a host permission for the address).
+std::vector<const WebRequestListener*> webRequestTargets(const std::string& event, const std::string& url, const std::string& type, int tabId)
+{
+    std::vector<const WebRequestListener*> targets;
+    for (auto& listener : g_webRequestListeners) {
+        if (listener.event != event)
+            continue;
+        if (listener.tabId >= 0 && listener.tabId != tabId)
+            continue;
+        if (!listener.types.empty() && !listener.types.count(type))
+            continue;
+        auto context = g_contexts.find(listener.context);
+        if (context == g_contexts.end())
+            continue;
+        Extension* ext = internal::findEnabled(context->second.extId);
+        if (!ext || !ext->hasPermission("webRequest"))
+            continue;
+        bool hostAllowed = std::any_of(ext->hosts.begin(), ext->hosts.end(), [&](const std::string& host) { return matchesPattern(host, url); });
+        if (!hostAllowed)
+            continue;
+        bool urlMatches = listener.urls.empty()
+            || std::any_of(listener.urls.begin(), listener.urls.end(), [&](const std::string& pattern) { return matchesPattern(pattern, url); });
+        if (urlMatches)
+            targets.push_back(&listener);
+    }
+    return targets;
+}
+
+std::string webRequestEvent(const WebRequestListener& listener, const std::string& detailsJSON, bool wantsAnswer)
+{
+    return "{\"type\":\"webRequest\",\"listener\":" + std::to_string(listener.id) + ",\"blocking\":" + (wantsAnswer ? "true" : "false")
+        + ",\"details\":" + detailsJSON + "}";
+}
+
+void ensureWebRequestTimer()
+{
+    if (!g_webRequestTimer)
+        g_webRequestTimer = SetTimer(nullptr, 0, 100, webRequestTimeouts);
+}
+
+} // namespace
+
+bool webRequestListening()
+{
+    return !g_webRequestListeners.empty();
+}
+
+void webRequestBefore(const WebRequestDetails& details, std::string& requestId, std::function<void(WebRequestDecision)> done)
+{
+    requestId.clear();
+    auto before = webRequestTargets("onBeforeRequest", details.url, details.type, details.tabId);
+    bool wantsEnd = !webRequestTargets("onCompleted", details.url, details.type, details.tabId).empty()
+        || !webRequestTargets("onErrorOccurred", details.url, details.type, details.tabId).empty();
+    if (before.empty() && !wantsEnd) {
+        done({ });
+        return;
+    }
+
+    std::string id = std::to_string(g_nextWebRequest++);
+    std::string fields = "{\"requestId\":" + json::quote(id) + ",\"url\":" + json::quote(details.url)
+        + ",\"method\":" + json::quote(details.method.empty() ? "GET" : details.method)
+        + ",\"frameId\":" + std::to_string(details.frameId) + ",\"parentFrameId\":" + std::to_string(details.parentFrameId)
+        + ",\"tabId\":" + std::to_string(details.tabId) + ",\"type\":" + json::quote(details.type)
+        + ",\"timeStamp\":" + numberJSON(nowMilliseconds())
+        + ",\"frameType\":" + json::quote(details.frameId == 0 ? "outermost_frame" : "sub_frame")
+        + ",\"documentLifecycle\":\"active\"";
+    if (!details.documentURL.empty()) {
+        std::string origin = originOf(details.documentURL);
+        fields += ",\"documentUrl\":" + json::quote(details.documentURL) + ",\"originUrl\":" + json::quote(details.documentURL);
+        if (!origin.empty())
+            fields += ",\"initiator\":" + json::quote(origin);
+    }
+    std::string detailsJSON = fields + "}";
+
+    // Any extension that saw it: the page mustn't remember the answer.
+    requestId = id;
+    if (wantsEnd) {
+        ULONGLONG now = GetTickCount64();
+        if (g_webRequestTracked.size() > 5000) {
+            // Requests whose end never came (pages closed mid-load).
+            for (auto it = g_webRequestTracked.begin(); it != g_webRequestTracked.end();)
+                it = now - it->second.since > 60 * 1000 ? g_webRequestTracked.erase(it) : std::next(it);
+            if (g_webRequestTracked.size() > 5000)
+                g_webRequestTracked.clear();
+        }
+        g_webRequestTracked[id] = { fields, details.url, details.type, details.tabId, now };
+    }
+
+    WebRequestPending pending;
+    for (auto* listener : before) {
+        auto context = g_contexts.find(listener->context);
+        if (context == g_contexts.end())
+            continue;
+        Extension* ext = internal::findEnabled(context->second.extId);
+        bool wantsAnswer = listener->blocking && ext && ext->hasPermission("webRequestBlocking");
+        deliver(context->second, webRequestEvent(*listener, detailsJSON, wantsAnswer));
+        if (wantsAnswer)
+            pending.waiting.insert({ listener->context, listener->id });
+    }
+    if (pending.waiting.empty()) {
+        done({ });
+        return;
+    }
+    pending.done = std::move(done);
+    pending.deadline = GetTickCount64() + kWebRequestWait;
+    g_webRequestPending[id] = std::move(pending);
+    ensureWebRequestTimer();
+}
+
+void webRequestEnded(const std::string& requestId, bool succeeded, const std::string& error)
+{
+    auto found = g_webRequestTracked.find(requestId);
+    if (found == g_webRequestTracked.end())
+        return;
+    WebRequestTracked tracked = std::move(found->second);
+    g_webRequestTracked.erase(found);
+    const char* event = succeeded ? "onCompleted" : "onErrorOccurred";
+    std::string detailsJSON = tracked.details + ",\"timeStamp\":" + numberJSON(nowMilliseconds());
+    if (succeeded)
+        detailsJSON += ",\"fromCache\":false,\"statusCode\":200,\"statusLine\":\"HTTP/1.1 200 OK\"}";
+    else
+        detailsJSON += ",\"fromCache\":false,\"error\":" + json::quote(error.empty() ? "net::ERR_FAILED" : error) + "}";
+    for (auto* listener : webRequestTargets(event, tracked.url, tracked.type, tracked.tabId)) {
+        auto context = g_contexts.find(listener->context);
+        if (context != g_contexts.end())
+            deliver(context->second, webRequestEvent(*listener, detailsJSON, false));
+    }
+}
+
+void webRequestMainFrame(int tabId, const std::string& url)
+{
+    if (g_webRequestListeners.empty())
+        return;
+    WebRequestDetails details;
+    details.tabId = tabId;
+    details.url = url;
+    details.type = "main_frame";
+    std::string requestId;
+    // Pages are decided before this (Prism doesn't wait for extensions).
+    webRequestBefore(details, requestId, [](WebRequestDecision) { });
+    g_webRequestTracked.erase(requestId);
 }
 
 void tabUpdated(int tabId)

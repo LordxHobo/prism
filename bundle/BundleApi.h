@@ -99,8 +99,15 @@ typedef struct WKBundlePageResourceLoadClientV0 {
     X(WKBundlePagePostMessage, void, (WKBundlePageRef, WKStringRef, WKTypeRef)) \
     X(WKBundlePageSetResourceLoadClient, void, (WKBundlePageRef, WKBundlePageResourceLoadClientBase*)) \
     X(WKBundleFrameIsMainFrame, bool, (WKBundleFrameRef)) \
-    X(WKBundleFrameCopyProvisionalURL, WKURLRef, (WKBundleFrameRef))
+    X(WKBundleFrameCopyProvisionalURL, WKURLRef, (WKBundleFrameRef)) \
+    X(WKBundleFrameCopyURL, WKURLRef, (WKBundleFrameRef)) \
+    X(WKBundlePostMessage, void, (WKBundleRef, WKStringRef, WKTypeRef)) \
+    X(WKURLRequestCopyHTTPMethod, WKStringRef, (WKURLRequestRef)) \
+    X(WKURLRequestCreateWithWKURL, WKURLRequestRef, (WKURLRef)) \
+    X(WKURLCreateWithUTF8CString, WKURLRef, (const char*))
 
 // Optional functions: used when present.
 #define PRISM_BUNDLE_OPTIONAL(X) \
-    X(WKBundlePageGetWebPageProxyIdentifierForTesting, uint64_t, (WKBundlePageRef))
+    X(WKBundlePageGetWebPageProxyIdentifierForTesting, uint64_t, (WKBundlePageRef)) \
+    X(WKBundleFrameGetParentFrame, WKBundleFrameRef, (WKBundleFrameRef)) \
+    X(WKErrorCopyLocalizedDescription, WKStringRef, (WKErrorRef))

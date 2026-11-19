@@ -71,6 +71,38 @@ bool isStoreURL(const std::wstring& url);
 // Remembers a store link to offer on the Extensions page when it opens.
 void queueInstall(const std::wstring& url);
 
+// ---- webRequest (from RequestFilter, for requests pages make) ----
+
+struct WebRequestDetails {
+    int tabId { -1 };
+    int frameId { 0 };
+    int parentFrameId { -1 };
+    std::string url;
+    std::string method;
+    std::string type;        // webRequest type: "script", "image", "sub_frame"...
+    std::string documentURL; // the frame that made the request
+};
+
+struct WebRequestDecision {
+    bool cancel { false };
+    std::string redirectURL;
+};
+
+// True if an extension listens to webRequest events (pages then ask about
+// every request).
+bool webRequestListening();
+
+// Sends onBeforeRequest to the extensions listening for this request.
+// `done` runs with the outcome: right away if no blocking listener cares,
+// otherwise once they've all answered (or after about a second).
+// `requestId` is set to the id extensions saw ("" if none did); end events
+// for it go to webRequestEnded.
+void webRequestBefore(const WebRequestDetails& details, std::string& requestId, std::function<void(WebRequestDecision)> done);
+void webRequestEnded(const std::string& requestId, bool succeeded, const std::string& error);
+
+// A tab starts loading a page (main_frame; extensions can't block it here).
+void webRequestMainFrame(int tabId, const std::string& url);
+
 // Writes extension storage that's still waiting to be saved. Call at exit.
 void flushStorage();
 

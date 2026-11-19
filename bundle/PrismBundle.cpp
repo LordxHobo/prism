@@ -9,7 +9,9 @@
 //
 // Answers are cached per page address and request, so each one costs a
 // round trip to Prism only once. Prism tells the bundle when its rules
-// change so the cache starts over.
+// change so the cache starts over. Requests an extension watches with
+// webRequest aren't cached (the extension decides each time), may be
+// redirected, and Prism hears how they ended.
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -103,32 +105,116 @@ uint64_t pageIdentifier(WKBundlePageRef page)
     return WKBundlePageGetWebPageProxyIdentifierForTesting ? WKBundlePageGetWebPageProxyIdentifierForTesting(page) : 0;
 }
 
-// Asks Prism. Returns true to block.
-bool askPrism(WKBundlePageRef page, const char* kind, const std::string& firstParty, const std::string& url)
+// Frame IDs as extensions see them: 0 for a page's main frame, then a
+// number per frame (kept for the frame's life in this process).
+std::unordered_map<WKBundleFrameRef, int> g_frameIds;
+int g_nextFrameId = 1;
+
+int frameIdOf(WKBundleFrameRef frame)
+{
+    if (!frame || WKBundleFrameIsMainFrame(frame))
+        return 0;
+    auto found = g_frameIds.find(frame);
+    if (found != g_frameIds.end())
+        return found->second;
+    if (g_frameIds.size() > 4096)
+        g_frameIds.clear();
+    int id = g_nextFrameId++;
+    g_frameIds.emplace(frame, id);
+    return id;
+}
+
+int parentFrameIdOf(WKBundleFrameRef frame)
+{
+    if (!frame || WKBundleFrameIsMainFrame(frame))
+        return -1;
+    WKBundleFrameRef parent = WKBundleFrameGetParentFrame ? WKBundleFrameGetParentFrame(frame) : nullptr;
+    return parent ? frameIdOf(parent) : 0;
+}
+
+// Requests Prism asked to hear the end of (extensions' webRequest
+// onCompleted / onErrorOccurred): resource id -> Prism's request id.
+std::unordered_map<uint64_t, std::string> g_tracked;
+
+struct Answer {
+    char action = '0';    // '0' let through, '1' block, 'r' redirect
+    bool cacheable = true;
+    std::string requestId; // set when Prism wants to hear how it ended
+    std::string redirectURL;
+};
+
+// Prism's reply: "<action>\t<flags>\t<request id>\t<redirect URL>".
+Answer parseAnswer(const std::string& text)
+{
+    Answer answer;
+    if (text.empty())
+        return answer;
+    answer.action = text[0];
+    size_t a = text.find('\t');
+    if (a == std::string::npos)
+        return answer;
+    size_t b = text.find('\t', a + 1);
+    std::string flags = text.substr(a + 1, b == std::string::npos ? std::string::npos : b - a - 1);
+    answer.cacheable = flags.find('n') == std::string::npos;
+    if (b == std::string::npos)
+        return answer;
+    size_t c = text.find('\t', b + 1);
+    answer.requestId = text.substr(b + 1, c == std::string::npos ? std::string::npos : c - b - 1);
+    if (c != std::string::npos)
+        answer.redirectURL = text.substr(c + 1);
+    return answer;
+}
+
+// Asks Prism about one request.
+Answer askPrism(WKBundlePageRef page, WKBundleFrameRef frame, uint64_t resourceId, const char* kind,
+    const std::string& firstParty, const std::string& url, WKURLRequestRef request)
 {
     std::string key = std::string(kind) + '\n' + firstParty + '\n' + url;
     auto cached = g_decisions.find(key);
-    if (cached != g_decisions.end())
-        return cached->second;
+    if (cached != g_decisions.end()) {
+        Answer answer;
+        answer.action = cached->second ? '1' : '0';
+        return answer;
+    }
 
-    std::string message = std::to_string(pageIdentifier(page)) + '\t' + kind + '\t' + firstParty + '\t' + url;
+    std::string method;
+    if (WKStringRef string = WKURLRequestCopyHTTPMethod(request)) {
+        method = toUTF8(string);
+        WKRelease(string);
+    }
+    std::string frameURL = takeURL(WKBundleFrameCopyURL(frame));
+    // "<page id>\t<kind>\t<first party>\t<url>\t<resource id>\t<frame id>\t<parent frame id>\t<method>\t<frame url>"
+    std::string message = std::to_string(pageIdentifier(page)) + '\t' + kind + '\t' + firstParty + '\t' + url
+        + '\t' + std::to_string(resourceId) + '\t' + std::to_string(frameIdOf(frame)) + '\t' + std::to_string(parentFrameIdOf(frame))
+        + '\t' + method + '\t' + frameURL;
     WKStringRef name = WKStringCreateWithUTF8CString("prism:check");
     WKStringRef body = WKStringCreateWithUTF8CString(message.c_str());
     WKTypeRef reply = nullptr;
     WKBundlePostSynchronousMessage(g_bundle, name, body, &reply);
     WKRelease(body);
     WKRelease(name);
-    bool block = bodyString(reply) == "1";
+    Answer answer = parseAnswer(bodyString(reply));
     if (reply)
         WKRelease(reply);
 
-    if (g_decisions.size() >= kMaxDecisions)
-        g_decisions.clear();
-    g_decisions.emplace(std::move(key), block);
-    return block;
+    if (answer.cacheable && (answer.action == '0' || answer.action == '1')) {
+        if (g_decisions.size() >= kMaxDecisions)
+            g_decisions.clear();
+        g_decisions.emplace(std::move(key), answer.action == '1');
+    }
+    return answer;
 }
 
-WKURLRequestRef willSendRequest(WKBundlePageRef page, WKBundleFrameRef frame, uint64_t, WKURLRequestRef request, WKURLResponseRef redirectResponse, const void*)
+void tellPrism(const char* what, const std::string& text)
+{
+    WKStringRef name = WKStringCreateWithUTF8CString(what);
+    WKStringRef body = WKStringCreateWithUTF8CString(text.c_str());
+    WKBundlePostMessage(g_bundle, name, body);
+    WKRelease(body);
+    WKRelease(name);
+}
+
+WKURLRequestRef willSendRequest(WKBundlePageRef page, WKBundleFrameRef frame, uint64_t resourceId, WKURLRequestRef request, WKURLResponseRef redirectResponse, const void*)
 {
     auto allow = [&] { return static_cast<WKURLRequestRef>(WKRetain(request)); };
     if (!g_filtering || !request)
@@ -137,7 +223,7 @@ WKURLRequestRef willSendRequest(WKBundlePageRef page, WKBundleFrameRef frame, ui
     std::string url = takeURL(WKURLRequestCopyURL(request));
     std::string host = requestkind::hostOf(url);
     if (host.empty() || requestkind::isLocalHost(host))
-        return allow(); // not http(s), or this PC
+        return allow(); // not http(s), or this PC (also Prism's own redirects)
 
     // The site in the address bar. Requests made by Prism's own pages
     // (toolbar, extension pages) and by local pages aren't filtered.
@@ -154,9 +240,50 @@ WKURLRequestRef willSendRequest(WKBundlePageRef page, WKBundleFrameRef frame, ui
         return allow(); // pages themselves are checked by Prism before they load
 
     const char* kind = isDocument ? "subdocument" : requestkind::guess(url);
-    if (askPrism(page, kind, firstParty, url))
+    Answer answer = askPrism(page, frame, resourceId, kind, firstParty, url, request);
+    if (!answer.requestId.empty()) {
+        if (g_tracked.size() > 4096)
+            g_tracked.clear();
+        g_tracked[resourceId] = answer.requestId;
+    }
+    if (answer.action == '1')
         return nullptr; // cancels the load
+    if (answer.action == 'r' && !answer.redirectURL.empty()) {
+        if (WKURLRef target = WKURLCreateWithUTF8CString(answer.redirectURL.c_str())) {
+            WKURLRequestRef replacement = WKURLRequestCreateWithWKURL(target);
+            WKRelease(target);
+            if (replacement)
+                return replacement; // already retained (created)
+        }
+    }
     return allow();
+}
+
+void didFinishLoad(WKBundlePageRef, WKBundleFrameRef, uint64_t resourceId, const void*)
+{
+    auto found = g_tracked.find(resourceId);
+    if (found == g_tracked.end())
+        return;
+    tellPrism("prism:done", found->second + "\t1\t");
+    g_tracked.erase(found);
+}
+
+void didFailLoad(WKBundlePageRef, WKBundleFrameRef, uint64_t resourceId, WKErrorRef error, const void*)
+{
+    auto found = g_tracked.find(resourceId);
+    if (found == g_tracked.end())
+        return;
+    std::string description = "net::ERR_FAILED";
+    if (error && WKErrorCopyLocalizedDescription) {
+        if (WKStringRef text = WKErrorCopyLocalizedDescription(error)) {
+            std::string value = toUTF8(text);
+            WKRelease(text);
+            if (!value.empty())
+                description = value;
+        }
+    }
+    tellPrism("prism:done", found->second + "\t0\t" + description);
+    g_tracked.erase(found);
 }
 
 WKBundlePageResourceLoadClientV0 g_resourceClient = {
@@ -165,8 +292,8 @@ WKBundlePageResourceLoadClientV0 g_resourceClient = {
     willSendRequest,
     nullptr,
     nullptr,
-    nullptr,
-    nullptr,
+    didFinishLoad,
+    didFailLoad,
 };
 
 void didCreatePage(WKBundleRef, WKBundlePageRef page, const void*)

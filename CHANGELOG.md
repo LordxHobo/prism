@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.2
+
+- **webRequest** for extensions: `onBeforeRequest` (blocking listeners with `webRequestBlocking` can cancel or redirect; Firefox-style promise answers work), `onCompleted`, `onErrorOccurred`. Header events (`onBeforeSendHeaders`, `onHeadersReceived`...) accept listeners but never fire. Listeners need the `webRequest` permission and a host permission for the request's address; filters `urls`, `types` and `tabId` are honoured.
+- Subresource requests come from PrismBundle.dll. The question now carries the resource id, frame id (0 = main frame, then numbered per frame in the process), parent frame id (`WKBundleFrameGetParentFrame`), method and the frame's address. The answer is `"<0|1|r>\t<flags>\t<request id>\t<redirect URL>"`; flag `n` = don't cache (any request an extension saw). Redirects are applied with `WKURLRequestCreateWithWKURL` (`chrome-extension://` targets become the extension's http address; http(s) and data: only). Finished / failed loads of reported requests come back as `prism:done "<request id>\t<1|0>\t<error>"` (`WKBundlePostMessage`).
+- RequestFilter uses `WKContextInjectedBundleClientV2` with `didReceiveSynchronousMessageFromInjectedBundleWithListener` (and no plain sync callback, which WebKit would prefer), so answers can wait for extensions without blocking Prism's window. Prism Shields and extension rules decide first; then onBeforeRequest goes to matching listeners (through each page's poll) and Prism waits for blocking ones, at most 1 s (100 ms timer). Cancels count toward the shield badge.
+- Main-frame loads send onBeforeRequest with type `main_frame` from decidePolicyForNavigationAction (not waited for), which uBlock-based extensions use to keep track of each tab's page.
+- The Extensions page now lists only header changes as unsupported for webRequestBlocking extensions.
+
 ## 0.9.1
 
 - Shields runtime (`ui/shields-runtime.js`): videos in hidden ads are stopped. Capture-phase `play` / `playing` listeners: a `<video>` inside an element matching one of Shields' hide selectors (the valid ones, joined for `closest`) is paused and muted at once; a connected `<video>` with no layout box or one under 2×2 px is checked again after 400 ms and stopped if it's still playing with no size. Skipped within 1.5 s of a trusted pointerdown/keydown. Videos already playing are checked when new hide rules arrive. Audio elements aren't touched. Tested in WebKitGTK 2.52 (hidden ad tile and zero-size player stopped; visible video and a player sized 150 ms late kept playing).

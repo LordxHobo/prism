@@ -1895,8 +1895,10 @@ void BrowserWindow::decidePolicyForNavigationAction(WKPageRef, WKNavigationActio
             if ((scheme == L"http" || scheme == L"https") && !extensionPage) {
                 auto frame = Ref<WKFrameInfoRef>::adopt(WKNavigationActionCopyTargetFrameInfo(action));
                 // No target frame means a new window: that's a top-level page too.
-                if (!frame || WKFrameInfoGetIsMainFrame(frame.get()))
+                if (!frame || WKFrameInfoGetIsMainFrame(frame.get())) {
                     blocker::noteTopLevelSite(util::toUTF8(hostOf(target)));
+                    extensions::webRequestMainFrame(tab->id, util::toUTF8(target));
+                }
                 // Right after Prism starts (tabs from last time), wait for
                 // Shields' blocker (5 s at most), so pages like YouTube get
                 // their fixes from the start instead of showing an ad.
