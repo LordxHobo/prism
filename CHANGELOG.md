@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.2
+
+- Extension storage (`storage-<area>.json`) is read with a 1 GB limit (`util::readFile` gained a `maxBytes` parameter, default still 16 MB). Files of 16 MB and over used to read as empty, so AdNauseam (unlimitedStorage, 16+ MB) looked freshly installed at every start, opened firstrun.html again and saved over its data.
+- A storage file that exists but can't be read or parsed is renamed to `storage-<area>.unreadable.json` instead of being overwritten.
+- Storage saves are coalesced: a change marks the store dirty, a 1 s thread timer serializes it and a background thread writes it (newest contents per file win). `extensions::flushStorage()` writes what's waiting at exit; removing an extension drops its pending writes.
+
 ## 0.8.1
 
 - curl error 60 (peer certificate not verified) on an https page: once per site and session, Prism makes a WinHTTP HEAD request to the same address. WebKit's curl uses `CURLSSLOPT_NATIVE_CA` on Windows, which only reads root certificates already in the Windows store; Schannel's chain building downloads missing roots from Microsoft's trusted program (automatic root update). If WinHTTP succeeds, `engine::restartNetworkProcess()` (`WKWebsiteDataStoreTerminateNetworkProcess`, new optional binding) makes WebKit read the store again and the page loads again; otherwise the error page shows. HTTPS-first's fallback to http only happens after that.

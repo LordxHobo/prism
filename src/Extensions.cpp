@@ -21,6 +21,7 @@
 #include <cwctype>
 #include <filesystem>
 #include <map>
+#include <mutex>
 #include <memory>
 #include <random>
 #include <set>
@@ -804,6 +805,14 @@ size_t quotaFor(const Extension& ext, const std::string& area)
     return 10 * 1024 * 1024;
 }
 
+// Storage files can be big: unlimitedStorage allows 512 MB of data.
+constexpr unsigned long long kMaxStorageFile = 1024ull * 1024 * 1024;
+
+fs::path storageFile(const Extension& ext, const std::string& area)
+{
+    return extensionData(ext.id) / util::fromUTF8("storage-" + area + ".json");
+}
+
 Store& storeFor(const Extension& ext, const std::string& area)
 {
     Store& store = g_storage[ext.id][area];
@@ -812,31 +821,139 @@ Store& storeFor(const Extension& ext, const std::string& area)
     store.loaded = true;
     if (area == "session")
         return store; // memory only
-    std::string text = readText(extensionData(ext.id) / util::fromUTF8("storage-" + area + ".json"));
+    fs::path file = storageFile(ext, area);
+    std::string text = util::readFile(file.wstring(), kMaxStorageFile);
     json::Value saved;
-    if (json::parse(text, saved)) {
+    if (json::parse(text, saved) && saved.isObject()) {
         for (auto& member : saved.members()) {
             std::string raw = text.substr(member.second.start(), member.second.end() - member.second.start());
             store.bytes += member.first.size() + raw.size();
             store.items[member.first] = std::move(raw);
         }
+    } else {
+        // The file is there but couldn't be read. Keep it aside instead of
+        // overwriting it with the extension's fresh, empty settings.
+        std::error_code error;
+        if (fs::exists(file, error) && fs::file_size(file, error) > 0) {
+            fs::path aside = file;
+            aside.replace_filename(util::fromUTF8("storage-" + area + ".unreadable.json"));
+            fs::rename(file, aside, error);
+        }
     }
     return store;
 }
 
-void saveStore(const Extension& ext, const std::string& area, const Store& store)
+std::string serializeStore(const Store& store)
+{
+    size_t length = 2;
+    for (auto& [key, raw] : store.items)
+        length += key.size() + raw.size() + 4;
+    std::string json;
+    json.reserve(length);
+    json += '{';
+    bool first = true;
+    for (auto& [key, raw] : store.items) {
+        if (!first)
+            json += ',';
+        json += json::quote(key);
+        json += ':';
+        json += raw;
+        first = false;
+    }
+    json += '}';
+    return json;
+}
+
+// Saving. Changes are written a moment later on a background thread, so a
+// big store (AdNauseam keeps 10+ MB) isn't rewritten on every small change.
+// The newest contents of each file win; flushStorage() writes everything
+// still waiting when Prism exits.
+
+std::set<std::pair<std::string, std::string>> g_dirtyStores; // extension ID, area
+UINT_PTR g_saveTimer = 0;
+std::mutex g_pendingMutex;                 // guards g_pendingWrites, g_writerRunning
+std::mutex g_writeMutex;                   // held while taking and writing one file
+std::map<std::wstring, std::string> g_pendingWrites; // file -> contents
+bool g_writerRunning = false;
+
+bool writeOnePending()
+{
+    std::lock_guard<std::mutex> writing(g_writeMutex);
+    std::wstring path;
+    std::string contents;
+    {
+        std::lock_guard<std::mutex> lock(g_pendingMutex);
+        if (g_pendingWrites.empty())
+            return false;
+        auto next = g_pendingWrites.begin();
+        path = next->first;
+        contents = std::move(next->second);
+        g_pendingWrites.erase(next);
+    }
+    util::ensureDirectory(fs::path(path).parent_path().wstring());
+    util::writeFileAtomically(path, contents);
+    return true;
+}
+
+void queueWrite(const fs::path& file, std::string contents)
+{
+    std::lock_guard<std::mutex> lock(g_pendingMutex);
+    g_pendingWrites[file.wstring()] = std::move(contents);
+    if (g_writerRunning)
+        return;
+    g_writerRunning = true;
+    std::thread([] {
+        for (;;) {
+            if (writeOnePending())
+                continue;
+            std::lock_guard<std::mutex> lock(g_pendingMutex);
+            if (g_pendingWrites.empty()) {
+                g_writerRunning = false;
+                return;
+            }
+        }
+    }).detach();
+}
+
+void saveDirtyStores()
+{
+    if (g_saveTimer) {
+        KillTimer(nullptr, g_saveTimer);
+        g_saveTimer = 0;
+    }
+    auto dirty = std::move(g_dirtyStores);
+    g_dirtyStores.clear();
+    for (auto& [id, area] : dirty) {
+        Extension* ext = findExtension(id);
+        auto extStores = g_storage.find(id);
+        if (!ext || extStores == g_storage.end())
+            continue;
+        auto store = extStores->second.find(area);
+        if (store != extStores->second.end())
+            queueWrite(storageFile(*ext, area), serializeStore(store->second));
+    }
+}
+
+void saveStore(const Extension& ext, const std::string& area, const Store&)
 {
     if (area == "session")
         return;
-    std::string json = "{";
-    bool first = true;
-    for (auto& [key, raw] : store.items) {
-        json += (first ? "" : ",") + json::quote(key) + ":" + raw;
-        first = false;
-    }
-    json += "}";
-    util::ensureDirectory(extensionData(ext.id).wstring());
-    util::writeFileAtomically((extensionData(ext.id) / util::fromUTF8("storage-" + area + ".json")).wstring(), json);
+    g_dirtyStores.insert({ ext.id, area });
+    if (!g_saveTimer)
+        g_saveTimer = SetTimer(nullptr, 0, 1000, [](HWND, UINT, UINT_PTR, DWORD) { saveDirtyStores(); });
+    if (!g_saveTimer)
+        saveDirtyStores();
+}
+
+// Drops anything waiting to be saved for an extension that's being removed.
+void forgetPendingStorage(const Extension& ext)
+{
+    for (auto it = g_dirtyStores.begin(); it != g_dirtyStores.end();)
+        it = it->first == ext.id ? g_dirtyStores.erase(it) : std::next(it);
+    std::lock_guard<std::mutex> writing(g_writeMutex);
+    std::lock_guard<std::mutex> lock(g_pendingMutex);
+    for (const char* area : { "local", "sync" })
+        g_pendingWrites.erase(storageFile(ext, area).wstring());
 }
 
 std::string rawOf(const std::string& text, const json::Value& value)
@@ -1468,6 +1585,7 @@ std::string handleCommand(const std::wstring& command, const std::wstring& argum
         if (answer != IDOK)
             return listJSON();
         host::stop(id);
+        forgetPendingStorage(*ext);
         g_extensions.erase(std::remove_if(g_extensions.begin(), g_extensions.end(), [&](auto& e) { return e->id == id; }), g_extensions.end());
         g_storage.erase(id);
         saveRegistry();
@@ -1730,6 +1848,14 @@ bool isStoreURL(const std::wstring& url)
 void queueInstall(const std::wstring& url)
 {
     g_pendingInstall = url;
+}
+
+void flushStorage()
+{
+    saveDirtyStores();
+    while (writeOnePending()) { }
+    // Wait for a write the background thread may be in the middle of.
+    std::lock_guard<std::mutex> writing(g_writeMutex);
 }
 
 } // namespace extensions

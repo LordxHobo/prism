@@ -44,7 +44,8 @@ std::wstring uniqueFilePath(const std::wstring& folder, std::wstring name);
 
 // Writes a file atomically (write to a temporary file, then replace).
 bool writeFileAtomically(const std::wstring& path, const std::string& contents);
-std::string readFile(const std::wstring& path);
+// Reads a whole file. Files larger than maxBytes read as empty.
+std::string readFile(const std::wstring& path, unsigned long long maxBytes = 16ull * 1024 * 1024);
 
 // Simple key/value settings stored in %LOCALAPPDATA%\Prism\prism.ini.
 std::wstring readSetting(const wchar_t* key, const wchar_t* fallback = L"");

@@ -71,4 +71,7 @@ bool isStoreURL(const std::wstring& url);
 // Remembers a store link to offer on the Extensions page when it opens.
 void queueInstall(const std::wstring& url);
 
+// Writes extension storage that's still waiting to be saved. Call at exit.
+void flushStorage();
+
 } // namespace extensions

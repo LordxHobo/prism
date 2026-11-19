@@ -22,7 +22,7 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.8.1</span>
+      <span class="version">Version 0.8.2</span>
     </div>
   </header>
 
@@ -30,6 +30,12 @@
     <h2 style="margin-top:0">Harder to track</h2>
     <p><b>HTTPS by default</b>, <b>tracking removed from links</b> and <b>fingerprinting protection</b>, each switchable per site in the Shields panel.</p>
   </div>
+
+  <h2>Fixed in 0.8.2</h2>
+  <ul class="notes">
+    <li><b>Extensions that save a lot of data</b> (like AdNauseam, once its list of collected ads grows past 16 MB) lost their settings at every start, so AdNauseam showed its welcome page again. Prism now reads saved extension data of any allowed size, and saves it in the background so big extensions don't slow down browsing.</li>
+    <li>If an extension's saved data ever can't be read, Prism keeps the file aside instead of replacing it.</li>
+  </ul>
 
   <h2>Fixed in 0.8.1</h2>
   <ul class="notes">

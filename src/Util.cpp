@@ -219,14 +219,14 @@ bool writeFileAtomically(const std::wstring& path, const std::string& contents)
     return MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
 }
 
-std::string readFile(const std::wstring& path)
+std::string readFile(const std::wstring& path, unsigned long long maxBytes)
 {
     HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
         return { };
     std::string contents;
     LARGE_INTEGER size;
-    if (GetFileSizeEx(file, &size) && size.QuadPart < 16 * 1024 * 1024) {
+    if (GetFileSizeEx(file, &size) && static_cast<unsigned long long>(size.QuadPart) <= maxBytes) {
         contents.resize(static_cast<size_t>(size.QuadPart));
         DWORD read = 0;
         if (!ReadFile(file, contents.data(), static_cast<DWORD>(contents.size()), &read, nullptr))

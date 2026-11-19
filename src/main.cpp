@@ -124,6 +124,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         DispatchMessageW(&msg);
     }
 
+    extensions::flushStorage();
     permissions::shutdown();
 
     if (settings::clearOnExit()) {
