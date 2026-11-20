@@ -22,7 +22,7 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.3</span>
+      <span class="version">Version 0.9.4</span>
     </div>
   </header>
 
@@ -30,6 +30,11 @@
     <h2 style="margin-top:0">Every request filtered</h2>
     <p>Prism Shields and blocking extensions now see the <b>full address of every picture, script, frame and request</b> a page makes, not just which site it goes to. Ads and trackers hosted on ordinary sites get blocked too, and the shield shows how many were blocked on the page you're on.</p>
   </div>
+
+  <h2>Fixed in 0.9.4</h2>
+  <ul class="notes">
+    <li><b>Errors from closed popups:</b> closing an extension's popup (for example by right-clicking its button while it was open) could list an error like "Attempting to use a disconnected port object" on the Extensions page. Prism now stops the popup before disconnecting it.</li>
+  </ul>
 
   <h2>New in 0.9.3</h2>
   <ul class="notes">

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.4
+
+- Closing an extension popup: `WKPageClose` before its contexts are killed (ports disconnected), and messages from a just-closed popup page (10 s, unless it's the current popup's page) are refused without logging. Before, the page kept running a moment after its ports were disconnected and reported errors (Bitwarden: "Attempting to use a disconnected port object" when right-clicking its button with the popup open).
+
 ## 0.9.3
 
 - **Shields stand-ins and $removeparam** for requests pages make: `prism_shields_check_request_ex` (prism_shields 0.5.0) returns 2 + a data: URL (adblock-rust's `redirect`, for `$redirect` / `$redirect-rule` filters) or 3 + the rewritten address (`rewritten_url`, `$removeparam`). `shields::checkRequest` → RequestVerdict {Allow, Block, StandIn, Rewrite}; RequestFilter answers `r` (not cached) so PrismBundle.dll loads the replacement. Stand-ins count as blocked. Prism.exe still works with an older DLL (block only).

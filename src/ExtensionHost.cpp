@@ -669,6 +669,21 @@ void detach(WKPageRef page)
     WKPageSetPageNavigationClient(page, &navigation.base);
 }
 
+// Pages of popups that were just closed: anything they still send is ignored.
+std::vector<std::pair<WKPageRef, ULONGLONG>> g_closedPopupPages;
+
+bool isClosedPopupPage(WKPageRef page)
+{
+    if (g_popup && g_popup->page == page)
+        return false; // a new popup that happens to reuse the address
+    ULONGLONG now = GetTickCount64();
+    for (auto& [closed, at] : g_closedPopupPages) {
+        if (closed == page && now - at < 10000)
+            return true;
+    }
+    return false;
+}
+
 void closePopup()
 {
     if (!g_popup)
@@ -676,6 +691,13 @@ void closePopup()
     std::unique_ptr<HostView> popup = std::move(g_popup);
     g_popupClosedAt = GetTickCount64();
     g_popupClosedExt = popup->extId;
+    // Stop the page first: once its ports are disconnected, a page that's
+    // still running (it closes a moment later) would report errors about
+    // them, which Chrome's popups never get to do.
+    g_closedPopupPages.push_back({ popup->page, GetTickCount64() });
+    if (g_closedPopupPages.size() > 8)
+        g_closedPopupPages.erase(g_closedPopupPages.begin());
+    WKPageClose(popup->page);
     killContextsOfPage(popup->page);
     detach(popup->page);
     SetWindowLongPtrW(popup->hwnd, GWLP_USERDATA, 0);
@@ -2315,6 +2337,10 @@ void handlePageMessage(WKScriptMessageRef message, WKCompletionListenerRef liste
         int windowId = currentWindow(g_contexts[id]);
         complete(listener, ok("{\"ctx\":" + std::to_string(id) + ",\"kind\":\"" + kindName(kind) + "\",\"tabId\":" + std::to_string(tabId)
             + ",\"windowId\":" + std::to_string(windowId) + "}"));
+        return;
+    }
+    if (isClosedPopupPage(page)) {
+        complete(listener, fail("The popup was closed."));
         return;
     }
     if (op == "log") {
