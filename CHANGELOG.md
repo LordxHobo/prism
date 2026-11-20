@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.5
+
+- Background and popup contexts no longer expire when they don't poll again within 8 s (Prism's own host view decides their life: stop, crash, reload, close). A busy background (uBO/AdNauseam handling webRequest for every request on YouTube, or compiling lists) was dropped, and stayed dropped: every op then failed with "Say hello first" and the poll retried every 2 s without saying hello again. Popups got "Could not establish connection. Receiving end does not exist." (uBO, AdNauseam) or "Attempting to use a disconnected port object" (Bitwarden).
+- `ui/extension-page.js`: a "Say hello first" answer (to poll or any op) makes the page say hello again and register its webRequest listeners again (listeners keep their options for this). Open ports of the old connection stay closed.
+
 ## 0.9.4
 
 - Closing an extension popup: `WKPageClose` before its contexts are killed (ports disconnected), and messages from a just-closed popup page (10 s, unless it's the current popup's page) are refused without logging. Before, the page kept running a moment after its ports were disconnected and reported errors (Bitwarden: "Attempting to use a disconnected port object" when right-clicking its button with the popup open).

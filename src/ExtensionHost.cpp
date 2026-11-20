@@ -1105,7 +1105,12 @@ void CALLBACK tick(HWND, UINT, UINT_PTR, DWORD)
     ULONGLONG now = GetTickCount64();
     std::vector<int> dead;
     for (auto& [id, context] : g_contexts) {
-        if (!context.poll && context.repollDeadline && now > context.repollDeadline)
+        // Backgrounds and popups live as long as Prism's own view of them
+        // (they're dropped when it goes), and a busy one (an ad blocker
+        // compiling its lists, or handling every request of a busy page)
+        // can take a while to ask again. Only other pages expire.
+        bool ownView = context.kind == Kind::Background || context.kind == Kind::Popup;
+        if (!ownView && !context.poll && context.repollDeadline && now > context.repollDeadline)
             dead.push_back(id);
         else if (context.poll && now - context.pollSince > 20000)
             deliver(context, "{\"type\":\"ping\"}"); // are you still there?

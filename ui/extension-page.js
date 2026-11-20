@@ -56,6 +56,7 @@
     return handler.postMessage(text).then((reply) => {
       const result = JSON.parse(reply);
       if (result && result.ok) return result.result;
+      if (op !== 'hello' && op !== 'poll' && result && typeof result.error === 'string' && result.error.includes('Say hello first') && typeof reconnect === 'function') reconnect();
       throw new Error((result && result.error) || 'Unknown error');
     });
   }
@@ -162,7 +163,33 @@
     call('poll').then((list) => {
       if (Array.isArray(list)) for (const event of list) handleEvent(event);
       pollLoop();
-    }, () => setTimeout(pollLoop, 2000));
+    }, (error) => {
+      if (lostConnection(error)) reconnect();
+      else setTimeout(pollLoop, 2000);
+    });
+  }
+
+  // Prism dropped this page's connection (it went quiet for a long time):
+  // say hello again and register what Prism forgot with it. Open ports are
+  // gone, as when Chrome restarts an extension's worker.
+  function lostConnection(error) {
+    return String((error && error.message) || error).includes('Say hello first');
+  }
+  let reconnecting = false;
+  function reconnect() {
+    if (reconnecting) return;
+    reconnecting = true;
+    call('hello', { url: location.href }).then((info) => {
+      context = info;
+      reconnecting = false;
+      for (const entry of webRequestListeners.values()) {
+        if (entry.options) call('webRequest.addListener', entry.options).catch(() => {});
+      }
+      pollLoop();
+    }, () => {
+      reconnecting = false;
+      setTimeout(reconnect, 2000);
+    });
   }
 
   function handleEvent(event) {
@@ -335,7 +362,7 @@
     setUninstallURL: resolved(undefined),
     requestUpdateCheck: resolved({ status: 'no_update' }),
     getPlatformInfo: resolved({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' }),
-    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.4', buildID: '0' }),
+    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.5', buildID: '0' }),
     getContexts: resolved([]),
     getBackgroundPage: notYet('Reaching the background page directly'),
     getPackageDirectoryEntry: notYet('getPackageDirectoryEntry'),
@@ -792,13 +819,16 @@
         const id = nextWebRequestListener++;
         const blocking = Array.isArray(extraInfoSpec) && extraInfoSpec.includes('blocking');
         ids.set(callback, id);
-        webRequestListeners.set(id, { name, callback, blocking });
-        if (!sent) return;
-        const urls = filter && Array.isArray(filter.urls) ? filter.urls.map(String) : [];
-        const types = filter && Array.isArray(filter.types) ? filter.types.map(String) : [];
-        const options = { id, event: name, urls, types, blocking };
-        if (filter && typeof filter.tabId === 'number') options.tabId = filter.tabId;
-        ready.then(() => call('webRequest.addListener', options)).catch((error) => console.error(error));
+        let options = null;
+        if (sent) {
+          const urls = filter && Array.isArray(filter.urls) ? filter.urls.map(String) : [];
+          const types = filter && Array.isArray(filter.types) ? filter.types.map(String) : [];
+          options = { id, event: name, urls, types, blocking };
+          if (filter && typeof filter.tabId === 'number') options.tabId = filter.tabId;
+        }
+        // `options` is kept so a reconnect can register it again.
+        webRequestListeners.set(id, { name, callback, blocking, options });
+        if (options) ready.then(() => call('webRequest.addListener', options)).catch((error) => console.error(error));
       },
       removeListener(callback) {
         const id = ids.get(callback);

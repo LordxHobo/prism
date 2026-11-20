@@ -22,7 +22,7 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.4</span>
+      <span class="version">Version 0.9.5</span>
     </div>
   </header>
 
@@ -30,6 +30,11 @@
     <h2 style="margin-top:0">Every request filtered</h2>
     <p>Prism Shields and blocking extensions now see the <b>full address of every picture, script, frame and request</b> a page makes, not just which site it goes to. Ads and trackers hosted on ordinary sites get blocked too, and the shield shows how many were blocked on the page you're on.</p>
   </div>
+
+  <h2>Fixed in 0.9.5</h2>
+  <ul class="notes">
+    <li><b>Extensions that stopped answering:</b> when an extension's background was busy for a while (uBlock Origin and AdNauseam checking every request on YouTube, or compiling their filter lists), Prism took it for gone and never let it back in. Its popup then said "Could not establish connection. Receiving end does not exist." Backgrounds now stay connected however busy they get, and an extension page that does lose its connection reconnects by itself.</li>
+  </ul>
 
   <h2>Fixed in 0.9.4</h2>
   <ul class="notes">
