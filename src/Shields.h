@@ -54,6 +54,15 @@ bool filtersRequests();
 
 bool blocksRequest(const std::string& url, const std::string& pageURL, const std::string& type);
 
+// The same check, with what to load instead: a stand-in for a blocked file
+// (uBlock Origin's noop.js, a blank GIF..., as a data: URL) or the address
+// without tracking parameters ($removeparam).
+struct RequestVerdict {
+    enum Action { Allow, Block, StandIn, Rewrite } action { Allow };
+    std::string url; // StandIn / Rewrite
+};
+RequestVerdict checkRequest(const std::string& url, const std::string& pageURL, const std::string& type);
+
 // Filter engines for other rule sources (content-blocking extensions),
 // built from adblock-style filter text. buildEngine may be called on any
 // thread; it returns null if Prism Shields' library isn't available.

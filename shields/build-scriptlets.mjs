@@ -13,7 +13,15 @@
 //   [{ "name": "json-prune.js", "aliases": [...], "kind": { "mime": "application/javascript" },
 //      "content": base64(function source), "dependencies": [...], "permission": 0|1 }]
 //
-// Usage: node build-scriptlets.mjs <uBlock/src/js/resources> <output.json>
+// It also adds uBlock Origin's stand-ins for blocked files (noop.js, a 1×1
+// GIF, harmless versions of google-analytics.js and others, from
+// src/web_accessible_resources/ as listed in src/js/redirect-resources.js),
+// which filters load in place of a blocked request with $redirect:
+//
+//   [{ "name": "noop.js", "aliases": ["noopjs"], "kind": { "mime": "application/javascript" },
+//      "content": base64(file) }]
+//
+// Usage: node build-scriptlets.mjs <uBlock/src/js/resources> <output.json> [<uBlock/src>]
 //
 // The scriptlets are uBlock Origin's code (GPLv3). They are fetched and built
 // at build time and shipped as a separate data file next to Prism, with
@@ -23,9 +31,9 @@ import fs from 'fs';
 import path from 'path';
 import vm from 'vm';
 
-const [sourceDir, outputFile] = process.argv.slice(2);
+const [sourceDir, outputFile, ublockSrc] = process.argv.slice(2);
 if (!sourceDir || !outputFile) {
-  console.error('Usage: node build-scriptlets.mjs <uBlock/src/js/resources> <output.json>');
+  console.error('Usage: node build-scriptlets.mjs <uBlock/src/js/resources> <output.json> [<uBlock/src>]');
   process.exit(1);
 }
 
@@ -125,6 +133,42 @@ for (const details of registered) {
   });
 }
 
+// ---- Stand-ins for blocked files ($redirect) ----
+const scriptletCount = resources.length;
+let redirects = 0;
+if (ublockSrc) {
+  const warDir = path.join(ublockSrc, 'web_accessible_resources');
+  const listFile = path.join(ublockSrc, 'js', 'redirect-resources.js');
+  if (!fs.existsSync(warDir) || !fs.existsSync(listFile)) {
+    throw new Error('Missing ' + warDir + ' or ' + listFile);
+  }
+  const listSource = fs.readFileSync(listFile, 'utf8').replace(/^\s*export\s+default\s+/m, 'globalThis.__prismRedirects = ');
+  const listBox = {};
+  vm.createContext(listBox);
+  vm.runInContext(listSource, listBox, { filename: 'redirect-resources.js' });
+  const list = listBox.__prismRedirects;
+  if (!list || typeof list.entries !== 'function') throw new Error('redirect-resources.js has an unexpected layout');
+  const mimes = {
+    js: 'application/javascript', css: 'text/css', html: 'text/html', json: 'application/json', txt: 'text/plain',
+    xml: 'text/xml', gif: 'image/gif', png: 'image/png', mp3: 'audio/mp3', mp4: 'video/mp4',
+  };
+  for (const [name, details] of list.entries()) {
+    // Pages that need parameters or run uBlock Origin's own UI aren't stand-ins.
+    if (details && details.params) continue;
+    const file = path.join(warDir, name);
+    if (!fs.existsSync(file) || seen.has(name)) continue;
+    const ext = path.extname(name).slice(1).toLowerCase();
+    const mime = mimes[ext] || (name === 'empty' ? 'text/plain' : null);
+    if (!mime) continue;
+    const alias = details && details.alias;
+    const aliases = Array.isArray(alias) ? alias : alias ? [alias] : [];
+    seen.add(name);
+    resources.push({ name, aliases, kind: { mime }, content: fs.readFileSync(file).toString('base64') });
+    redirects++;
+  }
+  if (redirects < 20) throw new Error(`Only found ${redirects} stand-ins; uBlock Origin's layout may have changed.`);
+}
+
 fs.mkdirSync(path.dirname(outputFile), { recursive: true });
 fs.writeFileSync(outputFile, JSON.stringify(resources));
-console.log(`Wrote ${resources.length} scriptlets to ${outputFile}`);
+console.log(`Wrote ${scriptletCount} scriptlets and ${redirects} stand-ins to ${outputFile}`);

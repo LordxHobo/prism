@@ -94,6 +94,7 @@ public:
     // Keyboard shortcuts work no matter which part of the window has focus.
     // Returns true when the key was used by Prism.
     bool handleShortcut(const MSG&);
+    bool handleBrowserShortcut(const MSG&); // Prism's own shortcuts (handleShortcut adds extensions')
 
     Tab* newTab(const std::wstring& url, bool select, WKPageConfigurationRef = nullptr);
     void closeTab(int id);

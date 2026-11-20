@@ -29,10 +29,22 @@ struct Ruleset {
     bool enabledByDefault { false };
 };
 
+// A keyboard shortcut from the manifest's "commands".
+struct Command {
+    std::string name;        // "_execute_action" opens the toolbar popup
+    std::string description;
+    std::string shortcut;    // as shown, e.g. "Ctrl+Shift+Y" ("" = none)
+    unsigned key { 0 };      // virtual-key code
+    bool ctrl { false };
+    bool alt { false };
+    bool shift { false };
+};
+
 struct Extension {
     std::string id;          // folder name and the ID scripts see
     std::string name, version, description, homepage;
     int manifestVersion { 2 };
+    std::vector<Command> commands;
     std::string source;      // chrome, firefox, file, folder
     std::string sourceURL;
     bool enabled { true };
@@ -85,6 +97,8 @@ namespace internal {
 std::vector<Extension*> enabledExtensions();
 Extension* find(const std::string& id); // enabled or not
 Extension* findEnabled(const std::string& id);
+// The extension's data folder (ExtensionData\<id>).
+std::wstring extensionDataDirectory(const std::string& id);
 
 // The extension's own address, http://<id>.localhost:<port>/ (with the
 // trailing slash; see ExtensionServer.h).

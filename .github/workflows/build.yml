@@ -103,8 +103,26 @@ jobs:
           path: package/${{ env.PACKAGE }}
           retention-days: 30
 
+      # Only when webkit.lock is new or changed (no file committed yet, or the
+      # "newest WebKit" option was used); otherwise it's the committed copy.
+      - name: Check whether webkit.lock changed
+        id: lock
+        shell: pwsh
+        run: |
+          $changed = 'false'
+          if (Test-Path webkit.lock) {
+            git ls-files --error-unmatch webkit.lock 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) { $changed = 'true' }
+            else {
+              git diff --quiet -- webkit.lock
+              if ($LASTEXITCODE -ne 0) { $changed = 'true' }
+            }
+          }
+          "changed=$changed" >> $env:GITHUB_OUTPUT
+          exit 0
+
       - name: Upload webkit.lock (pin it by committing this file)
-        if: hashFiles('webkit.lock') != ''
+        if: steps.lock.outputs.changed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: webkit.lock

@@ -371,6 +371,125 @@ void CALLBACK webRequestTimeouts(HWND, UINT, UINT_PTR, DWORD)
     }
 }
 
+// ---- Right-click menu items (contextMenus / menus) -----------------------------------
+// Per extension, in the order they were created. Kept while Prism runs;
+// Manifest V3 extensions' items are also saved (ExtensionData\<id>\menus.json),
+// since their background only adds them when they're installed.
+
+struct MenuItem {
+    std::string id;       // JSON (number or string)
+    std::string parentId; // JSON, "" at the top
+    std::string title;
+    std::string type { "normal" };
+    std::vector<std::string> contexts { "page" };
+    std::vector<std::string> documentPatterns;
+    std::vector<std::string> targetPatterns;
+    bool enabled { true };
+    bool visible { true };
+    bool checked { false };
+};
+std::map<std::string, std::vector<MenuItem>> g_menus;
+std::set<std::string> g_menusLoaded;
+
+std::string idJSON(const json::Value& value)
+{
+    if (value.isString())
+        return json::quote(value.asString());
+    if (value.isNumber())
+        return numberJSON(value.asNumber());
+    return { };
+}
+
+fs::path menusFile(const Extension& ext)
+{
+    return fs::path(internal::extensionDataDirectory(ext.id)) / L"menus.json";
+}
+
+void applyMenuProperties(MenuItem& item, const json::Value& props)
+{
+    if (props["title"].isString())
+        item.title = props["title"].asString();
+    if (props["type"].isString())
+        item.type = props["type"].asString();
+    if (props["contexts"].isArray()) {
+        item.contexts.clear();
+        for (auto& context : props["contexts"].items())
+            item.contexts.push_back(context.asString());
+    } else if (props["contexts"].isString()) {
+        item.contexts = { props["contexts"].asString() };
+    }
+    if (props["documentUrlPatterns"].isArray()) {
+        item.documentPatterns.clear();
+        for (auto& pattern : props["documentUrlPatterns"].items())
+            item.documentPatterns.push_back(pattern.asString());
+    }
+    if (props["targetUrlPatterns"].isArray()) {
+        item.targetPatterns.clear();
+        for (auto& pattern : props["targetUrlPatterns"].items())
+            item.targetPatterns.push_back(pattern.asString());
+    }
+    if (props["enabled"].isBool())
+        item.enabled = props["enabled"].asBool();
+    if (props["visible"].isBool())
+        item.visible = props["visible"].asBool();
+    if (props["checked"].isBool())
+        item.checked = props["checked"].asBool();
+    if (props.has("parentId"))
+        item.parentId = idJSON(props["parentId"]);
+}
+
+std::string menuItemJSON(const MenuItem& item)
+{
+    auto list = [](const std::vector<std::string>& values) {
+        std::string out = "[";
+        for (size_t i = 0; i < values.size(); ++i)
+            out += (i ? "," : "") + json::quote(values[i]);
+        return out + "]";
+    };
+    std::string json = "{\"id\":" + item.id + ",\"title\":" + json::quote(item.title) + ",\"type\":" + json::quote(item.type)
+        + ",\"contexts\":" + list(item.contexts) + ",\"documentUrlPatterns\":" + list(item.documentPatterns)
+        + ",\"targetUrlPatterns\":" + list(item.targetPatterns)
+        + ",\"enabled\":" + (item.enabled ? "true" : "false") + ",\"visible\":" + (item.visible ? "true" : "false")
+        + ",\"checked\":" + (item.checked ? "true" : "false");
+    if (!item.parentId.empty())
+        json += ",\"parentId\":" + item.parentId;
+    return json + "}";
+}
+
+std::vector<MenuItem>& menusFor(const Extension& ext)
+{
+    std::vector<MenuItem>& items = g_menus[ext.id];
+    if (g_menusLoaded.insert(ext.id).second && ext.manifestVersion >= 3) {
+        json::Value saved;
+        if (json::parse(util::readFile(menusFile(ext).wstring()), saved)) {
+            for (auto& entry : saved.items()) {
+                MenuItem item;
+                item.id = idJSON(entry["id"]);
+                if (item.id.empty())
+                    continue;
+                applyMenuProperties(item, entry);
+                items.push_back(std::move(item));
+            }
+        }
+    }
+    return items;
+}
+
+void saveMenus(const Extension& ext)
+{
+    if (ext.manifestVersion < 3)
+        return; // their background adds them again each time it starts
+    std::string json = "[";
+    bool first = true;
+    for (auto& item : g_menus[ext.id]) {
+        json += (first ? "" : ",") + menuItemJSON(item);
+        first = false;
+    }
+    json += "]";
+    util::ensureDirectory(internal::extensionDataDirectory(ext.id));
+    util::writeFileAtomically(menusFile(ext).wstring(), json);
+}
+
 void forgetWebRequestListeners(int contextId)
 {
     bool changed = false;
@@ -403,6 +522,12 @@ void killContext(int id)
         return;
     if (found->second.poll)
         complete(found->second.poll.get(), ok("[]"));
+    // A Manifest V2 background adds its menu items again when it restarts.
+    if (found->second.kind == Kind::Background) {
+        Extension* ext = internal::find(found->second.extId);
+        if (ext && ext->manifestVersion < 3)
+            g_menus.erase(ext->id);
+    }
     g_contexts.erase(found);
 
     // Messages it was supposed to answer.
@@ -2006,6 +2131,79 @@ void pageOperation(Extension& ext, Context& context, const std::string& op, cons
         return;
     }
 
+    // ---- Right-click menu items ----
+    if (op == "menus.create") {
+        const json::Value& props = message["props"];
+        MenuItem item;
+        item.id = idJSON(props["id"]);
+        if (item.id.empty()) {
+            complete(listener, fail("A menu item needs an id."));
+            return;
+        }
+        applyMenuProperties(item, props);
+        auto& items = menusFor(ext);
+        if (std::any_of(items.begin(), items.end(), [&](const MenuItem& other) { return other.id == item.id; })) {
+            complete(listener, fail("Cannot create item with duplicate id " + item.id));
+            return;
+        }
+        if (!item.parentId.empty() && std::none_of(items.begin(), items.end(), [&](const MenuItem& other) { return other.id == item.parentId; })) {
+            complete(listener, fail("Cannot find menu item with id " + item.parentId));
+            return;
+        }
+        if (items.size() >= 1000) {
+            complete(listener, fail("Too many menu items."));
+            return;
+        }
+        items.push_back(std::move(item));
+        saveMenus(ext);
+        complete(listener, ok());
+        return;
+    }
+    if (op == "menus.update" || op == "menus.remove") {
+        std::string id = idJSON(message["id"]);
+        auto& items = menusFor(ext);
+        auto found = std::find_if(items.begin(), items.end(), [&](const MenuItem& item) { return item.id == id; });
+        if (found == items.end()) {
+            complete(listener, fail("Cannot find menu item with id " + id));
+            return;
+        }
+        if (op == "menus.update") {
+            applyMenuProperties(*found, message["props"]);
+        } else {
+            // The item and everything under it.
+            std::set<std::string> gone { id };
+            for (bool more = true; more;) {
+                more = false;
+                for (auto& item : items) {
+                    if (!item.parentId.empty() && gone.count(item.parentId) && gone.insert(item.id).second)
+                        more = true;
+                }
+            }
+            items.erase(std::remove_if(items.begin(), items.end(), [&](const MenuItem& item) { return gone.count(item.id) > 0; }), items.end());
+        }
+        saveMenus(ext);
+        complete(listener, ok());
+        return;
+    }
+    if (op == "menus.removeAll") {
+        menusFor(ext).clear();
+        saveMenus(ext);
+        complete(listener, ok());
+        return;
+    }
+
+    // ---- Keyboard shortcuts ----
+    if (op == "commands.getAll") {
+        std::string json = "[";
+        for (size_t i = 0; i < ext.commands.size(); ++i) {
+            auto& command = ext.commands[i];
+            json += (i ? "," : "") + std::string("{\"name\":") + json::quote(command.name) + ",\"description\":" + json::quote(command.description)
+                + ",\"shortcut\":" + json::quote(command.shortcut) + "}";
+        }
+        complete(listener, ok(json + "]"));
+        return;
+    }
+
     // ---- webRequest ----
     if (op == "webRequest.addListener") {
         WebRequestListener entry;
@@ -2433,6 +2631,221 @@ void webRequestMainFrame(int tabId, const std::string& url)
     // Pages are decided before this (Prism doesn't wait for extensions).
     webRequestBefore(details, requestId, [](WebRequestDecision) { });
     g_webRequestTracked.erase(requestId);
+}
+
+// ---------------------------------------------------------------------------
+// Right-click menu items
+
+namespace {
+
+// The contexts of a right-click, as contextMenus names them.
+std::set<std::string> clickContexts(const MenuContext& context)
+{
+    std::set<std::string> contexts;
+    if (!context.selectionText.empty())
+        contexts.insert("selection");
+    if (!context.linkURL.empty())
+        contexts.insert("link");
+    if (context.editable)
+        contexts.insert("editable");
+    if (!context.mediaType.empty())
+        contexts.insert(context.mediaType);
+    // "page" only when nothing more specific was clicked.
+    if (contexts.empty())
+        contexts.insert("page");
+    return contexts;
+}
+
+bool anyPatternMatches(const std::vector<std::string>& patterns, const std::string& url)
+{
+    return std::any_of(patterns.begin(), patterns.end(), [&](const std::string& pattern) { return matchesPattern(pattern, url); });
+}
+
+bool itemApplies(const MenuItem& item, const std::set<std::string>& contexts, const MenuContext& context)
+{
+    if (!item.visible)
+        return false;
+    bool contextMatches = false;
+    for (auto& name : item.contexts) {
+        if ((name == "all" && !contexts.count("action")) || contexts.count(name))
+            contextMatches = true;
+    }
+    if (!contextMatches)
+        return false;
+    if (!item.documentPatterns.empty() && !anyPatternMatches(item.documentPatterns, context.pageURL))
+        return false;
+    if (!item.targetPatterns.empty()) {
+        std::string target = !context.linkURL.empty() ? context.linkURL : context.srcURL;
+        if (!target.empty() && !anyPatternMatches(item.targetPatterns, target))
+            return false;
+    }
+    return true;
+}
+
+std::string menuTitle(const std::string& title, const std::string& selection)
+{
+    std::string shown = selection;
+    if (shown.size() > 60)
+        shown = shown.substr(0, 57) + "...";
+    std::string out;
+    for (size_t i = 0; i < title.size(); ++i) {
+        if (title[i] == '%' && i + 1 < title.size() && title[i + 1] == 's') {
+            out += shown;
+            ++i;
+        } else {
+            out += title[i];
+        }
+    }
+    return out;
+}
+
+std::vector<MenuNode> buildNodes(const Extension& ext, const std::vector<MenuItem>& items, const std::string& parent,
+    const std::set<std::string>& contexts, const MenuContext& context, int depth)
+{
+    std::vector<MenuNode> nodes;
+    if (depth > 8)
+        return nodes;
+    for (auto& item : items) {
+        if (item.parentId != parent || !itemApplies(item, contexts, context))
+            continue;
+        MenuNode node;
+        node.extensionId = ext.id;
+        node.itemId = item.id;
+        node.title = menuTitle(item.title, context.selectionText);
+        node.type = item.type;
+        node.enabled = item.enabled;
+        node.checked = item.checked;
+        node.children = buildNodes(ext, items, item.id, contexts, context, depth + 1);
+        nodes.push_back(std::move(node));
+    }
+    return nodes;
+}
+
+} // namespace
+
+bool hasMenuItems()
+{
+    for (Extension* ext : internal::enabledExtensions()) {
+        if (!menusFor(*ext).empty())
+            return true;
+    }
+    return false;
+}
+
+std::vector<MenuNode> pageMenu(const MenuContext& context)
+{
+    std::vector<MenuNode> out;
+    std::set<std::string> contexts = clickContexts(context);
+    for (Extension* ext : internal::enabledExtensions()) {
+        std::vector<MenuNode> nodes = buildNodes(*ext, menusFor(*ext), "", contexts, context, 0);
+        if (nodes.empty())
+            continue;
+        if (nodes.size() == 1) {
+            out.push_back(std::move(nodes[0]));
+        } else {
+            // Several items: under the extension's name, as in Chrome.
+            MenuNode group;
+            group.extensionId = ext->id;
+            group.title = ext->name;
+            group.children = std::move(nodes);
+            out.push_back(std::move(group));
+        }
+    }
+    return out;
+}
+
+std::vector<MenuNode> actionMenu(const std::string& extensionId)
+{
+    Extension* ext = internal::findEnabled(extensionId);
+    if (!ext)
+        return { };
+    MenuContext context;
+    std::set<std::string> contexts { "action", "browser_action", "page_action" };
+    std::vector<MenuNode> nodes = buildNodes(*ext, menusFor(*ext), "", contexts, context, 0);
+    if (nodes.size() > 6)
+        nodes.resize(6); // Chrome's limit for the button's menu
+    return nodes;
+}
+
+void menuItemClicked(const std::string& extensionId, const std::string& itemId, const MenuContext& context, int tabId)
+{
+    Extension* ext = internal::findEnabled(extensionId);
+    if (!ext)
+        return;
+    auto& items = menusFor(*ext);
+    auto found = std::find_if(items.begin(), items.end(), [&](const MenuItem& item) { return item.id == itemId; });
+    if (found == items.end() || !found->enabled)
+        return;
+
+    bool wasChecked = found->checked;
+    if (found->type == "checkbox") {
+        found->checked = !found->checked;
+    } else if (found->type == "radio") {
+        // The other radio items next to it (same parent) turn off.
+        size_t index = static_cast<size_t>(found - items.begin());
+        for (size_t i = index; i-- > 0;) {
+            if (items[i].parentId != found->parentId) continue;
+            if (items[i].type != "radio") break;
+            items[i].checked = false;
+        }
+        for (size_t i = index + 1; i < items.size(); ++i) {
+            if (items[i].parentId != found->parentId) continue;
+            if (items[i].type != "radio") break;
+            items[i].checked = false;
+        }
+        found->checked = true;
+    }
+    if (found->type == "checkbox" || found->type == "radio")
+        saveMenus(*ext);
+
+    std::string info = "{\"menuItemId\":" + found->id;
+    if (!found->parentId.empty())
+        info += ",\"parentMenuItemId\":" + found->parentId;
+    info += ",\"editable\":" + std::string(context.editable ? "true" : "false");
+    if (!context.pageURL.empty())
+        info += ",\"pageUrl\":" + json::quote(context.pageURL);
+    if (!context.linkURL.empty())
+        info += ",\"linkUrl\":" + json::quote(context.linkURL);
+    if (!context.linkText.empty())
+        info += ",\"linkText\":" + json::quote(context.linkText);
+    if (!context.srcURL.empty())
+        info += ",\"srcUrl\":" + json::quote(context.srcURL);
+    if (!context.mediaType.empty())
+        info += ",\"mediaType\":" + json::quote(context.mediaType);
+    if (!context.selectionText.empty())
+        info += ",\"selectionText\":" + json::quote(context.selectionText);
+    if (found->type == "checkbox" || found->type == "radio")
+        info += ",\"wasChecked\":" + std::string(wasChecked ? "true" : "false") + ",\"checked\":" + (found->checked ? "true" : "false");
+    info += "}";
+
+    tabs::Info tab;
+    std::string tabArg = tabId >= 0 && tabs::find(tabId, tab) ? tabJSON(*ext, tab) : "null";
+    broadcastToPages(ext->id, eventJSON("menus.onClicked", "[" + info + "," + tabArg + "]"));
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard shortcuts
+
+bool runShortcut(HWND window, int tabId, unsigned key, bool ctrl, bool alt, bool shift)
+{
+    for (Extension* ext : internal::enabledExtensions()) {
+        for (auto& command : ext->commands) {
+            if (!command.key || command.key != key || command.ctrl != ctrl || command.alt != alt || command.shift != shift)
+                continue;
+            if (command.name == "_execute_action" || command.name == "_execute_browser_action" || command.name == "_execute_page_action") {
+                // Same as clicking its toolbar button (the popup opens under the toolbar's right side).
+                RECT bounds { };
+                GetClientRect(window, &bounds);
+                actionClicked(window, tabId, ext->id, bounds.right - 8, 76);
+                return true;
+            }
+            tabs::Info tab;
+            std::string tabArg = tabId >= 0 && tabs::find(tabId, tab) ? tabJSON(*ext, tab) : "null";
+            broadcastToPages(ext->id, eventJSON("commands.onCommand", "[" + json::quote(command.name) + "," + tabArg + "]"));
+            return true;
+        }
+    }
+    return false;
 }
 
 void tabUpdated(int tabId)

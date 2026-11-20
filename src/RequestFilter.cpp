@@ -148,9 +148,21 @@ void answer(const std::string& text, std::function<void(const std::string&)> rep
     std::string host = hostOf(url);
 
     std::string owner;
-    if (decide(kind, pageURL, url, &owner)) {
+    shields::RequestVerdict verdict = decideRequest(kind, pageURL, url, &owner);
+    if (verdict.action == shields::RequestVerdict::Block) {
         record(pageId, host);
         reply("1");
+        return;
+    }
+    if (verdict.action == shields::RequestVerdict::StandIn) {
+        // Blocked, with a harmless stand-in loaded instead (so the page
+        // doesn't break waiting for the script it expected).
+        record(pageId, host);
+        reply("r\tn\t\t" + verdict.url);
+        return;
+    }
+    if (verdict.action == shields::RequestVerdict::Rewrite) {
+        reply("r\tn\t\t" + verdict.url); // tracking parameters removed
         return;
     }
     if (!extensions::webRequestListening()) {
@@ -332,31 +344,42 @@ void rulesChanged()
 
 bool decide(const std::string& kind, const std::string& pageURL, const std::string& url, std::string* owner)
 {
+    return decideRequest(kind, pageURL, url, owner).action == shields::RequestVerdict::Block;
+}
+
+shields::RequestVerdict decideRequest(const std::string& kind, const std::string& pageURL, const std::string& url, std::string* owner)
+{
+    shields::RequestVerdict blocked;
+    blocked.action = shields::RequestVerdict::Block;
     std::string host = hostOf(url);
     if (host.empty() || blocker::isUserAllowed(host))
-        return false;
+        return { };
 
     // Without a telling extension, check the types most untyped requests are.
     static const std::vector<std::string> unknownKinds = { "other", "xmlhttprequest", "script" };
     std::vector<std::string> kinds = kind.empty() ? unknownKinds : std::vector<std::string> { kind };
 
+    shields::RequestVerdict rewrite;
     for (auto& type : kinds) {
-        if (shields::blocksRequest(url, pageURL, type)) {
+        shields::RequestVerdict verdict = shields::checkRequest(url, pageURL, type);
+        if (verdict.action == shields::RequestVerdict::Block || verdict.action == shields::RequestVerdict::StandIn) {
             if (owner)
                 *owner = "Prism Shields";
-            return true;
+            return verdict;
         }
+        if (verdict.action == shields::RequestVerdict::Rewrite && rewrite.action == shields::RequestVerdict::Allow)
+            rewrite = verdict;
     }
     for (auto& rules : g_extensionRules) {
         for (auto& type : kinds) {
             if (shields::engineBlocks(rules->engine, url, pageURL, type)) {
                 if (owner)
                     *owner = rules->owner;
-                return true;
+                return blocked;
             }
         }
     }
-    return false;
+    return rewrite;
 }
 
 } // namespace requestfilter

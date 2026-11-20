@@ -435,6 +435,54 @@ typedef struct WKPageInjectedBundleClientV0 {
     WKPageDidReceiveSynchronousMessageFromInjectedBundleCallback didReceiveSynchronousMessageFromInjectedBundle;
 } WKPageInjectedBundleClientV0;
 
+// Context menus (WKPageContextMenuClient.h, WKContextMenuItem.h,
+// WKHitTestResultRef.h, WKContextMenuListener.h): extensions' menu items.
+typedef const struct OpaqueWKContextMenuItem* WKContextMenuItemRef;
+typedef const struct OpaqueWKContextMenuListener* WKContextMenuListenerRef;
+typedef const struct OpaqueWKHitTestResult* WKHitTestResultRef;
+typedef struct OpaqueWKArray* WKMutableArrayRef;
+typedef uint32_t WKContextMenuItemTag;
+enum { kWKContextMenuItemBaseApplicationTag = 10000 };
+struct WKPoint {
+    double x;
+    double y;
+};
+typedef struct WKPoint WKPoint;
+
+typedef void (*WKPageGetContextMenuFromProposedContextMenuCallback)(WKPageRef page, WKArrayRef proposedMenu, WKArrayRef* newMenu, WKHitTestResultRef hitTestResult, WKTypeRef userData, const void* clientInfo);
+typedef void (*WKPageGetContextMenuFromProposedContextMenuCallbackAsync)(WKPageRef page, WKArrayRef proposedMenu, WKContextMenuListenerRef listener, WKHitTestResultRef hitTestResult, WKTypeRef userData, const void* clientInfo);
+typedef void (*WKPageCustomContextMenuItemSelectedCallback)(WKPageRef page, WKContextMenuItemRef contextMenuItem, const void* clientInfo);
+typedef void (*WKPageContextMenuDismissedCallback)(WKPageRef page, const void* clientInfo);
+typedef void (*WKPageShowContextMenuCallback)(WKPageRef page, WKPoint menuLocation, WKArrayRef menuItems, const void* clientInfo);
+typedef void (*WKPageHideContextMenuCallback)(WKPageRef page, const void* clientInfo);
+typedef void (*WKPageGetContextMenuFromProposedContextMenuCallback_deprecatedForUseWithV0)(WKPageRef page, WKArrayRef proposedMenu, WKArrayRef* newMenu, WKTypeRef userData, const void* clientInfo);
+
+typedef struct WKPageContextMenuClientBase {
+    int version;
+    const void* clientInfo;
+} WKPageContextMenuClientBase;
+
+typedef struct WKPageContextMenuClientV4 {
+    WKPageContextMenuClientBase base;
+
+    // Version 0.
+    WKPageGetContextMenuFromProposedContextMenuCallback_deprecatedForUseWithV0 getContextMenuFromProposedMenu_deprecatedForUseWithV0;
+    WKPageCustomContextMenuItemSelectedCallback customContextMenuItemSelected;
+
+    // Version 1.
+    WKPageContextMenuDismissedCallback contextMenuDismissed;
+
+    // Version 2.
+    WKPageGetContextMenuFromProposedContextMenuCallback getContextMenuFromProposedMenu;
+
+    // Version 3. Left empty: WebKit then shows the menu itself.
+    WKPageShowContextMenuCallback showContextMenu;
+    WKPageHideContextMenuCallback hideContextMenu;
+
+    // Version 4.
+    WKPageGetContextMenuFromProposedContextMenuCallbackAsync getContextMenuFromProposedMenuAsync;
+} WKPageContextMenuClientV4;
+
 } // extern "C"
 
 // ---- Function table -------------------------------------------------------
@@ -578,7 +626,23 @@ typedef struct WKPageInjectedBundleClientV0 {
     X(WKContextSetInitializationUserDataForInjectedBundle, void, (WKContextRef, WKTypeRef)) \
     X(WKContextPostMessageToInjectedBundle, void, (WKContextRef, WKStringRef, WKTypeRef)) \
     X(WKMessageListenerSendReply, void, (WKMessageListenerRef, WKTypeRef)) \
-    X(WKPageSetPageInjectedBundleClient, void, (WKPageRef, const WKPageInjectedBundleClientBase*))
+    X(WKPageSetPageInjectedBundleClient, void, (WKPageRef, const WKPageInjectedBundleClientBase*)) \
+    X(WKPageSetPageContextMenuClient, void, (WKPageRef, const WKPageContextMenuClientBase*)) \
+    X(WKContextMenuItemCreateAsAction, WKContextMenuItemRef, (WKContextMenuItemTag, WKStringRef, bool)) \
+    X(WKContextMenuItemCreateAsCheckableAction, WKContextMenuItemRef, (WKContextMenuItemTag, WKStringRef, bool, bool)) \
+    X(WKContextMenuItemCreateAsSubmenu, WKContextMenuItemRef, (WKStringRef, bool, WKArrayRef)) \
+    X(WKContextMenuItemSeparatorItem, WKContextMenuItemRef, ()) \
+    X(WKContextMenuItemGetTag, WKContextMenuItemTag, (WKContextMenuItemRef)) \
+    X(WKContextMenuListenerUseContextMenuItems, void, (WKContextMenuListenerRef, WKArrayRef)) \
+    X(WKHitTestResultCopyAbsoluteImageURL, WKURLRef, (WKHitTestResultRef)) \
+    X(WKHitTestResultCopyAbsoluteLinkURL, WKURLRef, (WKHitTestResultRef)) \
+    X(WKHitTestResultCopyAbsoluteMediaURL, WKURLRef, (WKHitTestResultRef)) \
+    X(WKHitTestResultCopyLinkLabel, WKStringRef, (WKHitTestResultRef)) \
+    X(WKHitTestResultIsContentEditable, bool, (WKHitTestResultRef)) \
+    X(WKMutableArrayCreate, WKMutableArrayRef, ()) \
+    X(WKArrayAppendItem, void, (WKMutableArrayRef, WKTypeRef)) \
+    X(WKArrayGetSize, size_t, (WKArrayRef)) \
+    X(WKArrayGetItemAtIndex, WKTypeRef, (WKArrayRef, size_t))
 
 namespace wk {
 

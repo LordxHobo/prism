@@ -86,6 +86,9 @@ function supportItems(support) {
   if (support.background) items.push([true, 'Runs in the background']);
   if (support.action) items.push([true, support.popup ? 'Toolbar button with a popup' : 'Toolbar button']);
   if (support.options) items.push([true, 'Options page']);
+  for (const shortcut of support.shortcuts || []) {
+    items.push([true, 'Shortcut ' + shortcut.keys + ': ' + shortcut.label]);
+  }
   for (const missing of support.unsupported || []) items.push([false, missing + ': not yet']);
   if (!items.length) items.push([false, 'Nothing this extension does works in Prism yet']);
   return items;

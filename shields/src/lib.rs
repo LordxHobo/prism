@@ -225,6 +225,59 @@ pub unsafe extern "C" fn prism_shields_check_request(
     }
 }
 
+/// Like prism_shields_check_request, with what to do instead of blocking.
+/// Returns 0 = let it through, 1 = block, 2 = load `*out` instead (a
+/// stand-in from the scriptlet resources, as a data: URL), 3 = load `*out`
+/// instead (the same address with tracking parameters removed), -1 = bad
+/// input. `*out` is set for 2 and 3; free it with prism_shields_free_string.
+#[no_mangle]
+pub unsafe extern "C" fn prism_shields_check_request_ex(
+    engine: *const PrismShieldsEngine,
+    url: *const c_char,
+    source_url: *const c_char,
+    request_type: *const c_char,
+    out: *mut *mut c_char,
+) -> c_int {
+    if !out.is_null() {
+        *out = std::ptr::null_mut();
+    }
+    let (Some(engine), Some(url)) = (engine.as_ref(), str_from(url)) else {
+        return -1;
+    };
+    let source = str_from(source_url).unwrap_or("");
+    let kind = str_from(request_type).unwrap_or("other");
+    let Ok(request) = Request::new(url, source, kind, "GET") else {
+        return -1;
+    };
+    let result = engine.engine.check_network_request(&request);
+    let give = |text: String| -> bool {
+        if out.is_null() {
+            return false;
+        }
+        match CString::new(text) {
+            Ok(text) => {
+                *out = text.into_raw();
+                true
+            }
+            Err(_) => false,
+        }
+    };
+    if result.should_block() {
+        if let Some(redirect) = result.redirect {
+            if give(redirect) {
+                return 2;
+            }
+        }
+        return 1;
+    }
+    if let Some(rewritten) = result.rewritten_url {
+        if rewritten != url && give(rewritten) {
+            return 3;
+        }
+    }
+    0
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn prism_shields_free_string(text: *mut c_char) {
     if !text.is_null() {

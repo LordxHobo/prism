@@ -22,7 +22,7 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.2</span>
+      <span class="version">Version 0.9.3</span>
     </div>
   </header>
 
@@ -30,6 +30,14 @@
     <h2 style="margin-top:0">Every request filtered</h2>
     <p>Prism Shields and blocking extensions now see the <b>full address of every picture, script, frame and request</b> a page makes, not just which site it goes to. Ads and trackers hosted on ordinary sites get blocked too, and the shield shows how many were blocked on the page you're on.</p>
   </div>
+
+  <h2>New in 0.9.3</h2>
+  <ul class="notes">
+    <li><b>Stand-ins for blocked trackers:</b> some sites break when a tracker script is missing. Prism Shields now loads a harmless stand-in instead (like a do-nothing Google Analytics), the way uBlock Origin does.</li>
+    <li><b>Tracking parameters</b> are also removed from requests pages make, wherever filter lists say so.</li>
+    <li><b>Extensions' right-click menu items</b> appear in the page's menu (for the page, links, pictures, videos, selected text and text fields) and on their toolbar button's menu.</li>
+    <li><b>Extensions' keyboard shortcuts</b> work, and the Extensions page lists them. Prism's own shortcuts always come first.</li>
+  </ul>
 
   <h2>New in 0.9.2</h2>
   <ul class="notes">
@@ -49,7 +57,7 @@
     <li><b>Blocking extensions</b> like uBlock Origin Lite now apply their rules to full addresses too. The Extensions page shows how many rules are in use.</li>
     <li><b>Alt+F4</b> closes the window, even while you're on a web page. <b>Ctrl+Shift+W</b> closes the whole window (Ctrl+W still closes the tab).</li>
   </ul>
-  <p class="dim">Still to come in 0.9: stand-in scripts for Prism Shields, extension scripts kept apart from pages, right-click menus and shortcuts for extensions, and Prism's own WebKit build for printing, camera and microphone.</p>
+  <p class="dim">Still to come in 0.9: extension scripts kept apart from pages, and Prism's own WebKit build for printing, camera and microphone.</p>
 
   <h2>Fixed in 0.8.2</h2>
   <ul class="notes">

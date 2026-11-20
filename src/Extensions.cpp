@@ -232,6 +232,84 @@ bool isHostPermission(const std::string& permission)
     return permission == "<all_urls>" || permission.find("://") != std::string::npos;
 }
 
+// "Ctrl+Shift+Y" (and the other names Chrome accepts) -> a virtual key.
+bool parseShortcut(const std::string& text, Command& command)
+{
+    command.ctrl = command.alt = command.shift = false;
+    command.key = 0;
+    std::vector<std::string> parts;
+    size_t start = 0;
+    while (start <= text.size()) {
+        size_t plus = text.find('+', start);
+        parts.push_back(text.substr(start, plus == std::string::npos ? std::string::npos : plus - start));
+        if (plus == std::string::npos)
+            break;
+        start = plus + 1;
+    }
+    if (parts.empty())
+        return false;
+    for (size_t i = 0; i + 1 < parts.size(); ++i) {
+        const std::string& modifier = parts[i];
+        if (modifier == "Ctrl" || modifier == "Command")
+            command.ctrl = true;
+        else if (modifier == "Alt")
+            command.alt = true;
+        else if (modifier == "Shift")
+            command.shift = true;
+        else
+            return false; // MacCtrl and other Mac-only modifiers
+    }
+    const std::string& key = parts.back();
+    static const std::map<std::string, unsigned> named = {
+        { "Comma", VK_OEM_COMMA }, { "Period", VK_OEM_PERIOD }, { "Home", VK_HOME }, { "End", VK_END },
+        { "PageUp", VK_PRIOR }, { "PageDown", VK_NEXT }, { "Space", VK_SPACE }, { "Insert", VK_INSERT },
+        { "Delete", VK_DELETE }, { "Up", VK_UP }, { "Down", VK_DOWN }, { "Left", VK_LEFT }, { "Right", VK_RIGHT },
+        { "MediaNextTrack", VK_MEDIA_NEXT_TRACK }, { "MediaPrevTrack", VK_MEDIA_PREV_TRACK },
+        { "MediaPlayPause", VK_MEDIA_PLAY_PAUSE }, { "MediaStop", VK_MEDIA_STOP },
+    };
+    if (key.size() == 1 && ((key[0] >= 'A' && key[0] <= 'Z') || (key[0] >= '0' && key[0] <= '9')))
+        command.key = static_cast<unsigned char>(key[0]);
+    else if (key.size() >= 2 && key[0] == 'F' && std::all_of(key.begin() + 1, key.end(), ::isdigit)) {
+        int number = std::atoi(key.c_str() + 1);
+        if (number >= 1 && number <= 12)
+            command.key = VK_F1 + number - 1;
+    } else if (auto found = named.find(key); found != named.end())
+        command.key = found->second;
+    if (!command.key)
+        return false;
+    bool media = command.key >= VK_MEDIA_NEXT_TRACK && command.key <= VK_MEDIA_PLAY_PAUSE;
+    // Like Chrome: other keys need Ctrl or Alt.
+    if (!media && !command.ctrl && !command.alt)
+        return false;
+    command.shortcut = text;
+    return true;
+}
+
+std::vector<Command> parseCommands(const json::Value& commands)
+{
+    std::vector<Command> out;
+    for (auto& [name, details] : commands.members()) {
+        Command command;
+        command.name = name;
+        command.description = details["description"].asString();
+        const json::Value& suggested = details["suggested_key"];
+        std::string key;
+        if (suggested.isString())
+            key = suggested.asString();
+        else if (suggested["windows"].isString())
+            key = suggested["windows"].asString();
+        else if (suggested["default"].isString())
+            key = suggested["default"].asString();
+        if (!key.empty() && !parseShortcut(key, command)) {
+            command.shortcut.clear();
+            command.key = 0;
+        }
+        out.push_back(std::move(command));
+    }
+    return out;
+}
+
+
 // Reads manifest.json and everything we need from an extension folder.
 // Runs on worker threads too: touches only the file system.
 bool loadExtension(const fs::path& dir, Extension& ext, std::string& error)
@@ -387,8 +465,6 @@ bool loadExtension(const fs::path& dir, Extension& ext, std::string& error)
     };
     if (needs("webRequestBlocking"))
         ext.unsupported.push_back("Changing request and response headers with webRequest");
-    if (needs("contextMenus") || needs("menus"))
-        ext.unsupported.push_back("Right-click menu items");
     if (needs("offscreen"))
         ext.unsupported.push_back("Offscreen documents");
     if (needs("cookies"))
@@ -405,8 +481,12 @@ bool loadExtension(const fs::path& dir, Extension& ext, std::string& error)
         ext.unsupported.push_back("Signing in with Google or Firefox accounts");
     if (needs("proxy") || needs("privacy") || needs("webNavigation") || needs("debugger"))
         ext.unsupported.push_back("Some browser-level APIs (proxy, privacy, webNavigation, debugger)");
-    if (manifest.has("commands"))
-        ext.unsupported.push_back("Keyboard shortcuts");
+    ext.commands = parseCommands(manifest["commands"]);
+    bool globalShortcut = false;
+    for (auto& member : manifest["commands"].members())
+        globalShortcut = globalShortcut || member.second["global"].asBool();
+    if (globalShortcut)
+        ext.unsupported.push_back("Shortcuts that work when Prism isn't in front");
     if (manifest.has("side_panel") || manifest.has("sidebar_action"))
         ext.unsupported.push_back("Side panel");
     if (manifest.has("chrome_url_overrides") || manifest.has("devtools_page") || manifest.has("omnibox"))
@@ -520,6 +600,18 @@ std::string supportJSON(const Extension& ext)
     json += ",\"rulesetsEnabled\":" + std::to_string(enabledRulesets);
     json += ",\"blockingDomains\":" + std::to_string(ext.blockingDomains);
     json += ",\"blockingRules\":" + std::to_string(ext.blockingRules);
+    json += ",\"shortcuts\":[";
+    bool firstShortcut = true;
+    for (auto& command : ext.commands) {
+        if (command.shortcut.empty())
+            continue;
+        std::string label = command.description;
+        if (label.empty())
+            label = command.name.rfind("_execute_", 0) == 0 ? "Open the toolbar popup" : command.name;
+        json += std::string(firstShortcut ? "" : ",") + "{\"keys\":" + json::quote(command.shortcut) + ",\"label\":" + json::quote(label) + "}";
+        firstShortcut = false;
+    }
+    json += "]";
     json += std::string(",\"background\":") + (ext.hasBackground ? "true" : "false");
     json += std::string(",\"popup\":") + (!ext.actionPopup.empty() ? "true" : "false");
     json += std::string(",\"action\":") + (ext.hasAction ? "true" : "false");
@@ -1661,6 +1753,11 @@ std::vector<Extension*> enabledExtensions()
 Extension* find(const std::string& id)
 {
     return findExtension(id);
+}
+
+std::wstring extensionDataDirectory(const std::string& id)
+{
+    return extensionData(id).wstring();
 }
 
 Extension* findEnabled(const std::string& id)

@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "Shields.h"
 #include "WebKitApi.h"
 
 #include <cstdint>
@@ -62,5 +63,9 @@ void rulesChanged();
 // an adblock request type, or "" when it couldn't tell. Fills `owner` with
 // whatever blocks it.
 bool decide(const std::string& kind, const std::string& pageURL, const std::string& url, std::string* owner);
+// The same, with what to load instead of the request, if anything
+// (a stand-in for a blocked file, or the address without tracking
+// parameters).
+shields::RequestVerdict decideRequest(const std::string& kind, const std::string& pageURL, const std::string& url, std::string* owner);
 
 } // namespace requestfilter

@@ -48,6 +48,8 @@ struct Library {
     char* (*hiddenClassIdSelectors)(const void*, const char*, const char*, const char*) = nullptr;
     int (*checkRequest)(const void*, const char*, const char*, const char*) = nullptr;
     void (*freeString)(char*) = nullptr;
+    // Optional (prism_shields 0.5): stand-ins and tracking-parameter removal.
+    int (*checkRequestEx)(const void*, const char*, const char*, const char*, char**) = nullptr;
     bool loaded = false;
 };
 
@@ -78,6 +80,8 @@ bool loadLibrary()
         && loadSymbol(module, "prism_shields_hidden_class_id_selectors", g_lib.hiddenClassIdSelectors)
         && loadSymbol(module, "prism_shields_check_request", g_lib.checkRequest)
         && loadSymbol(module, "prism_shields_free_string", g_lib.freeString);
+    if (ok)
+        loadSymbol(module, "prism_shields_check_request_ex", g_lib.checkRequestEx);
     g_lib.loaded = ok;
     return ok;
 }
@@ -675,21 +679,46 @@ bool filtersRequests()
     return g_engine && requestSettings().on;
 }
 
-bool blocksRequest(const std::string& url, const std::string& pageURL, const std::string& type)
+RequestVerdict checkRequest(const std::string& url, const std::string& pageURL, const std::string& type)
 {
     if (!g_engine)
-        return false;
+        return { };
     const RequestSettings& settings = requestSettings();
     if (!settings.on)
-        return false;
+        return { };
     std::string pageHost = hostOf(pageURL);
     if (pageHost.empty())
-        return false;
+        return { };
     for (auto& site : settings.disabledSites) {
         if (pageHost == site || (pageHost.size() > site.size() && pageHost.compare(pageHost.size() - site.size() - 1, std::string::npos, "." + site) == 0))
-            return false;
+            return { };
     }
-    return g_lib.checkRequest(g_engine, url.c_str(), pageURL.c_str(), type.c_str()) == 1;
+    RequestVerdict verdict;
+    if (!g_lib.checkRequestEx) {
+        if (g_lib.checkRequest(g_engine, url.c_str(), pageURL.c_str(), type.c_str()) == 1)
+            verdict.action = RequestVerdict::Block;
+        return verdict;
+    }
+    char* out = nullptr;
+    int result = g_lib.checkRequestEx(g_engine, url.c_str(), pageURL.c_str(), type.c_str(), &out);
+    if (out) {
+        verdict.url = out;
+        g_lib.freeString(out);
+    }
+    if (result == 1)
+        verdict.action = RequestVerdict::Block;
+    else if (result == 2 && !verdict.url.empty())
+        verdict.action = RequestVerdict::StandIn;
+    else if (result == 3 && !verdict.url.empty())
+        verdict.action = RequestVerdict::Rewrite;
+    if (verdict.action == RequestVerdict::Allow || verdict.action == RequestVerdict::Block)
+        verdict.url.clear();
+    return verdict;
+}
+
+bool blocksRequest(const std::string& url, const std::string& pageURL, const std::string& type)
+{
+    return checkRequest(url, pageURL, type).action == RequestVerdict::Block;
 }
 
 void* buildEngine(const std::string& filters)

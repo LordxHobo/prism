@@ -335,7 +335,7 @@
     setUninstallURL: resolved(undefined),
     requestUpdateCheck: resolved({ status: 'no_update' }),
     getPlatformInfo: resolved({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' }),
-    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.2', buildID: '0' }),
+    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.3', buildID: '0' }),
     getContexts: resolved([]),
     getBackgroundPage: notYet('Reaching the background page directly'),
     getPackageDirectoryEntry: notYet('getPackageDirectoryEntry'),
@@ -669,26 +669,70 @@
   };
 
   // ---- Smaller APIs -------------------------------------------------------------------------------
+  // Right-click menu items (contextMenus / menus): Prism adds them to the
+  // page's menu and to the toolbar button's menu.
+  const menuClickHandlers = new Map(); // id -> onclick (Manifest V2)
   let menuCounter = 0;
+  const menuClicked = makeEvent('menus.onClicked');
+  menuClicked.event.addListener((info, tab) => {
+    const handler = menuClickHandlers.get(info && info.menuItemId);
+    if (handler) handler(info, tab);
+  });
+  const menuKeys = ['title', 'type', 'contexts', 'documentUrlPatterns', 'targetUrlPatterns', 'enabled', 'visible', 'checked', 'parentId'];
+  function menuProps(properties) {
+    const props = {};
+    for (const key of menuKeys) if (properties && properties[key] !== undefined) props[key] = properties[key];
+    return props;
+  }
   const menus = {
-    create: (properties, callback) => {
-      if (typeof callback === 'function') setTimeout(callback, 0);
-      return (properties && properties.id) || ++menuCounter;
+    // Returns the item's id at once, like Chrome (numbers when none is given).
+    create(properties, callback) {
+      const props = menuProps(properties);
+      const id = properties && properties.id !== undefined ? properties.id : ++menuCounter;
+      props.id = id;
+      if (properties && typeof properties.onclick === 'function') menuClickHandlers.set(id, properties.onclick);
+      ready.then(() => call('menus.create', { props })).then(() => {
+        if (typeof callback === 'function') callback();
+      }, (error) => {
+        if (typeof callback === 'function') {
+          lastError = { message: String((error && error.message) || error) };
+          try { callback(); } catch (callbackError) { console.error(callbackError); }
+          lastError = undefined;
+        } else {
+          console.error(error);
+        }
+      });
+      return id;
     },
-    update: resolved(undefined),
-    remove: resolved(undefined),
-    removeAll: resolved(undefined),
-    onClicked: quiet(),
+    update: withCallback((id, properties) => {
+      if (properties && typeof properties.onclick === 'function') menuClickHandlers.set(id, properties.onclick);
+      return ready.then(() => call('menus.update', { id, props: menuProps(properties) }));
+    }),
+    remove: withCallback((id) => {
+      menuClickHandlers.delete(id);
+      return ready.then(() => call('menus.remove', { id }));
+    }),
+    removeAll: withCallback(() => {
+      menuClickHandlers.clear();
+      return ready.then(() => call('menus.removeAll'));
+    }),
+    refresh: resolved(undefined),
+    onClicked: menuClicked.event,
     onShown: quiet(),
     onHidden: quiet(),
-    ContextType: {},
+    ACTION_MENU_TOP_LEVEL_LIMIT: 6,
+    ContextType: {
+      ALL: 'all', PAGE: 'page', FRAME: 'frame', SELECTION: 'selection', LINK: 'link', EDITABLE: 'editable', IMAGE: 'image',
+      VIDEO: 'video', AUDIO: 'audio', LAUNCHER: 'launcher', BROWSER_ACTION: 'browser_action', PAGE_ACTION: 'page_action', ACTION: 'action',
+    },
+    ItemType: { NORMAL: 'normal', CHECKBOX: 'checkbox', RADIO: 'radio', SEPARATOR: 'separator' },
   };
 
+  // Keyboard shortcuts from the manifest's "commands" (Prism sends onCommand).
   const commands = {
-    getAll: resolved(Object.keys(manifest.commands || {}).map((name) => ({
-      name, description: (manifest.commands[name] || {}).description || '', shortcut: '',
-    }))),
-    onCommand: quiet(),
+    getAll: withCallback(() => ready.then(() => call('commands.getAll'))),
+    onCommand: makeEvent('commands.onCommand').event,
+    onChanged: quiet(),
   };
 
   let notificationCounter = 0;

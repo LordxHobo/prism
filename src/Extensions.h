@@ -8,6 +8,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 // Browser extensions (Chrome Web Store and Firefox Add-ons).
 //
@@ -102,6 +103,44 @@ void webRequestEnded(const std::string& requestId, bool succeeded, const std::st
 
 // A tab starts loading a page (main_frame; extensions can't block it here).
 void webRequestMainFrame(int tabId, const std::string& url);
+
+// ---- Right-click menu items (contextMenus / menus) ----
+
+// What was right-clicked.
+struct MenuContext {
+    std::string pageURL;
+    std::string linkURL;
+    std::string linkText;
+    std::string srcURL;    // image, video or audio address
+    std::string mediaType; // "image", "video", "audio" or ""
+    std::string selectionText;
+    bool editable { false };
+};
+
+struct MenuNode {
+    std::string extensionId;
+    std::string itemId; // the extension's id for it, as JSON (number or string)
+    std::string title;
+    std::string type;   // "normal", "checkbox", "radio", "separator"
+    bool enabled { true };
+    bool checked { false };
+    std::vector<MenuNode> children;
+};
+
+// True if any extension has added menu items.
+bool hasMenuItems();
+// Items for a right-click on a page: per extension, its one item, or a
+// submenu named after the extension when it has several.
+std::vector<MenuNode> pageMenu(const MenuContext& context);
+// Items for a right-click on an extension's toolbar button.
+std::vector<MenuNode> actionMenu(const std::string& extensionId);
+void menuItemClicked(const std::string& extensionId, const std::string& itemId, const MenuContext& context, int tabId);
+
+// ---- Keyboard shortcuts (commands) ----
+
+// Runs the extension shortcut for this key press, if there's one. `tabId`
+// is the active tab. Returns true if a shortcut was used.
+bool runShortcut(HWND window, int tabId, unsigned key, bool ctrl, bool alt, bool shift);
 
 // Writes extension storage that's still waiting to be saved. Call at exit.
 void flushStorage();

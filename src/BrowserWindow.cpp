@@ -26,6 +26,9 @@
 #include "Version.h"
 
 #include <algorithm>
+#include <cstring>
+#include <functional>
+#include <memory>
 #include <set>
 #include <thread>
 #include <cmath>
@@ -75,6 +78,155 @@ int s_lastFocusedWindowId = -1;
 Tab* tabFromClientInfo(const void* clientInfo)
 {
     return const_cast<Tab*>(static_cast<const Tab*>(clientInfo));
+}
+
+// ---- Extensions' right-click menu items -------------------------------------------
+// WebKit asks for the menu before showing it (getContextMenuFromProposedMenuAsync).
+// When an extension has items, Prism first asks the page for the selected
+// text (contextMenus "selection" items show it), then adds the items after
+// WebKit's own.
+
+struct PendingMenu {
+    Ref<WKContextMenuListenerRef> listener;
+    Ref<WKArrayRef> proposed;
+    extensions::MenuContext context;
+    int tabId { -1 };
+};
+
+struct MenuTag {
+    std::string extensionId;
+    std::string itemId;
+};
+std::vector<MenuTag> g_menuTags;              // tag - kWKContextMenuItemBaseApplicationTag -> item
+extensions::MenuContext g_menuContext;         // of the menu on screen
+int g_menuTabId = -1;
+
+std::string urlText(WKURLRef url)
+{
+    if (!url)
+        return { };
+    std::string text = util::toUTF8(toWide(url));
+    WKRelease(url);
+    return text;
+}
+
+void appendMenuNodes(WKMutableArrayRef array, const std::vector<extensions::MenuNode>& nodes)
+{
+    for (auto& node : nodes) {
+        WKContextMenuItemRef item = nullptr;
+        auto title = stringUTF8(node.title);
+        if (node.type == "separator") {
+            item = WKContextMenuItemSeparatorItem();
+        } else if (!node.children.empty() || node.itemId.empty()) {
+            WKMutableArrayRef children = WKMutableArrayCreate();
+            appendMenuNodes(children, node.children);
+            item = WKContextMenuItemCreateAsSubmenu(title.get(), node.enabled, children);
+            WKRelease(children);
+        } else {
+            WKContextMenuItemTag tag = kWKContextMenuItemBaseApplicationTag + static_cast<WKContextMenuItemTag>(g_menuTags.size());
+            g_menuTags.push_back({ node.extensionId, node.itemId });
+            if (node.type == "checkbox" || node.type == "radio")
+                item = WKContextMenuItemCreateAsCheckableAction(tag, title.get(), node.enabled, node.checked);
+            else
+                item = WKContextMenuItemCreateAsAction(tag, title.get(), node.enabled);
+        }
+        if (item) {
+            WKArrayAppendItem(array, item);
+            WKRelease(item);
+        }
+    }
+}
+
+void finishMenu(PendingMenu& pending)
+{
+    WKMutableArrayRef items = WKMutableArrayCreate();
+    size_t count = WKArrayGetSize(pending.proposed.get());
+    for (size_t i = 0; i < count; ++i)
+        WKArrayAppendItem(items, WKArrayGetItemAtIndex(pending.proposed.get(), i));
+    std::vector<extensions::MenuNode> nodes = extensions::pageMenu(pending.context);
+    g_menuTags.clear();
+    if (!nodes.empty()) {
+        if (count) {
+            WKContextMenuItemRef separator = WKContextMenuItemSeparatorItem();
+            WKArrayAppendItem(items, separator);
+            WKRelease(separator);
+        }
+        appendMenuNodes(items, nodes);
+    }
+    g_menuContext = pending.context;
+    g_menuTabId = pending.tabId;
+    WKContextMenuListenerUseContextMenuItems(pending.listener.get(), items);
+    WKRelease(items);
+}
+
+void selectionForMenu(WKTypeRef result, WKErrorRef, void* context)
+{
+    std::unique_ptr<PendingMenu> pending(static_cast<PendingMenu*>(context));
+    if (result && WKGetTypeID(result) == WKStringGetTypeID()) {
+        std::string text = util::toUTF8(toWide(static_cast<WKStringRef>(result)));
+        if (text.size() > 10000)
+            text.resize(10000);
+        pending->context.selectionText = text;
+    }
+    finishMenu(*pending);
+}
+
+bool isAudioAddress(const std::string& url)
+{
+    std::string lower = url.substr(0, url.find_first_of("?#"));
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    for (const char* ext : { ".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".wav", ".flac" }) {
+        size_t length = std::strlen(ext);
+        if (lower.size() > length && lower.compare(lower.size() - length, length, ext) == 0)
+            return true;
+    }
+    return false;
+}
+
+void getContextMenuAsync(WKPageRef page, WKArrayRef proposed, WKContextMenuListenerRef listener, WKHitTestResultRef hit, WKTypeRef, const void* clientInfo)
+{
+    Tab* tab = tabFromClientInfo(clientInfo);
+    if (!tab || tab->extensionPages || !extensions::hasMenuItems()) {
+        WKContextMenuListenerUseContextMenuItems(listener, proposed);
+        return;
+    }
+    auto pending = std::make_unique<PendingMenu>();
+    pending->listener = Ref<WKContextMenuListenerRef>::retain(listener);
+    pending->proposed = Ref<WKArrayRef>::retain(proposed);
+    pending->tabId = tab->id;
+    extensions::MenuContext& context = pending->context;
+    context.pageURL = util::toUTF8(tab->url);
+    if (hit) {
+        context.linkURL = urlText(WKHitTestResultCopyAbsoluteLinkURL(hit));
+        if (!context.linkURL.empty()) {
+            if (WKStringRef label = WKHitTestResultCopyLinkLabel(hit)) {
+                context.linkText = util::toUTF8(toWide(label));
+                WKRelease(label);
+            }
+        }
+        std::string image = urlText(WKHitTestResultCopyAbsoluteImageURL(hit));
+        std::string media = urlText(WKHitTestResultCopyAbsoluteMediaURL(hit));
+        if (!image.empty()) {
+            context.srcURL = image;
+            context.mediaType = "image";
+        } else if (!media.empty()) {
+            context.srcURL = media;
+            context.mediaType = isAudioAddress(media) ? "audio" : "video";
+        }
+        context.editable = WKHitTestResultIsContentEditable(hit);
+    }
+    WKPageEvaluateJavaScriptInMainFrame(page, stringUTF8("String(window.getSelection ? window.getSelection() : '')").get(),
+        pending.release(), selectionForMenu);
+}
+
+void contextMenuItemSelected(WKPageRef, WKContextMenuItemRef item, const void*)
+{
+    WKContextMenuItemTag tag = WKContextMenuItemGetTag(item);
+    if (tag < kWKContextMenuItemBaseApplicationTag)
+        return;
+    size_t index = tag - kWKContextMenuItemBaseApplicationTag;
+    if (index < g_menuTags.size())
+        extensions::menuItemClicked(g_menuTags[index].extensionId, g_menuTags[index].itemId, g_menuContext, g_menuTabId);
 }
 
 BrowserWindow* windowFromClientInfo(const void* clientInfo)
@@ -1080,6 +1232,15 @@ void BrowserWindow::attachClients(Tab* tab)
     navigationClient.didSameDocumentNavigation = didSameDocumentNavigation;
     WKPageSetPageNavigationClient(tab->page, &navigationClient.base);
     requestfilter::attachPage(tab->page);
+
+    if (WKPageSetPageContextMenuClient && WKContextMenuListenerUseContextMenuItems && WKMutableArrayCreate) {
+        WKPageContextMenuClientV4 contextMenuClient = { };
+        contextMenuClient.base.version = 4;
+        contextMenuClient.base.clientInfo = tab;
+        contextMenuClient.getContextMenuFromProposedMenuAsync = getContextMenuAsync;
+        contextMenuClient.customContextMenuItemSelected = contextMenuItemSelected;
+        WKPageSetPageContextMenuClient(tab->page, &contextMenuClient.base);
+    }
 
     if (WKPageSetPageFindClient) {
         WKPageFindClientV0 findClient = { };
@@ -2174,6 +2335,20 @@ void BrowserWindow::showDevTools()
 // Keyboard shortcuts
 
 bool BrowserWindow::handleShortcut(const MSG& msg)
+{
+    // Prism's own shortcuts first; keys it doesn't use can be extensions'.
+    if (handleBrowserShortcut(msg))
+        return true;
+    if (msg.message != WM_KEYDOWN && msg.message != WM_SYSKEYDOWN)
+        return false;
+    UINT key = static_cast<UINT>(msg.wParam);
+    if (key == VK_CONTROL || key == VK_SHIFT || key == VK_MENU)
+        return false;
+    Tab* tab = activeTab();
+    return extensions::runShortcut(m_hwnd, tab ? tab->id : -1, key, GetKeyState(VK_CONTROL) < 0, GetKeyState(VK_MENU) < 0, GetKeyState(VK_SHIFT) < 0);
+}
+
+bool BrowserWindow::handleBrowserShortcut(const MSG& msg)
 {
     if (msg.message == WM_XBUTTONUP) {
         Tab* tab = activeTab();
@@ -3372,11 +3547,43 @@ void BrowserWindow::showHiddenActionMenu(const std::string& extensionId, int x, 
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, menuText(name).c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    // The extension's own items for its button (contextMenus "action").
+    std::vector<std::string> itemIds; // menu id - 100 -> item
+    std::function<void(HMENU, const std::vector<extensions::MenuNode>&)> addItems = [&](HMENU target, const std::vector<extensions::MenuNode>& nodes) {
+        for (auto& node : nodes) {
+            std::wstring title = menuText(util::fromUTF8(node.title));
+            UINT disabled = node.enabled ? 0 : MF_GRAYED;
+            if (node.type == "separator") {
+                AppendMenuW(target, MF_SEPARATOR, 0, nullptr);
+            } else if (!node.children.empty()) {
+                HMENU submenu = CreatePopupMenu();
+                addItems(submenu, node.children);
+                AppendMenuW(target, MF_POPUP | MF_STRING | disabled, reinterpret_cast<UINT_PTR>(submenu), title.c_str());
+            } else {
+                UINT id = 100 + static_cast<UINT>(itemIds.size());
+                itemIds.push_back(node.itemId);
+                UINT checked = (node.type == "checkbox" || node.type == "radio") && node.checked ? MF_CHECKED : 0;
+                AppendMenuW(target, MF_STRING | disabled | checked, id, title.c_str());
+            }
+        }
+    };
+    std::vector<extensions::MenuNode> extensionItems = extensions::actionMenu(extensionId);
+    if (!extensionItems.empty()) {
+        addItems(menu, extensionItems);
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    }
     AppendMenuW(menu, MF_STRING | (options ? 0 : MF_GRAYED), 1, L"Options");
     AppendMenuW(menu, MF_STRING, 2, L"Hide from toolbar");
     AppendMenuW(menu, MF_STRING, 3, L"Manage extension");
     int choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_RIGHTALIGN, point.x, point.y, 0, m_hwnd, nullptr);
     DestroyMenu(menu);
+    if (choice >= 100 && static_cast<size_t>(choice - 100) < itemIds.size()) {
+        extensions::MenuContext context;
+        if (tab)
+            context.pageURL = util::toUTF8(tab->url);
+        extensions::menuItemClicked(extensionId, itemIds[choice - 100], context, tab ? tab->id : -1);
+        return;
+    }
     if (choice == 1)
         extensions::openOptionsPage(extensionId, m_id);
     else if (choice == 2) {

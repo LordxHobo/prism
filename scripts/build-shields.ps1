@@ -52,19 +52,20 @@ if (-not $SkipScriptlets) {
     $git = Get-Command git -ErrorAction SilentlyContinue
     if ($node -and $git) {
         $ublock = Join-Path $Cache "uBlock-$UBlockTag"
-        if (-not (Test-Path (Join-Path $ublock 'src\js\resources\scriptlets.js'))) {
-            Write-Step "Downloading uBlock Origin $UBlockTag's scriptlets"
+        # Earlier builds only fetched src/js; the stand-ins need src/web_accessible_resources too.
+        if (-not (Test-Path (Join-Path $ublock 'src\js\resources\scriptlets.js')) -or -not (Test-Path (Join-Path $ublock 'src\web_accessible_resources\noop.js'))) {
+            Write-Step "Downloading uBlock Origin $UBlockTag's scriptlets and stand-ins"
             if (Test-Path $ublock) { Remove-Item -Recurse -Force $ublock }
             & git -c advice.detachedHead=false clone --quiet --depth 1 --branch $UBlockTag --filter=blob:none --sparse https://github.com/gorhill/uBlock.git $ublock
             if ($LASTEXITCODE -ne 0) { throw 'Downloading uBlock Origin failed.' }
-            & git -C $ublock sparse-checkout set src/js
+            & git -C $ublock sparse-checkout set src/js src/web_accessible_resources
             if ($LASTEXITCODE -ne 0) { throw 'Downloading uBlock Origin failed.' }
         }
 
         Write-Step 'Bundling the scriptlets'
         $out = Join-Path $Dist 'shields'
         New-Item -ItemType Directory -Force -Path $out | Out-Null
-        & node (Join-Path $Root 'shields\build-scriptlets.mjs') (Join-Path $ublock 'src\js\resources') (Join-Path $out 'scriptlets.json')
+        & node (Join-Path $Root 'shields\build-scriptlets.mjs') (Join-Path $ublock 'src\js\resources') (Join-Path $out 'scriptlets.json') (Join-Path $ublock 'src')
         if ($LASTEXITCODE -ne 0) { throw 'Bundling the scriptlets failed.' }
         Copy-Item (Join-Path $ublock 'LICENSE.txt') (Join-Path $out 'LICENSE-uBlock-Origin.txt') -Force -ErrorAction SilentlyContinue
         if (-not (Test-Path (Join-Path $out 'LICENSE-uBlock-Origin.txt'))) {
@@ -73,12 +74,14 @@ if (-not $SkipScriptlets) {
             Copy-Item (Join-Path $ublock 'LICENSE.txt') (Join-Path $out 'LICENSE-uBlock-Origin.txt') -Force -ErrorAction SilentlyContinue
         }
         Set-Content -Path (Join-Path $out 'README.txt') -Encoding UTF8 -Value @"
-scriptlets.json holds uBlock Origin's scriptlets (from uBlock Origin $UBlockTag,
-https://github.com/gorhill/uBlock), packed for Prism Shields.
+scriptlets.json holds uBlock Origin's scriptlets and its stand-ins for blocked
+files (from uBlock Origin $UBlockTag, https://github.com/gorhill/uBlock),
+packed for Prism Shields.
 
 They are Copyright (C) Raymond Hill and contributors and licensed under the
 GNU General Public License v3 (see LICENSE-uBlock-Origin.txt). The source is at
-https://github.com/gorhill/uBlock/tree/$UBlockTag/src/js/resources and the
+https://github.com/gorhill/uBlock/tree/$UBlockTag/src/js/resources and
+src/web_accessible_resources, and the
 packing script at shields/build-scriptlets.mjs in Prism's repository.
 
 Prism itself is licensed under the Mozilla Public License 2.0; this data file is
