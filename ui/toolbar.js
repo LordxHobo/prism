@@ -693,6 +693,7 @@ const PROMPT_TEXT = {
   notifications: ' wants to show notifications',
 };
 const PROMPT_ICONS = {
+  password: '<circle cx="5.5" cy="8" r="3"/><path d="M8.5 8h6M12.5 8v2.5M14.5 8v2"/>',
   location: '<path d="M8 14.5s4.5-4.2 4.5-8a4.5 4.5 0 0 0-9 0c0 3.8 4.5 8 4.5 8z"/><circle cx="8" cy="6.5" r="1.6"/>',
   notifications: '<path d="M4 11V7a4 4 0 0 1 8 0v4l1.2 1.5H2.8z"/><path d="M6.5 14a1.6 1.6 0 0 0 3 0"/>',
 };
@@ -706,7 +707,16 @@ function renderInfobar() {
   elements.infoText.textContent = '';
   const site = document.createElement('b');
   site.textContent = prompt.site;
-  elements.infoText.append(site, PROMPT_TEXT[prompt.kind] || ' wants a permission');
+  const password = prompt.kind === 'password';
+  $('permAllow').textContent = password ? (prompt.update ? 'Update' : 'Save') : 'Allow';
+  $('permBlock').textContent = password ? 'Never' : 'Block';
+  $('permBlock').title = password ? 'Never save passwords for this site' : '';
+  if (password) {
+    const user = document.createElement('b');
+    user.textContent = prompt.username || 'this login';
+    elements.infoText.append(prompt.update ? 'Update the saved password for ' : 'Save the password for ', user, ' on ', site, '?');
+  } else
+    elements.infoText.append(site, PROMPT_TEXT[prompt.kind] || ' wants a permission');
 }
 
 // ---- Find bar -------------------------------------------------------------------------

@@ -13,6 +13,7 @@
 #include "Http.h"
 #include "Icons.h"
 #include "Permissions.h"
+#include "Passwords.h"
 #include "Privacy.h"
 #include "RequestFilter.h"
 #include "Shields.h"
@@ -272,7 +273,7 @@ bool systemUsesDarkTheme()
 bool isKnownInternalPage(const std::wstring& name)
 {
     return name == L"newtab" || name == L"whatsnew" || name == L"settings" || name == L"extensions"
-        || name == L"history" || name == L"bookmarks";
+        || name == L"history" || name == L"bookmarks" || name == L"passwords";
 }
 
 struct DownloadInfo {
@@ -483,7 +484,6 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         if (lParam && !lstrcmpW(reinterpret_cast<const wchar_t*>(lParam), L"ImmersiveColorSet")) {
             updateTheme();
             pushState();
-            updateIcon(); // Amber on a light taskbar, Ocean on a dark one
             // The theme's accent may have changed with it.
             evaluateInInternalPages(L"settings", "window.prismSettingsChanged && prismSettingsChanged();");
         }
@@ -624,7 +624,8 @@ int BrowserWindow::toolbarCSSHeight() const
     if (settings::showBookmarksBar())
         height += kBookmarksBarCSSHeight;
     if (Tab* tab = activeTab()) {
-        if (!tab->prompts.empty())
+        passwords::Offer offer;
+        if (!tab->prompts.empty() || passwords::offerFor(tab->id, offer))
             height += kInfobarCSSHeight;
         if (tab->findOpen)
             height += kFindbarCSSHeight;
@@ -1088,9 +1089,14 @@ void BrowserWindow::pushState()
         json += ",\"bookmarked\":" + std::string(bookmarked ? "true" : "false");
         json += ",\"find\":{\"open\":" + std::string(tab->findOpen ? "true" : "false") + ",\"query\":" + util::jsonString(tab->findQuery)
             + ",\"matches\":" + std::to_string(tab->findMatches) + ",\"index\":" + std::to_string(tab->findIndex) + "}";
+        passwords::Offer offer;
         if (!tab->prompts.empty()) {
             auto& prompt = tab->prompts.front();
             json += ",\"prompt\":{\"kind\":" + util::jsonString(prompt.kind) + ",\"site\":" + util::jsonString(permissions::displayName(prompt.origin)) + "}";
+        } else if (passwords::offerFor(tab->id, offer)) {
+            // "Save password?" (never the password itself).
+            json += ",\"prompt\":{\"kind\":\"password\",\"site\":" + util::jsonString(offer.site) + ",\"username\":" + util::jsonString(offer.username)
+                + ",\"update\":" + (offer.update ? "true" : "false") + "}";
         }
         json += "}";
     }
@@ -1326,6 +1332,7 @@ void BrowserWindow::closeTab(int id)
     Tab* tab = findTab(id);
     if (!tab)
         return;
+    passwords::tabClosed(id);
     int index = indexOf(tab);
 
     if (!tab->url.empty() && !engine::isInternalURL(tab->url)) {
@@ -1466,7 +1473,7 @@ std::wstring BrowserWindow::sessionURL(const Tab* tab)
         return { };
     if (!engine::isInternalURL(url))
         return url;
-    for (auto* name : { L"newtab", L"whatsnew", L"settings", L"extensions", L"history", L"bookmarks" }) {
+    for (auto* name : { L"newtab", L"whatsnew", L"settings", L"extensions", L"history", L"bookmarks", L"passwords" }) {
         if (engine::isInternalPage(url, name))
             return std::wstring(L"prism://") + name;
     }
@@ -1637,6 +1644,17 @@ void BrowserWindow::applyInterfaceCSS()
 {
     for (auto* window : s_windows)
         window->runToolbarScript("window.prism && prism.setUserCSS(" + json::quote(usercss::interfaceCSS()) + ");");
+}
+
+void BrowserWindow::passwordOfferChanged(int tabId)
+{
+    for (auto* window : s_windows) {
+        if (window->findTab(tabId)) {
+            if (window->m_toolbarReady)
+                window->pushState();
+            window->layout();
+        }
+    }
 }
 
 void BrowserWindow::refreshToolbars()
@@ -1917,6 +1935,16 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
         bool isHistory = engine::isInternalPage(frameURL, L"history");
         bool isNewTab = engine::isInternalPage(frameURL, L"newtab");
         bool isBookmarks = engine::isInternalPage(frameURL, L"bookmarks");
+        // prism://passwords: only that page, in its main frame.
+        if (engine::isInternalPage(frameURL, L"passwords")) {
+            std::wstring body = message.substr(6);
+            size_t newline = body.find(L'\n');
+            std::string answer = passwords::handleCommand(body.substr(0, newline), newline == std::wstring::npos ? L"" : body.substr(newline + 1), tab->window->m_hwnd);
+            SecureZeroMemory(body.data(), body.size() * sizeof(wchar_t));
+            SecureZeroMemory(message.data(), message.size() * sizeof(wchar_t));
+            WKPageRunJavaScriptPromptResultListenerCall(listener, stringUTF8(answer).get());
+            return;
+        }
         // The "blocked" page can allow the site it's showing, and nothing else.
         if (engine::isInternalPage(frameURL, L"error") && message.rfind(L"prism:allowHttp\n", 0) == 0) {
             std::wstring site = message.substr(16);
@@ -2256,7 +2284,7 @@ void BrowserWindow::startDownload(WKDownloadRef download)
 void BrowserWindow::showMenu(int x, int y)
 {
     enum { NewTab = 1, NewWindow, ReopenTab, ZoomIn, ZoomOut, ZoomReset, DevTools, Downloads, Extensions, Settings, WhatsNew, About,
-        History, Bookmarks, BookmarksBar, Find, Print };
+        History, Bookmarks, BookmarksBar, Find, Print, Passwords };
 
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, NewTab, L"New tab\tCtrl+T");
@@ -2265,6 +2293,7 @@ void BrowserWindow::showMenu(int x, int y)
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, History, L"History\tCtrl+H");
     AppendMenuW(menu, MF_STRING, Bookmarks, L"Bookmarks\tCtrl+Shift+O");
+    AppendMenuW(menu, MF_STRING, Passwords, L"Passwords");
     AppendMenuW(menu, MF_STRING | (settings::showBookmarksBar() ? MF_CHECKED : 0), BookmarksBar, L"Show bookmarks bar\tCtrl+Shift+B");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, Find, L"Find in page\tCtrl+F");
@@ -2302,6 +2331,7 @@ void BrowserWindow::showMenu(int x, int y)
     case Settings: openInternalPage(L"settings"); break;
     case WhatsNew: openInternalPage(L"whatsnew"); break;
     case History: openInternalPage(L"history"); break;
+    case Passwords: openInternalPage(L"passwords"); break;
     case Bookmarks: openInternalPage(L"bookmarks"); break;
     case BookmarksBar: toggleBookmarksBar(); break;
     case Find: openFind(); break;
@@ -2546,8 +2576,10 @@ void BrowserWindow::didCommitNavigation(WKPageRef page, WKNavigationRef, WKTypeR
         tab->findMatches = -1;
         tab->findIndex = 0;
     }
+    std::wstring committed = toWide(Ref<WKURLRef>::adopt(WKPageCopyActiveURL(page)).get());
+    passwords::tabNavigated(tab->id, committed);
     if (!tab->extensionPages)
-        history::recordVisit(toWide(Ref<WKURLRef>::adopt(WKPageCopyActiveURL(page)).get()), L"");
+        history::recordVisit(committed, L"");
 }
 
 void BrowserWindow::didSameDocumentNavigation(WKPageRef page, WKNavigationRef, WKSameDocumentNavigationType type, WKTypeRef, const void* clientInfo)
@@ -2710,8 +2742,12 @@ void BrowserWindow::queuePrompt(Tab* tab, const std::wstring& kind, const std::w
 
 void BrowserWindow::answerPrompt(Tab* tab, const std::wstring& answer)
 {
-    if (tab->prompts.empty())
+    if (tab->prompts.empty()) {
+        passwords::answerOffer(tab->id, answer, m_hwnd);
+        if (tab->id == m_activeTabId)
+            focusContent();
         return;
+    }
     // "allow" and "block" are remembered for the site; "dismiss" only says
     // no this time.
     PermissionPrompt first = tab->prompts.front();

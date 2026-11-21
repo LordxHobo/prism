@@ -10,11 +10,8 @@
 
 namespace util {
 
-// Prism's icon for the taskbar's current colours: Amber on a light
-// taskbar, Ocean on a dark one. `small` is the title bar size.
+// Prism's icon (the Ocean logo); `smallIcon` is the title bar size.
 HICON appIcon(bool smallIcon);
-// True if Windows' taskbar uses the light theme.
-bool taskbarIsLight();
 
 std::string toUTF8(const std::wstring&);
 std::wstring fromUTF8(const std::string&);

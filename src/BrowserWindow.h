@@ -79,6 +79,8 @@ public:
     // Re-applies settings (theme, accent, tab size, ...) to every window.
     static void settingsChanged();
     static void refreshToolbars();
+    // A tab's "Save password?" offer appeared or went away (Passwords.h).
+    static void passwordOfferChanged(int tabId);
     // Sends your interface CSS (usercss::interfaceCSS) to every toolbar.
     static void applyInterfaceCSS();
 
@@ -130,7 +132,7 @@ private:
     int toolbarCSSHeight() const;
     void applyScaleFactor();
     void updateTheme();
-    void updateIcon(); // the window and taskbar icon for the taskbar's colours
+    void updateIcon(); // the window and taskbar icon
 
     Tab* findTab(int id) const;
     Tab* findTab(WKPageRef) const;

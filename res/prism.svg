@@ -2,8 +2,8 @@
   <!-- Prism "Facet" logo. This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. -->
   <defs><clipPath id="facet"><path d="M114.56,53.09 Q128.00,29.44 141.44,53.09 L226.56,202.91 Q240.00,226.56 213.12,226.56 L42.88,226.56 Q16.00,226.56 29.44,202.91 Z"/></clipPath></defs>
   <g clip-path="url(#facet)">
-    <polygon points="128.00,29.44 16.00,226.56 128.00,160.85" fill="#f29e0c"/>
-    <polygon points="128.00,29.44 240.00,226.56 128.00,160.85" fill="#f9c766"/>
-    <polygon points="16.00,226.56 240.00,226.56 128.00,160.85" fill="#c27406"/>
+    <polygon points="128.00,29.44 16.00,226.56 128.00,160.85" fill="#3b8ee8"/>
+    <polygon points="128.00,29.44 240.00,226.56 128.00,160.85" fill="#93c5f8"/>
+    <polygon points="16.00,226.56 240.00,226.56 128.00,160.85" fill="#1f5fb8"/>
   </g>
 </svg>

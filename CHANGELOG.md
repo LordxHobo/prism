@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.9
+
+- **Prism Passwords** (`src/PasswordVault.*`, `src/Passwords.*`, `ui/passwords.*`, `ui/passwords-runtime.js`):
+  - Vault `%LOCALAPPDATA%\Prism\passwords.vault` (JSON, version 1): a random 256-bit vault key encrypts the contents (logins and the never-save list) with AES-256-GCM (Windows CNG; 12-byte nonce, authenticated purpose string). The vault key is stored wrapped with a key derived from the master password (PBKDF2-SHA256, 600,000 rounds, 16-byte salt) and, when "Stay unlocked while I'm signed in to Windows" is on (default), with DPAPI (`CryptProtectData`, current user). Seeing, copying or exporting a password needs the master password (valid for 5 minutes). Auto-lock (`PasswordsAutoLock`, minutes, default 15, 0 = only at exit) when Windows unlock is off. Strings holding secrets are zeroed when dropped.
+  - Page script (group "passwords", top frame of http(s) pages, not extension pages): reports logins on submit, on clicks of buttons near a filled password field, and on Enter (user name from autocomplete="username", an email field, or the nearest text field before it; remembered for two-step logins; sign-up/change-password forms use the new password). A click on a login field asks for the login menu. `window.__prismPasswords.fill` (non-writable) fills what Prism picked and dispatches input/change.
+  - Prism takes the site from the tab's committed URL, never from the page, and only accepts messages from the main frame. Login menu (native): saved logins for the origin first, then the same site (https logins never on http pages), "Suggest a strong password" on new-password fields, "Unlock Prism Passwords…" once per page when locked, "Manage passwords". The origin is checked again just before filling.
+  - "Save password?" / "Update password?" on the info bar (Save / Never / ×). Kept across the page loads that follow a login (same site, up to 4; other sites, 2). Saving while locked or before setup opens prism://passwords and saves after unlocking.
+  - prism://passwords (menu: Passwords): set up, unlock, list/search, show (30 s), copy (clipboard cleared after 45 s if unchanged; `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory` = 0, `CanUploadToCloudClipboard` = 0), add/edit/delete, generator (12–64, no look-alikes, no modulo bias), CSV import (Chrome/Edge/Brave, Firefox, Bitwarden, 1Password column names) and export (Chrome format), Windows unlock, auto-lock, change master password, never-save sites, delete everything.
+  - Links bcrypt and crypt32.
+- **Icon**: Ocean everywhere (`res/prism.ico` and `res/prism.svg` are Ocean; `prism-dark.*` removed; one icon resource; `util::taskbarIsLight` removed).
+
 ## 0.9.8
 
 - **Accent follows the theme**: the Accent setting is `theme` (default) or a custom #rrggbb. `settings::accent()` returns the custom colour, else Ocean #3aa0ff when `engine::darkTheme()` and Amber #f29e0c when light; `settings::customAccent()` (also in the settings JSON as `customAccent`). Saved values #8b7cf6 (old default), #3aa0ff and #ffb340 (0.9.7's presets) count as `theme`. Settings › Appearance: a split Ocean/Amber "Match the theme" swatch and the custom colour picker. The settings page refreshes on Windows' "ImmersiveColorSet" change. Light-theme defaults in toolbar.css / pages.css are Amber.

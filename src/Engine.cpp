@@ -6,6 +6,7 @@
 
 #include "Blocker.h"
 #include "Extensions.h"
+#include "Passwords.h"
 #include "RequestFilter.h"
 #include "Shields.h"
 #include "Settings.h"
@@ -211,6 +212,8 @@ bool initialize(std::wstring& error)
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { shields::handleScriptMessage(message, reply); }, nullptr);
     WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismExtensionPage").get(),
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { extensions::handlePageMessage(message, reply); }, nullptr);
+    WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismPasswords").get(),
+        [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { passwords::handleScriptMessage(message, reply); }, nullptr);
     WKPageConfigurationSetUserContentController(s_pageConfiguration.get(), s_userContent.get());
 
     s_backgroundConfiguration = Ref<WKPageConfigurationRef>::adopt(WKPageConfigurationCreate());

@@ -317,25 +317,14 @@ std::string base64(const std::string& bytes)
     return out;
 }
 
-bool taskbarIsLight()
-{
-    DWORD value = 0;
-    DWORD size = sizeof(value);
-    // Missing (older Windows 10) means the dark taskbar.
-    LSTATUS status = RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-        L"SystemUsesLightTheme", RRF_RT_REG_DWORD, nullptr, &value, &size);
-    return status == ERROR_SUCCESS && value != 0;
-}
-
 HICON appIcon(bool smallIcon)
 {
-    // Loaded once per size and variant (shared icons stay valid).
-    static HICON icons[2][2] = { };
-    int variant = taskbarIsLight() ? 0 : 1;
-    HICON& icon = icons[variant][smallIcon ? 1 : 0];
+    // Loaded once per size (shared icons stay valid).
+    static HICON icons[2] = { };
+    HICON& icon = icons[smallIcon ? 1 : 0];
     if (!icon) {
         int size = GetSystemMetrics(smallIcon ? SM_CXSMICON : SM_CXICON);
-        icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(variant == 0 ? 1 : 2), IMAGE_ICON, size, size, LR_SHARED));
+        icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, size, size, LR_SHARED));
         if (!icon)
             icon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1));
     }
