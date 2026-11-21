@@ -362,11 +362,18 @@
     setUninstallURL: resolved(undefined),
     requestUpdateCheck: resolved({ status: 'no_update' }),
     getPlatformInfo: resolved({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' }),
-    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.5', buildID: '0' }),
-    getContexts: resolved([]),
+    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.6', buildID: '0' }),
+    getContexts: withCallback((filter) => call('runtime.getContexts').then((contexts) => {
+      const f = filter || {};
+      const has = (list, value) => !Array.isArray(list) || list.includes(value);
+      return contexts.filter((c) => has(f.contextTypes, c.contextType) && has(f.contextIds, c.contextId) && has(f.tabIds, c.tabId)
+        && has(f.windowIds, c.windowId) && has(f.documentIds, c.documentId) && has(f.frameIds, c.frameId)
+        && has(f.documentUrls, c.documentUrl) && has(f.documentOrigins, c.documentOrigin) && (f.incognito === undefined || f.incognito === c.incognito));
+    })),
     getBackgroundPage: notYet('Reaching the background page directly'),
     getPackageDirectoryEntry: notYet('getPackageDirectoryEntry'),
     OnInstalledReason: { INSTALL: 'install', UPDATE: 'update', CHROME_UPDATE: 'chrome_update', SHARED_MODULE_UPDATE: 'shared_module_update' },
+    ContextType: { TAB: 'TAB', POPUP: 'POPUP', BACKGROUND: 'BACKGROUND', OFFSCREEN_DOCUMENT: 'OFFSCREEN_DOCUMENT', SIDE_PANEL: 'SIDE_PANEL', DEVELOPER_TOOLS: 'DEVELOPER_TOOLS' },
     PlatformOs: { WIN: 'win', MAC: 'mac', LINUX: 'linux', ANDROID: 'android', CROS: 'cros', OPENBSD: 'openbsd' },
   };
   Object.defineProperty(runtime, 'lastError', { get: () => lastError, enumerable: true });
@@ -932,7 +939,18 @@
       DEFAULT_PUBLIC_INTERFACE_ONLY: 'default_public_interface_only', DISABLE_NON_PROXIED_UDP: 'disable_non_proxied_udp' },
   };
   const dns = { resolve: notYet('dns.resolve') };
-  const offscreen = { createDocument: notYet('Offscreen documents'), closeDocument: resolved(undefined), hasDocument: resolved(false), Reason: {} };
+  // chrome.offscreen: a hidden page of the extension (one at a time).
+  const offscreenReasons = ['TESTING', 'AUDIO_PLAYBACK', 'IFRAME_SCRIPTING', 'DOM_SCRAPING', 'BLOBS', 'DOM_PARSER', 'USER_MEDIA',
+    'DISPLAY_MEDIA', 'WEB_RTC', 'CLIPBOARD', 'LOCAL_STORAGE', 'WORKERS', 'BATTERY_STATUS', 'MATCH_MEDIA', 'GEOLOCATION'];
+  const offscreen = {
+    createDocument: withCallback((options) => {
+      if (!options || typeof options.url !== 'string') return Promise.reject(new TypeError('offscreen.createDocument needs a url.'));
+      return call('offscreen.create', { url: new URL(options.url, base).href }).then(() => undefined);
+    }),
+    closeDocument: withCallback(() => call('offscreen.close').then(() => undefined)),
+    hasDocument: withCallback(() => call('offscreen.has').then((has) => has === true)),
+    Reason: Object.fromEntries(offscreenReasons.map((reason) => [reason, reason])),
+  };
 
   // ---- Putting it together -------------------------------------------------------------------------
   const api = {

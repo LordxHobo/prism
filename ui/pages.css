@@ -125,6 +125,11 @@ ul.notes li {
   height: 72px;
 }
 
+/* The Facet logo: Ocean (prism.svg) on dark pages, Amber on light ones. */
+:root[data-theme="light"] img[src="prism.svg"] {
+  content: url("prism-light.svg");
+}
+
 /* ---- Color palettes (Settings › Appearance) --------------------------------- */
 :root[data-palette="midnight"][data-theme="dark"] {
   --bg: #0d1117;

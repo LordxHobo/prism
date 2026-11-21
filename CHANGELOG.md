@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.6
+
+- **chrome.offscreen**: `createDocument` opens a hidden extension page (a host view like the background, one per extension; "Only a single offscreen document may be created." otherwise) and resolves when it has loaded; `closeDocument`, `hasDocument`, `Reason`. A closed document is kept 30 s and reused by the next `createDocument` (Bitwarden opens and closes one around every localStorage call). Closed with the background (stop, reload, disable), on `window.close()` and when its process ends. Its context lives as long as the view (no re-poll expiry), listed as `OFFSCREEN_DOCUMENT`. Bitwarden MV3 keeps its secondary storage there (`OffscreenStorageService`); the old stub rejected, so storage reads in its background failed.
+- **runtime.getContexts** lists the extension's open pages (BACKGROUND, POPUP, TAB, OFFSCREEN_DOCUMENT) with Chrome's fields, filtered like Chrome; `runtime.ContextType`. It returned `[]`, so Bitwarden's `isAnyPopupOrPopoutOpen` was always false and it called `runtime.reload()` with its popup open ("Could not establish connection. Receiving end does not exist." while the background restarted).
+- `runtime.reload()` closes the extension's popup, like Chrome.
+- Background pages report problems on the Extensions page: process ended (memory, CPU, stopped, crashed; restart count resets after 5 minutes; when Prism gives up after 3), failed loads (`didFailProvisionalNavigation` / `didFailNavigation`, with the error), and loading without saying hello within 15 s.
+- **Logo**: the Facet logo, Amber (`res/prism.ico` / `prism.svg`, icon 1, also the exe's file icon) for a light taskbar and Ocean (`res/prism-dark.ico` / `prism-dark.svg`, icon 2) for a dark one, picked from `SystemUsesLightTheme` (`util::appIcon`, `util::taskbarIsLight`) for windows, the window class and the tray icon, and updated on `WM_SETTINGCHANGE` "ImmersiveColorSet". Prism's pages show Ocean on dark pages and Amber (`ui/prism-light.svg`) on light ones.
+
 ## 0.9.5
 
 - Background and popup contexts no longer expire when they don't poll again within 8 s (Prism's own host view decides their life: stop, crash, reload, close). A busy background (uBO/AdNauseam handling webRequest for every request on YouTube, or compiling lists) was dropped, and stayed dropped: every op then failed with "Say hello first" and the poll retried every 2 s without saying hello again. Popups got "Could not establish connection. Receiving end does not exist." (uBO, AdNauseam) or "Attempting to use a disconnected port object" (Bitwarden).

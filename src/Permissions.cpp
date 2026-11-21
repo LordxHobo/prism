@@ -259,7 +259,7 @@ void showNotification(WKPageRef page, WKNotificationRef notification, const void
     data.uID = kIconId;
     data.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_INFO | NIF_SHOWTIP;
     data.uCallbackMessage = WM_NOTIFY_ICON;
-    data.hIcon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1));
+    data.hIcon = util::appIcon(true);
     copyInto(data.szTip, std::size(data.szTip), L"Prism");
     copyInto(data.szInfoTitle, std::size(data.szInfoTitle), title.empty() ? displayName(origin) : title);
     copyInto(data.szInfo, std::size(data.szInfo), (body.empty() ? L"" : body + L"\n") + displayName(origin));

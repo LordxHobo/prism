@@ -336,8 +336,8 @@ bool BrowserWindow::registerWindowClass(HINSTANCE instance)
     wc.lpfnWndProc = windowProc;
     wc.hInstance = instance;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
-    wc.hIconSm = wc.hIcon;
+    wc.hIcon = util::appIcon(false);
+    wc.hIconSm = util::appIcon(true);
     wc.lpszClassName = kWindowClass;
     return RegisterClassExW(&wc) != 0;
 }
@@ -419,6 +419,7 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         s_windows.push_back(this);
         extensions::windowCreated(m_id);
         updateTheme();
+        updateIcon();
         createToolbar();
         auto urls = std::move(m_pendingStartURLs);
         int active = m_pendingActiveIndex >= 0 && m_pendingActiveIndex < static_cast<int>(urls.size())
@@ -482,6 +483,7 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         if (lParam && !lstrcmpW(reinterpret_cast<const wchar_t*>(lParam), L"ImmersiveColorSet")) {
             updateTheme();
             pushState();
+            updateIcon(); // Amber on a light taskbar, Ocean on a dark one
         }
         break;
     case WM_ACTIVATE:
@@ -639,6 +641,12 @@ void BrowserWindow::applyScaleFactor()
         WKPageSetCustomBackingScaleFactor(m_sidebarPage, scale);
     for (auto& tab : m_tabs)
         WKPageSetCustomBackingScaleFactor(tab->page, scale);
+}
+
+void BrowserWindow::updateIcon()
+{
+    SendMessageW(m_hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(util::appIcon(false)));
+    SendMessageW(m_hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(util::appIcon(true)));
 }
 
 void BrowserWindow::updateTheme()

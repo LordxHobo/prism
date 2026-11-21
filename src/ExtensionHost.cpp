@@ -638,10 +638,19 @@ struct HostView {
     bool shown { false };
     bool inDialog { false };
     int crashes { 0 };
+    ULONGLONG lastCrash { 0 };
+    ULONGLONG loadedAt { 0 };      // background page finished loading
+    bool reportedSilent { false }; // "didn't start" already logged
+    // chrome.offscreen documents (hidden, like backgrounds)
+    bool offscreen { false };
+    Ref<WKCompletionListenerRef> created; // createDocument() waits for the load
+    ULONGLONG closeAt { 0 };              // closeDocument() was called; kept a while for reuse
 };
 
 std::map<std::string, std::unique_ptr<HostView>> g_backgrounds;
+std::map<std::string, std::unique_ptr<HostView>> g_offscreen;
 std::unique_ptr<HostView> g_popup;
+void closeOffscreen(const std::string& extId);
 ULONGLONG g_popupClosedAt = 0;
 std::string g_popupClosedExt;
 
@@ -653,6 +662,10 @@ HostView* hostForPage(WKPageRef page)
     if (g_popup && g_popup->page == page)
         return g_popup.get();
     for (auto& [id, host] : g_backgrounds) {
+        if (host->page == page)
+            return host.get();
+    }
+    for (auto& [id, host] : g_offscreen) {
         if (host->page == page)
             return host.get();
     }
@@ -822,6 +835,10 @@ void hostClose(WKPageRef, const void* clientInfo)
     HostView* host = hostFromClientInfo(clientInfo);
     if (host->kind == Kind::Popup)
         PostMessageW(host->hwnd, WM_HOST_CLOSE, 0, 0);
+    else if (host->offscreen) {
+        std::string extId = host->extId;
+        util::postToMainThread([extId] { closeOffscreen(extId); });
+    }
 }
 
 void hostAlert(WKPageRef, WKStringRef text, WKFrameRef, WKSecurityOriginRef, WKPageRunJavaScriptAlertResultListenerRef listener, const void* clientInfo)
@@ -898,7 +915,17 @@ void hostDecidePolicy(WKPageRef, WKNavigationActionRef action, WKFramePolicyList
 
 void startBackground(Extension& ext);
 
-void hostProcessTerminated(WKPageRef, uint32_t, const void* clientInfo)
+void ensureTick();
+
+void logBackgroundProblem(const std::string& extId, const std::string& message)
+{
+    if (Extension* ext = internal::findEnabled(extId))
+        internal::logError(*ext, "background", message, "");
+}
+
+void closeOffscreen(const std::string& extId);
+
+void hostProcessTerminated(WKPageRef, uint32_t reason, const void* clientInfo)
 {
     HostView* host = hostFromClientInfo(clientInfo);
     std::string extId = host->extId;
@@ -906,8 +933,21 @@ void hostProcessTerminated(WKPageRef, uint32_t, const void* clientInfo)
         PostMessageW(host->hwnd, WM_HOST_CLOSE, 0, 0);
         return;
     }
-    // Restart a crashed background page a few times.
+    if (host->offscreen) {
+        util::postToMainThread([extId] { closeOffscreen(extId); });
+        return;
+    }
+    // Restart a crashed background page a few times (counting again once it
+    // has run for 5 minutes).
+    ULONGLONG now = GetTickCount64();
+    if (host->lastCrash && now - host->lastCrash > 5 * 60 * 1000)
+        host->crashes = 0;
+    host->lastCrash = now;
+    host->loadedAt = 0;
     int crashes = host->crashes + 1;
+    const char* why = reason == 0 ? "used too much memory" : reason == 1 ? "used too much processor time" : reason == 2 ? "was stopped" : "crashed";
+    logBackgroundProblem(extId, std::string("The background page ") + why
+        + (crashes > 3 ? ". Prism stopped restarting it after 3 tries; disable and enable the extension to start it again." : ". Prism restarted it."));
     killContextsOfPage(host->page);
     util::postToMainThread([extId, crashes] {
         auto found = g_backgrounds.find(extId);
@@ -917,6 +957,43 @@ void hostProcessTerminated(WKPageRef, uint32_t, const void* clientInfo)
         WKPageReload(found->second->page);
         found->second->crashes = crashes;
     });
+}
+
+void hostDidFailNavigation(WKPageRef, WKNavigationRef, WKErrorRef error, WKTypeRef, const void* clientInfo)
+{
+    HostView* host = hostFromClientInfo(clientInfo);
+    if (host && host->offscreen && host->created) {
+        Ref<WKCompletionListenerRef> listener = std::move(host->created);
+        complete(listener.get(), fail("The offscreen document couldn't load."));
+        return;
+    }
+    if (!host || host->kind != Kind::Background)
+        return;
+    std::string description;
+    int code = error ? WKErrorGetErrorCode(error) : 0;
+    if (error) {
+        if (WKStringRef text = WKErrorCopyLocalizedDescription(error)) {
+            description = util::toUTF8(toWide(text));
+            WKRelease(text);
+        }
+    }
+    logBackgroundProblem(host->extId, "The background page couldn't load (" + (description.empty() ? std::string("error") : description)
+        + ", code " + std::to_string(code) + ").");
+}
+
+void hostDidFinishNavigation(WKPageRef, WKNavigationRef, WKTypeRef, const void* clientInfo)
+{
+    HostView* host = hostFromClientInfo(clientInfo);
+    if (host && host->offscreen && host->created) {
+        Ref<WKCompletionListenerRef> listener = std::move(host->created);
+        complete(listener.get(), ok());
+        return;
+    }
+    if (host && host->kind == Kind::Background && !host->offscreen) {
+        host->loadedAt = GetTickCount64();
+        host->reportedSilent = false;
+        ensureTick(); // checks that it connects
+    }
 }
 
 void attachHostClients(HostView& host)
@@ -936,6 +1013,9 @@ void attachHostClients(HostView& host)
     navigation.base.clientInfo = &host;
     navigation.decidePolicyForNavigationAction = hostDecidePolicy;
     navigation.webProcessDidTerminate = hostProcessTerminated;
+    navigation.didFailProvisionalNavigation = hostDidFailNavigation;
+    navigation.didFailNavigation = reinterpret_cast<void*>(hostDidFailNavigation);
+    navigation.didFinishNavigation = reinterpret_cast<void*>(hostDidFinishNavigation);
     WKPageSetPageNavigationClient(host.page, &navigation.base);
 }
 
@@ -963,8 +1043,29 @@ std::unique_ptr<HostView> createHost(const std::string& extId, Kind kind, HWND o
     return host;
 }
 
+// chrome.offscreen: one hidden extension page per extension. Prism's
+// background is a page already, but MV3 extensions (Bitwarden keeps its
+// localStorage there) expect a separate document they can message.
+void closeOffscreen(const std::string& extId)
+{
+    auto found = g_offscreen.find(extId);
+    if (found == g_offscreen.end())
+        return;
+    std::unique_ptr<HostView> host = std::move(found->second);
+    g_offscreen.erase(found);
+    if (host->created) {
+        Ref<WKCompletionListenerRef> listener = std::move(host->created);
+        complete(listener.get(), fail("The offscreen document was closed."));
+    }
+    killContextsOfPage(host->page);
+    detach(host->page);
+    SetWindowLongPtrW(host->hwnd, GWLP_USERDATA, 0);
+    DestroyWindow(host->hwnd);
+}
+
 void stopBackground(const std::string& extId)
 {
+    closeOffscreen(extId);
     auto found = g_backgrounds.find(extId);
     if (found == g_backgrounds.end())
         return;
@@ -1109,7 +1210,7 @@ void CALLBACK tick(HWND, UINT, UINT_PTR, DWORD)
         // (they're dropped when it goes), and a busy one (an ad blocker
         // compiling its lists, or handling every request of a busy page)
         // can take a while to ask again. Only other pages expire.
-        bool ownView = context.kind == Kind::Background || context.kind == Kind::Popup;
+        bool ownView = context.kind == Kind::Background || context.kind == Kind::Popup || hostForPage(context.page); // offscreen documents too
         if (!ownView && !context.poll && context.repollDeadline && now > context.repollDeadline)
             dead.push_back(id);
         else if (context.poll && now - context.pollSince > 20000)
@@ -1117,6 +1218,29 @@ void CALLBACK tick(HWND, UINT, UINT_PTR, DWORD)
     }
     for (int id : dead)
         killContext(id);
+
+    // Offscreen documents closed a while ago.
+    std::vector<std::string> expired;
+    for (auto& [extId, host] : g_offscreen) {
+        if (host->closeAt && now >= host->closeAt)
+            expired.push_back(extId);
+    }
+    for (auto& extId : expired)
+        closeOffscreen(extId);
+
+    // A background page that loaded but never connected (its Prism runtime
+    // didn't run): say so on the Extensions page.
+    for (auto& [extId, host] : g_backgrounds) {
+        if (!host || !host->loadedAt || host->reportedSilent || now - host->loadedAt < 15000)
+            continue;
+        bool connected = std::any_of(g_contexts.begin(), g_contexts.end(), [&](const auto& entry) {
+            return entry.second.extId == extId && entry.second.kind == Kind::Background;
+        });
+        if (!connected) {
+            host->reportedSilent = true;
+            logBackgroundProblem(extId, "The background page loaded but didn't connect to Prism.");
+        }
+    }
 
     double time = nowMilliseconds();
     for (auto& [extId, alarms] : g_alarms) {
@@ -1713,10 +1837,81 @@ void pageOperation(Extension& ext, Context& context, const std::string& op, cons
         complete(listener, ok());
         return;
     }
+    if (op == "runtime.getContexts") {
+        // Extension pages Prism has open (not content scripts), as Chrome
+        // describes them; the page filters them.
+        std::string out = "[";
+        for (auto& [id, candidate] : g_contexts) {
+            if (candidate.extId != ext.id || candidate.kind == Kind::Content)
+                continue;
+            HostView* host = hostForPage(candidate.page);
+            const char* type = candidate.kind == Kind::Background ? "BACKGROUND" : candidate.kind == Kind::Popup ? "POPUP"
+                : host && host->offscreen ? "OFFSCREEN_DOCUMENT" : "TAB";
+            tabs::Info tab;
+            int tabId = tabs::findByPage(candidate.page, tab) ? tab.id : -1;
+            if (out.size() > 1)
+                out += ",";
+            out += "{\"contextType\":\"" + std::string(type) + "\",\"contextId\":\"prism-" + std::to_string(id) + "\",\"tabId\":" + std::to_string(tabId)
+                + ",\"windowId\":" + std::to_string(tabId >= 0 ? tab.windowId : -1) + ",\"frameId\":" + std::to_string(tabId >= 0 ? 0 : -1)
+                + ",\"documentId\":\"prism-doc-" + std::to_string(id) + "\",\"documentUrl\":" + json::quote(candidate.url)
+                + ",\"documentOrigin\":" + json::quote(candidate.url.substr(0, candidate.url.find('/', candidate.url.find("://") == std::string::npos ? 0 : candidate.url.find("://") + 3))) + ",\"incognito\":false}";
+        }
+        complete(listener, ok(out + "]"));
+        return;
+    }
+    if (op == "offscreen.create") {
+        auto existing = g_offscreen.find(ext.id);
+        if (existing != g_offscreen.end() && existing->second->closeAt && !existing->second->created) {
+            // Closed a moment ago and still loaded: reuse it (extensions like
+            // Bitwarden open and close one around every storage call).
+            existing->second->closeAt = 0;
+            complete(listener, ok());
+            return;
+        }
+        if (existing != g_offscreen.end()) {
+            complete(listener, fail("Only a single offscreen document may be created."));
+            return;
+        }
+        std::string path = message["url"].asString();
+        std::string full = path.rfind(baseURL(ext), 0) == 0 ? path : baseURL(ext) + (path.size() && path[0] == '/' ? path.substr(1) : path);
+        if (full.rfind(baseURL(ext), 0) != 0 || full.find("..") != std::string::npos) {
+            complete(listener, fail("The offscreen document must be a page of the extension."));
+            return;
+        }
+        auto host = createHost(ext.id, Kind::Page, nullptr);
+        if (!host) {
+            complete(listener, fail("Couldn't create the offscreen document."));
+            return;
+        }
+        host->offscreen = true;
+        host->created = Ref<WKCompletionListenerRef>::retain(listener);
+        WKPageLoadURL(host->page, url(util::fromUTF8(full)).get());
+        g_offscreen[ext.id] = std::move(host);
+        return;
+    }
+    if (op == "offscreen.close") {
+        auto found = g_offscreen.find(ext.id);
+        if (found == g_offscreen.end() || found->second->closeAt) {
+            complete(listener, fail("No current offscreen document."));
+            return;
+        }
+        found->second->closeAt = GetTickCount64() + 30000;
+        ensureTick();
+        complete(listener, ok());
+        return;
+    }
+    if (op == "offscreen.has") {
+        auto found = g_offscreen.find(ext.id);
+        complete(listener, ok(found != g_offscreen.end() && !found->second->created && !found->second->closeAt ? "true" : "false"));
+        return;
+    }
     if (op == "runtime.reload") {
         std::string id = ext.id;
         complete(listener, ok());
         util::postToMainThread([id] {
+            // Like Chrome, a reload closes the extension's popup too.
+            if (g_popup && g_popup->extId == id)
+                closePopup();
             stopBackground(id);
             killContextsOfExtension(id);
             if (Extension* again = internal::findEnabled(id))

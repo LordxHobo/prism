@@ -5,7 +5,10 @@
 #include <windows.h>
 #include "../src/Version.h"
 
+// The "Facet" logo: Amber (1, also the file's own icon) for a light
+// taskbar, Ocean (2) for a dark one (util::appIcon picks).
 1 ICON "prism.ico"
+2 ICON "prism-dark.ico"
 1 RT_MANIFEST "Prism.exe.manifest"
 
 VS_VERSION_INFO VERSIONINFO

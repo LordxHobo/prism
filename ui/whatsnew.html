@@ -22,12 +22,22 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.5</span>
+      <span class="version">Version 0.9.6</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Every request filtered</h2>
+    <h2 style="margin-top:0">Bitwarden works, and a new logo</h2>
+    <ul>
+      <li><strong>Bitwarden's popup loads.</strong> Prism now supports offscreen documents, the hidden pages some Manifest V3 extensions keep part of their data in. Bitwarden couldn't read its storage without them, so its background kept restarting.</li>
+      <li>Extensions can see which of their pages are open (<code>runtime.getContexts</code>). Reloading an extension closes its popup, like in Chrome.</li>
+      <li>When an extension's background page crashes, fails to load or doesn't start properly, the Extensions page now says so, and also says when Prism stops restarting it.</li>
+      <li><strong>New logo:</strong> the Facet logo in Amber on a light taskbar and Ocean on a dark one. It switches when you change Windows' theme. Prism's pages use it too.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Every request filtered</h2>
     <p>Prism Shields and blocking extensions now see the <b>full address of every picture, script, frame and request</b> a page makes, not just which site it goes to. Ads and trackers hosted on ordinary sites get blocked too, and the shield shows how many were blocked on the page you're on.</p>
   </div>
 

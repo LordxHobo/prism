@@ -130,6 +130,7 @@ private:
     int toolbarCSSHeight() const;
     void applyScaleFactor();
     void updateTheme();
+    void updateIcon(); // the window and taskbar icon for the taskbar's colours
 
     Tab* findTab(int id) const;
     Tab* findTab(WKPageRef) const;
