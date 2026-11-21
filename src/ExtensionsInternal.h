@@ -11,6 +11,7 @@
 #include "Json.h"
 #include "WebKitApi.h"
 
+#include <deque>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -82,6 +83,7 @@ struct Extension {
     std::vector<std::string> unsupported; // features Prism can't do yet, in plain words
     struct LoggedError { std::string where, message, source; long long time { 0 }; int count { 1 }; };
     std::vector<LoggedError> errors;      // this session only
+    std::deque<std::string> consoleLog;   // its pages' console and Prism's notes on them, this session only
 
     bool rulesetEnabled(const Ruleset& ruleset) const
     {
@@ -148,6 +150,10 @@ void stop(const std::string& id);
 void handleContentMessage(Extension&, WKScriptMessageRef, const std::string& text, const json::Value& message, WKCompletionListenerRef reply);
 // Storage changes go to every part of the extension.
 void storageChanged(Extension&, const std::string& area, const std::string& changesJSON, int fromContext);
+// The background page's state for the Extensions page: {"state": "none" |
+// "loading" | "running" | "silent" | "stopped", "restarts", "selfReloads",
+// "offscreen"}.
+std::string backgroundStatusJSON(const std::string& id);
 
 } // namespace host
 

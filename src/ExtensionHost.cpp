@@ -918,8 +918,33 @@ void startBackground(Extension& ext);
 
 void ensureTick();
 
+// A line in the extension's console log (Extensions page, "Background page").
+void consoleNote(const std::string& extId, const std::string& level, const std::string& text)
+{
+    Extension* ext = internal::find(extId);
+    if (!ext)
+        return;
+    SYSTEMTIME now;
+    GetLocalTime(&now);
+    char stamp[16];
+    snprintf(stamp, sizeof(stamp), "%02d:%02d:%02d", now.wHour, now.wMinute, now.wSecond);
+    ext->consoleLog.push_back(std::string(stamp) + "\t" + level + "\t" + text);
+    while (ext->consoleLog.size() > 400)
+        ext->consoleLog.pop_front();
+}
+
+// Per extension, this session: how often its background was restarted.
+struct BackgroundHistory {
+    int restarts { 0 };
+    int selfReloads { 0 };
+    std::vector<ULONGLONG> recentReloads;
+    bool stopped { false }; // gave up after crashes
+};
+std::map<std::string, BackgroundHistory> g_backgroundHistory;
+
 void logBackgroundProblem(const std::string& extId, const std::string& message)
 {
+    consoleNote(extId, "prism", message);
     if (Extension* ext = internal::findEnabled(extId))
         internal::logError(*ext, "background", message, "");
 }
@@ -950,11 +975,13 @@ void hostProcessTerminated(WKPageRef, uint32_t reason, const void* clientInfo)
     logBackgroundProblem(extId, std::string("The background page ") + why
         + (crashes > 3 ? ". Prism stopped restarting it after 3 tries; disable and enable the extension to start it again." : ". Prism restarted it."));
     killContextsOfPage(host->page);
+    g_backgroundHistory[extId].stopped = crashes > 3;
     util::postToMainThread([extId, crashes] {
         auto found = g_backgrounds.find(extId);
         Extension* ext = internal::findEnabled(extId);
         if (found == g_backgrounds.end() || !ext || crashes > 3)
             return;
+        g_backgroundHistory[extId].restarts++;
         WKPageReload(found->second->page);
         found->second->crashes = crashes;
     });
@@ -991,6 +1018,7 @@ void hostDidFinishNavigation(WKPageRef, WKNavigationRef, WKTypeRef, const void* 
         return;
     }
     if (host && host->kind == Kind::Background && !host->offscreen) {
+        consoleNote(host->extId, "prism", "Background page loaded.");
         host->loadedAt = GetTickCount64();
         host->reportedSilent = false;
         ensureTick(); // checks that it connects
@@ -1115,10 +1143,36 @@ void startBackground(Extension& ext)
     if (page.empty())
         return;
     auto host = createHost(ext.id, Kind::Background, nullptr);
-    if (!host)
+    if (!host) {
+        logBackgroundProblem(ext.id, "Prism couldn't create the background page's window.");
         return;
+    }
+    consoleNote(ext.id, "prism", "Starting the background page (" + page + (ext.serviceWorker.empty() ? "" : ", from service worker " + ext.serviceWorker) + ").");
+    g_backgroundHistory[ext.id].stopped = false;
     WKPageLoadURL(host->page, url(util::fromUTF8(baseURL(ext) + page)).get());
     g_backgrounds[ext.id] = std::move(host);
+}
+
+std::string backgroundStatus(const std::string& extId)
+{
+    Extension* ext = internal::findEnabled(extId);
+    auto found = g_backgrounds.find(extId);
+    BackgroundHistory& history = g_backgroundHistory[extId];
+    std::string state;
+    if (!ext || (ext->backgroundPage.empty() && ext->backgroundScripts.empty() && ext->serviceWorker.empty()))
+        state = "none";
+    else if (found == g_backgrounds.end() || !found->second)
+        state = "stopped";
+    else if (std::any_of(g_contexts.begin(), g_contexts.end(), [&](const auto& entry) { return entry.second.extId == extId && entry.second.kind == Kind::Background; }))
+        state = "running";
+    else if (history.stopped)
+        state = "stopped";
+    else if (found->second->loadedAt)
+        state = "silent";
+    else
+        state = "loading";
+    return "{\"state\":\"" + state + "\",\"restarts\":" + std::to_string(history.restarts) + ",\"selfReloads\":" + std::to_string(history.selfReloads)
+        + ",\"offscreen\":" + (g_offscreen.count(extId) && !g_offscreen[extId]->closeAt ? "true" : "false") + "}";
 }
 
 // ---------------------------------------------------------------------------
@@ -1549,6 +1603,11 @@ void broadcastTabEvent(const std::string& name, const std::function<std::string(
 
 namespace host {
 
+std::string backgroundStatusJSON(const std::string& id)
+{
+    return backgroundStatus(id);
+}
+
 void extensionsChanged()
 {
     ensureTick();
@@ -1886,6 +1945,7 @@ void pageOperation(Extension& ext, Context& context, const std::string& op, cons
         }
         host->offscreen = true;
         host->created = Ref<WKCompletionListenerRef>::retain(listener);
+        consoleNote(ext.id, "prism", "Opening offscreen document " + full.substr(baseURL(ext).size()) + ".");
         WKPageLoadURL(host->page, url(util::fromUTF8(full)).get());
         g_offscreen[ext.id] = std::move(host);
         return;
@@ -1909,6 +1969,16 @@ void pageOperation(Extension& ext, Context& context, const std::string& op, cons
     if (op == "runtime.reload") {
         std::string id = ext.id;
         complete(listener, ok());
+        // An extension that keeps reloading itself is usually stuck starting up.
+        BackgroundHistory& history = g_backgroundHistory[id];
+        history.selfReloads++;
+        ULONGLONG now = GetTickCount64();
+        history.recentReloads.push_back(now);
+        history.recentReloads.erase(std::remove_if(history.recentReloads.begin(), history.recentReloads.end(), [&](ULONGLONG at) { return now - at > 60000; }),
+            history.recentReloads.end());
+        consoleNote(id, "prism", "The extension asked to reload itself (runtime.reload, from its " + std::string(kindName(context.kind)) + ").");
+        if (history.recentReloads.size() == 3)
+            logBackgroundProblem(id, "The extension reloaded itself 3 times within a minute. It may be failing to start; see Background page › Show log.");
         util::postToMainThread([id] {
             // Like Chrome, a reload closes the extension's popup too.
             if (g_popup && g_popup->extId == id)
@@ -2528,6 +2598,7 @@ void handlePageMessage(WKScriptMessageRef message, WKCompletionListenerRef liste
         int id = fresh.id;
         g_contexts[id] = std::move(fresh);
         if (kind == Kind::Background) {
+            consoleNote(ext->id, "prism", "Background page connected to Prism.");
             auto waiting = g_waitingForBackground.find(ext->id);
             if (waiting != g_waitingForBackground.end()) {
                 for (auto& event : waiting->second)
@@ -2544,7 +2615,16 @@ void handlePageMessage(WKScriptMessageRef message, WKCompletionListenerRef liste
         complete(listener, fail("The popup was closed."));
         return;
     }
+    if (op == "console") {
+        HostView* host = hostForPage(page);
+        std::string where = host && host->offscreen ? "offscreen" : kindName(kind);
+        for (auto& line : parsed["lines"].items())
+            consoleNote(ext->id, where + " " + line["level"].asString(), line["text"].asString().substr(0, 2000));
+        complete(listener, ok());
+        return;
+    }
     if (op == "log") {
+        consoleNote(ext->id, std::string(kindName(kind)) + " error", parsed["message"].asString() + (parsed["source"].asString().empty() ? "" : "  (" + parsed["source"].asString() + ")"));
         internal::logError(*ext, kindName(kind), parsed["message"].asString(), parsed["source"].asString());
         complete(listener, ok());
         return;

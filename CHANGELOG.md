@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.10
+
+- **Background page status and log** on the Extensions page (Details › Background page): `host::backgroundStatusJSON` (none / loading / running / silent = loaded but never said hello / stopped, crash restarts, `runtime.reload` count, offscreen document open) and `Extension::consoleLog` (400 lines this session). `ui/extension-page.js` forwards console.log/info/warn/debug/error from every extension page in batches (op `console`, ≤200 lines per 0.7 s); Prism adds its own notes (starting, loaded, connected, offscreen document, self-reloads, crashes, load failures). Command `backgroundLog <id> [clear]`. Show log / Refresh, Copy log, Clear log.
+- An extension that calls `runtime.reload()` 3 times within a minute gets an error on the Extensions page.
+- Extensions page repaint: after `setEnabled`, Prism redraws the window 250 ms later, and the page nudges its own paint after each re-render (WebKit on Windows left black, unpainted areas until scrolling).
+
 ## 0.9.9
 
 - **Prism Passwords** (`src/PasswordVault.*`, `src/Passwords.*`, `ui/passwords.*`, `ui/passwords-runtime.js`):

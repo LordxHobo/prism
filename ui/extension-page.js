@@ -143,7 +143,34 @@
   console.error = (...args) => {
     consoleError(...args);
     report(args.map(describe).join(' '), location.pathname);
+    keepLine('error', args);
   };
+
+  // The console, kept by Prism for the Extensions page's "Background page"
+  // log (WebKit's inspector can't always open for hidden pages). Sent in
+  // batches; a busy logger loses lines rather than slowing the page.
+  let consoleLines = [];
+  let consoleTimer = 0;
+  function keepLine(level, args) {
+    try {
+      if (consoleLines.length >= 200) return;
+      consoleLines.push({ level, text: args.map(describe).join(' ').slice(0, 2000), time: Date.now() });
+      if (!consoleTimer) consoleTimer = setTimeout(flushConsole, 700);
+    } catch (error) { /* never let logging break the page */ }
+  }
+  function flushConsole() {
+    consoleTimer = 0;
+    const lines = consoleLines;
+    consoleLines = [];
+    if (lines.length) call('console', { lines }).catch(() => {});
+  }
+  for (const level of ['log', 'info', 'warn', 'debug']) {
+    const original = console[level].bind(console);
+    console[level] = (...args) => {
+      original(...args);
+      keepLine(level, args);
+    };
+  }
 
   // ---- Messages, ports and events from Prism -----------------------------------------
   let context = { ctx: 0, kind: 'unknown', tabId: -1, windowId: -1 };
@@ -362,7 +389,7 @@
     setUninstallURL: resolved(undefined),
     requestUpdateCheck: resolved({ status: 'no_update' }),
     getPlatformInfo: resolved({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' }),
-    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.9', buildID: '0' }),
+    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.10', buildID: '0' }),
     getContexts: withCallback((filter) => call('runtime.getContexts').then((contexts) => {
       const f = filter || {};
       const has = (list, value) => !Array.isArray(list) || list.includes(value);

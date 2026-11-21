@@ -24,6 +24,90 @@ function ask(command, ...args) {
 let currentJob = 0;
 let pending = null; // the extension waiting for "Add extension"
 const openDetails = new Set();
+const openLogs = new Set();
+
+// WebKit on Windows sometimes leaves parts of the page unpainted after the
+// list is rebuilt (black areas until you scroll). Nudging the page makes it
+// paint everything again.
+function repaintSoon() {
+  requestAnimationFrame(() => {
+    const main = document.querySelector('main') || document.body;
+    main.style.transform = 'translateZ(0)';
+    window.scrollBy(0, 1);
+    window.scrollBy(0, -1);
+    requestAnimationFrame(() => { main.style.transform = ''; });
+  });
+}
+
+// "Background page": its state and its console, kept by Prism.
+const STATE_TEXT = {
+  none: 'No background page.',
+  loading: 'Starting…',
+  running: 'Running.',
+  silent: 'Loaded, but its scripts never connected to Prism (they may have stopped with an error).',
+  stopped: 'Not running.',
+};
+function renderBackground(ext, details) {
+  const title = document.createElement('h3');
+  title.textContent = 'Background page';
+  const status = document.createElement('p');
+  status.className = 'dim';
+  const buttons = document.createElement('div');
+  buttons.className = 'logButtons';
+  const toggle = document.createElement('button');
+  toggle.className = 'button secondary small';
+  const copy = document.createElement('button');
+  copy.className = 'button secondary small';
+  copy.textContent = 'Copy log';
+  const clear = document.createElement('button');
+  clear.className = 'button secondary small';
+  clear.textContent = 'Clear log';
+  const log = document.createElement('pre');
+  log.className = 'consoleLog';
+  let lines = [];
+
+  const refresh = (extra) => {
+    const result = ask('backgroundLog', ext.id, extra || '');
+    if (!result) return;
+    const s = result.status || {};
+    let text = STATE_TEXT[s.state] || '';
+    if (s.restarts) text += ' Restarted after a crash ' + s.restarts + (s.restarts === 1 ? ' time.' : ' times.');
+    if (s.selfReloads) text += ' Reloaded itself ' + s.selfReloads + (s.selfReloads === 1 ? ' time.' : ' times.');
+    if (s.offscreen) text += ' Offscreen document open.';
+    status.textContent = text;
+    lines = result.lines || [];
+    log.textContent = lines.length ? lines.map((line) => line.replace(/\t/g, '  ')).join('\n') : 'Nothing logged yet.';
+    log.scrollTop = log.scrollHeight;
+  };
+  const showLog = (open) => {
+    log.hidden = !open;
+    copy.hidden = clear.hidden = !open;
+    toggle.textContent = open ? 'Refresh' : 'Show log';
+    if (open) openLogs.add(ext.id);
+    else openLogs.delete(ext.id);
+  };
+  toggle.addEventListener('click', () => {
+    showLog(true);
+    refresh();
+  });
+  copy.addEventListener('click', () => {
+    const area = document.createElement('textarea');
+    area.value = lines.join('\n');
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand('copy');
+    area.remove();
+    copy.textContent = 'Copied';
+    setTimeout(() => { copy.textContent = 'Copy log'; }, 1500);
+  });
+  clear.addEventListener('click', () => refresh('clear'));
+  buttons.append(toggle, copy, clear);
+  details.append(title, status, buttons, log);
+  showLog(openLogs.has(ext.id));
+  // Filled in when Details opens, so a closed card costs nothing.
+  if (details.open) refresh();
+  else details.addEventListener('toggle', () => { if (details.open) refresh(); }, { once: true });
+}
 
 // ---- Status line -------------------------------------------------------------
 
@@ -213,6 +297,7 @@ window.prismExtensionsEvent = function (event) {
 function render(data) {
   const list = $('list');
   list.textContent = '';
+  repaintSoon();
   const extensions = data.extensions || [];
   $('empty').hidden = extensions.length > 0;
   $('blockedStat').textContent = data.blocked ? data.blocked.toLocaleString() + ' ads and trackers blocked since Prism started.' : '';
@@ -351,6 +436,8 @@ function render(data) {
       hint.textContent = 'Something in this extension doesn’t work? These errors show what went wrong; a screenshot of them helps fix it.';
       details.append(title, hint, list, clear);
     }
+
+    if (ext.enabled && ext.support.background) renderBackground(ext, details);
 
     if (ext.rulesets.length) {
       const title = document.createElement('h3');

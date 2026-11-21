@@ -1674,6 +1674,16 @@ std::string handleCommand(const std::wstring& command, const std::wstring& argum
             saveRegistry();
             applyAll();
         }
+        // Starting or stopping a background page can leave the Extensions
+        // tab partly unpainted (black areas until it scrolls): repaint it a
+        // moment later, once the background window exists.
+        static HWND s_repaint = nullptr;
+        s_repaint = owner;
+        SetTimer(nullptr, 0, 250, [](HWND, UINT, UINT_PTR id, DWORD) {
+            KillTimer(nullptr, id);
+            if (s_repaint && IsWindow(s_repaint))
+                RedrawWindow(s_repaint, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+        });
         return listJSON();
     }
 
@@ -1706,6 +1716,21 @@ std::string handleCommand(const std::wstring& command, const std::wstring& argum
         fs::remove_all(extensionData(id), ignored);
         host::removed(id);
         return listJSON();
+    }
+
+    if (command == L"backgroundLog") {
+        Extension* ext = findExtension(argUTF8(0));
+        if (!ext)
+            return "null";
+        if (arg(1) == L"clear")
+            ext->consoleLog.clear();
+        std::string json = "{\"status\":" + host::backgroundStatusJSON(ext->id) + ",\"lines\":[";
+        bool first = true;
+        for (auto& line : ext->consoleLog) {
+            json += std::string(first ? "" : ",") + json::quote(line);
+            first = false;
+        }
+        return json + "]}";
     }
 
     if (command == L"clearErrors") {
