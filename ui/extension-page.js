@@ -28,6 +28,52 @@
   const isBackground = /\/_prism_background\.html$/i.test(location.pathname);
   const manifest = config.manifest || {};
 
+  // ---- The log Prism keeps for the Extensions page ----------------------------------
+  // Console lines and a trace of the extension's chrome.* calls: the first
+  // use of each, calls that fail, and calls still unanswered after 5 s.
+  // Sent in batches; a busy logger loses lines rather than slowing the page.
+  let consoleLines = [];
+  let consoleTimer = 0;
+  function pushLine(level, text) {
+    try {
+      if (consoleLines.length >= 200) return;
+      consoleLines.push({ level, text: String(text).slice(0, 2000), time: Date.now() });
+      if (!consoleTimer) consoleTimer = setTimeout(flushConsole, 700);
+    } catch (error) { /* never let logging break the page */ }
+  }
+  function flushConsole() {
+    consoleTimer = 0;
+    const lines = consoleLines;
+    consoleLines = [];
+    if (lines.length) call('console', { lines }).catch(() => {});
+  }
+  const QUIET_OPS = new Set(['poll', 'console', 'log', 'respond', 'hello', 'popup.resize']);
+  const seenOps = new Set();
+  const failures = new Map();
+  const waiting = new Map();
+  let nextCall = 1;
+  function describeCall(op, data) {
+    if (!data) return op;
+    const message = data.message;
+    const kind = message && typeof message === 'object' ? (message.command || message.type || message.name || message.action || message.method) : null;
+    if (kind && typeof kind !== 'object') return op + ' "' + String(kind).slice(0, 80) + '"';
+    if (data.name) return op + ' "' + String(data.name).slice(0, 80) + '"';
+    if (Array.isArray(data.keys)) return op + ' ' + (data.area || '') + ' [' + data.keys.slice(0, 3).join(', ') + (data.keys.length > 3 ? ', …' : '') + ']';
+    if (data.area) return op + ' ' + data.area;
+    if (data.url) return op + ' ' + String(data.url).slice(0, 120);
+    return op;
+  }
+  setInterval(() => {
+    const now = Date.now();
+    for (const entry of waiting.values()) {
+      if (!entry.flagged && now - entry.started > 5000) {
+        entry.flagged = true;
+        pushLine('trace', entry.what + ': still waiting for an answer after 5 s');
+      }
+    }
+  }, 2500);
+  if (typeof WebAssembly === 'undefined') pushLine('trace', 'WebAssembly isn\'t available in this page');
+
   // ---- requestIdleCallback ------------------------------------------------------------
   // WebKit doesn't have it (Safari never shipped it), but extensions written
   // for Chrome and Firefox call it, e.g. AdNauseam whenever a tab changes.
@@ -53,11 +99,38 @@
     } catch (error) {
       return Promise.reject(error);
     }
+    const traced = !QUIET_OPS.has(op);
+    const id = nextCall++;
+    let what = '';
+    if (traced) {
+      what = describeCall(op, data);
+      if (!seenOps.has(op)) {
+        seenOps.add(op);
+        pushLine('trace', 'first ' + what);
+      }
+      waiting.set(id, { what, started: Date.now(), flagged: false });
+    }
+    const settled = () => {
+      const entry = waiting.get(id);
+      if (entry && entry.flagged) pushLine('trace', entry.what + ': answered after ' + Math.round((Date.now() - entry.started) / 1000) + ' s');
+      waiting.delete(id);
+    };
     return handler.postMessage(text).then((reply) => {
+      settled();
       const result = JSON.parse(reply);
       if (result && result.ok) return result.result;
       if (op !== 'hello' && op !== 'poll' && result && typeof result.error === 'string' && result.error.includes('Say hello first') && typeof reconnect === 'function') reconnect();
-      throw new Error((result && result.error) || 'Unknown error');
+      const message = (result && result.error) || 'Unknown error';
+      if (traced) {
+        const key = what + '\n' + message;
+        const count = (failures.get(key) || 0) + 1;
+        failures.set(key, count);
+        if (count <= 3) pushLine('trace', what + ' failed: ' + message + (count === 3 ? ' (not logged again)' : ''));
+      }
+      throw new Error(message);
+    }, (error) => {
+      settled();
+      throw error;
     });
   }
 
@@ -146,23 +219,9 @@
     keepLine('error', args);
   };
 
-  // The console, kept by Prism for the Extensions page's "Background page"
-  // log (WebKit's inspector can't always open for hidden pages). Sent in
-  // batches; a busy logger loses lines rather than slowing the page.
-  let consoleLines = [];
-  let consoleTimer = 0;
+  // The console goes into the same log (see pushLine).
   function keepLine(level, args) {
-    try {
-      if (consoleLines.length >= 200) return;
-      consoleLines.push({ level, text: args.map(describe).join(' ').slice(0, 2000), time: Date.now() });
-      if (!consoleTimer) consoleTimer = setTimeout(flushConsole, 700);
-    } catch (error) { /* never let logging break the page */ }
-  }
-  function flushConsole() {
-    consoleTimer = 0;
-    const lines = consoleLines;
-    consoleLines = [];
-    if (lines.length) call('console', { lines }).catch(() => {});
+    try { pushLine(level, args.map(describe).join(' ')); } catch (error) { /* never let logging break the page */ }
   }
   for (const level of ['log', 'info', 'warn', 'debug']) {
     const original = console[level].bind(console);
@@ -389,7 +448,7 @@
     setUninstallURL: resolved(undefined),
     requestUpdateCheck: resolved({ status: 'no_update' }),
     getPlatformInfo: resolved({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' }),
-    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.10', buildID: '0' }),
+    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.11', buildID: '0' }),
     getContexts: withCallback((filter) => call('runtime.getContexts').then((contexts) => {
       const f = filter || {};
       const has = (list, value) => !Array.isArray(list) || list.includes(value);

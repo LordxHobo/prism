@@ -22,12 +22,19 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.10</span>
+      <span class="version">Version 0.9.11</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Seeing what extensions are doing</h2>
+    <h2 style="margin-top:0">A more detailed extension log</h2>
+    <ul>
+      <li>An extension's log (Extensions › Details › Background page › Show log) now also shows which browser features it uses: the first use of each, any calls that fail (with the message they were sending), and anything still waiting for an answer after 5 seconds. This helps find where an extension like Bitwarden gets stuck while starting.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Seeing what extensions are doing</h2>
     <ul>
       <li><strong>Background page status:</strong> an extension's Details on the Extensions page now show whether its background page is starting, running, stuck or stopped, and how often it crashed or reloaded itself.</li>
       <li><strong>Show log:</strong> shows the extension's console messages (background, popup and offscreen pages), plus Prism's own notes on starting, connecting and reloading. You can copy or clear the log. It works even when the developer tools won't open.</li>

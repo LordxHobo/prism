@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.11
+
+- Extension log trace (`ui/extension-page.js` `call()`): level `trace` lines for the first use of each operation, failures (up to 3 per operation and message; `runtime.sendMessage` / `tabs.sendMessage` show the message's `command`/`type`/`name`/`action`/`method`, ports their name, storage calls the area and keys), calls unanswered after 5 s (and when they're answered), and pages without WebAssembly. `poll`, `console`, `log`, `respond`, `hello` and `popup.resize` aren't traced. The console buffer now starts before anything else, so early lines aren't lost.
+
 ## 0.9.10
 
 - **Background page status and log** on the Extensions page (Details › Background page): `host::backgroundStatusJSON` (none / loading / running / silent = loaded but never said hello / stopped, crash restarts, `runtime.reload` count, offscreen document open) and `Extension::consoleLog` (400 lines this session). `ui/extension-page.js` forwards console.log/info/warn/debug/error from every extension page in batches (op `console`, ≤200 lines per 0.7 s); Prism adds its own notes (starting, loaded, connected, offscreen document, self-reloads, crashes, load failures). Command `backgroundLog <id> [clear]`. Show log / Refresh, Copy log, Clear log.
