@@ -43,10 +43,10 @@
   --text-dim: #5d5d6b;
   --field: #ffffff;
   --field-border: #c9c9d3;
-  --field-focus: #1f7fd6;
+  --field-focus: #f29e0c;
   --button-hover: rgba(0, 0, 0, 0.06);
   --button-active: rgba(0, 0, 0, 0.11);
-  --accent: #1f7fd6;
+  --accent: #f29e0c;
   --shield: #1a9c55;
   --toast-bg: #1a1a22;
   --toast-text: #ffffff;

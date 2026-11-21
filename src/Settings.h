@@ -23,8 +23,11 @@ std::wstring downloadDirectory();
 // "system", "dark" or "light".
 std::wstring theme();
 
-// Accent color as #rrggbb.
+// Accent color as #rrggbb: the user's own colour, or the theme's (Ocean on
+// dark, Amber on light; follows engine::darkTheme()).
 std::wstring accent();
+// The user's own accent colour, or "" when it follows the theme.
+std::wstring customAccent();
 
 // Smaller tab strip and toolbar.
 bool compactTabs();

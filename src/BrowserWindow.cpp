@@ -484,6 +484,8 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             updateTheme();
             pushState();
             updateIcon(); // Amber on a light taskbar, Ocean on a dark one
+            // The theme's accent may have changed with it.
+            evaluateInInternalPages(L"settings", "window.prismSettingsChanged && prismSettingsChanged();");
         }
         break;
     case WM_ACTIVATE:

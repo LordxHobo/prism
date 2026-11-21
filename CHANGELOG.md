@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.8
+
+- **Accent follows the theme**: the Accent setting is `theme` (default) or a custom #rrggbb. `settings::accent()` returns the custom colour, else Ocean #3aa0ff when `engine::darkTheme()` and Amber #f29e0c when light; `settings::customAccent()` (also in the settings JSON as `customAccent`). Saved values #8b7cf6 (old default), #3aa0ff and #ffb340 (0.9.7's presets) count as `theme`. Settings › Appearance: a split Ocean/Amber "Match the theme" swatch and the custom colour picker. The settings page refreshes on Windows' "ImmersiveColorSet" change. Light-theme defaults in toolbar.css / pages.css are Amber.
+
 ## 0.9.7
 
 - **Accent colour**: the presets are now Ocean (#3aa0ff, the new default; was Violet #8b7cf6) and Amber (#ffb340), plus a custom swatch that opens Prism's own colour picker (saturation/brightness square, hue slider, hex field; WebKit on Windows has no `<input type="color">` dialog). A saved colour that isn't a preset shows as the custom swatch. Default `--accent` in toolbar.css / pages.css follows (light: #1f7fd6).

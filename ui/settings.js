@@ -19,11 +19,10 @@ function ask(command, argument) {
   }
 }
 
-// Prism's two colours (Ocean and Amber, like the logo); anything else is
-// picked with the colour picker.
+// The accent follows the theme (Ocean on dark, Amber on light, like the
+// logo) unless the user picks their own colour.
 const ACCENTS = [
-  ['#3aa0ff', 'Ocean'],
-  ['#ffb340', 'Amber'],
+  ['theme', 'Match the theme: Ocean on dark, Amber on light'],
 ];
 
 const COOKIE_HELP = {
@@ -67,13 +66,10 @@ function render(settings) {
   $('downloadDir').textContent = settings.downloadDir;
 
   renderSegmented('theme', settings.theme);
-  const accent = (settings.accent || '').toLowerCase();
-  let preset = false;
-  for (const button of $('accent').querySelectorAll('button[data-value]')) {
-    const on = button.dataset.value.toLowerCase() === accent;
-    preset = preset || on;
-    button.setAttribute('aria-checked', on ? 'true' : 'false');
-  }
+  const accent = (settings.customAccent || '').toLowerCase();
+  const preset = !accent;
+  for (const button of $('accent').querySelectorAll('button[data-value]'))
+    button.setAttribute('aria-checked', preset ? 'true' : 'false');
   const custom = $('accentCustom');
   custom.setAttribute('aria-checked', preset ? 'false' : 'true');
   custom.classList.toggle('chosen', !preset);
@@ -148,7 +144,7 @@ function renderPermissions() {
 for (const [color, name] of ACCENTS) {
   const button = document.createElement('button');
   button.dataset.value = color;
-  button.style.background = color;
+  button.className = 'theme-swatch';
   button.title = name;
   button.setAttribute('role', 'radio');
   button.setAttribute('aria-label', name);
@@ -208,6 +204,7 @@ for (const [color, name] of ACCENTS) {
     hex.classList.remove('invalid');
   }
   function open() {
+    // Start from the colour in use (the theme's, until one is picked).
     const start = /^#[0-9a-f]{6}$/i.test(current && current.accent || '') ? current.accent : '#3aa0ff';
     [h, s, v] = hexToHsv(start);
     draw();

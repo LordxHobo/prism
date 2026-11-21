@@ -4,6 +4,8 @@
 
 #include "Settings.h"
 
+#include "Engine.h"
+
 #include "Util.h"
 
 #include <cwctype>
@@ -33,7 +35,9 @@ const SearchEngine kSearchEngines[] = {
     { L"bing", L"Bing", L"https://www.bing.com/search?q=%s" },
 };
 
-const wchar_t kDefaultAccent[] = L"#3aa0ff";
+// The theme's own accents, matching the logo: Ocean on dark, Amber on light.
+const wchar_t kOceanAccent[] = L"#3aa0ff";
+const wchar_t kAmberAccent[] = L"#f29e0c";
 
 bool isOneOf(const std::wstring& value, std::initializer_list<const wchar_t*> allowed)
 {
@@ -120,10 +124,23 @@ std::wstring theme()
     return isOneOf(value, { L"system", L"dark", L"light" }) ? value : L"system";
 }
 
+std::wstring customAccent()
+{
+    std::wstring value = util::readSetting(L"Accent", L"theme");
+    for (auto& c : value)
+        c = static_cast<wchar_t>(std::towlower(c));
+    // Old defaults and 0.9.7's two presets mean "the theme's colour" now.
+    if (!isHexColor(value) || value == L"#8b7cf6" || value == L"#3aa0ff" || value == L"#ffb340")
+        return { };
+    return value;
+}
+
 std::wstring accent()
 {
-    std::wstring value = util::readSetting(L"Accent", kDefaultAccent);
-    return isHexColor(value) ? value : kDefaultAccent;
+    std::wstring custom = customAccent();
+    if (!custom.empty())
+        return custom;
+    return engine::darkTheme() ? kOceanAccent : kAmberAccent;
 }
 
 bool compactTabs()
@@ -261,6 +278,7 @@ std::string toJSON()
     json += ",\"downloadDir\":" + util::jsonString(downloadDirectory());
     json += ",\"theme\":" + util::jsonString(theme());
     json += ",\"accent\":" + util::jsonString(accent());
+    json += ",\"customAccent\":" + util::jsonString(customAccent());
     json += ",\"tabStyle\":" + util::jsonString(compactTabs() ? L"compact" : L"normal");
     json += ",\"cookiePolicy\":" + util::jsonString(strictCookies() ? L"strict" : L"standard");
     json += ",\"clearOnExit\":" + jsonBool(clearOnExit());
@@ -308,7 +326,8 @@ bool set(const std::wstring& key, const std::wstring& value)
             return false;
         util::writeSetting(L"Theme", value);
     } else if (key == L"accent") {
-        if (!isHexColor(value))
+        // "theme" (Ocean on dark, Amber on light) or a custom #rrggbb.
+        if (value != L"theme" && !isHexColor(value))
             return false;
         util::writeSetting(L"Accent", value);
     } else if (key == L"tabStyle") {

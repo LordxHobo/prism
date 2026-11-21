@@ -201,6 +201,11 @@ input[type="url"]:focus {
   outline-color: var(--text);
 }
 
+/* "Match the theme": Ocean (dark) and Amber (light), split diagonally. */
+.swatches .theme-swatch {
+  background: linear-gradient(135deg, #3aa0ff 0 50%, #f29e0c 50% 100%);
+}
+
 /* The colour picker's swatch: a colour wheel, or the chosen colour with a
    small rainbow ring once one is picked. */
 .swatches .custom-swatch {
