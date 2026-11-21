@@ -1714,6 +1714,10 @@ std::string handleCommand(const std::wstring& command, const std::wstring& argum
         return listJSON();
     }
 
+    if (command == L"inspect") {
+        return inspectBackground(argUTF8(0)) ? "true" : "false";
+    }
+
     if (command == L"openOptions") {
         int windowId = -1;
         if (BrowserWindow* window = BrowserWindow::fromHWND(owner))

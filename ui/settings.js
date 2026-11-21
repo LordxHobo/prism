@@ -19,15 +19,11 @@ function ask(command, argument) {
   }
 }
 
+// Prism's two colours (Ocean and Amber, like the logo); anything else is
+// picked with the colour picker.
 const ACCENTS = [
-  ['#8b7cf6', 'Violet'],
-  ['#3aa0ff', 'Blue'],
-  ['#2dd4bf', 'Teal'],
-  ['#3ddc84', 'Green'],
+  ['#3aa0ff', 'Ocean'],
   ['#ffb340', 'Amber'],
-  ['#ff6b6b', 'Red'],
-  ['#ff6ac1', 'Pink'],
-  ['#a3a3b5', 'Graphite'],
 ];
 
 const COOKIE_HELP = {
@@ -71,8 +67,18 @@ function render(settings) {
   $('downloadDir').textContent = settings.downloadDir;
 
   renderSegmented('theme', settings.theme);
-  for (const button of $('accent').querySelectorAll('button'))
-    button.setAttribute('aria-checked', button.dataset.value.toLowerCase() === settings.accent.toLowerCase() ? 'true' : 'false');
+  const accent = (settings.accent || '').toLowerCase();
+  let preset = false;
+  for (const button of $('accent').querySelectorAll('button[data-value]')) {
+    const on = button.dataset.value.toLowerCase() === accent;
+    preset = preset || on;
+    button.setAttribute('aria-checked', on ? 'true' : 'false');
+  }
+  const custom = $('accentCustom');
+  custom.setAttribute('aria-checked', preset ? 'false' : 'true');
+  custom.classList.toggle('chosen', !preset);
+  custom.style.setProperty('--custom', preset ? 'transparent' : accent);
+  custom.title = preset ? 'Pick your own colour' : 'Your colour (' + accent + '), click to change';
   renderSegmented('tabStyle', settings.tabStyle);
 
   renderSegmented('cookiePolicy', settings.cookiePolicy);
@@ -148,6 +154,110 @@ for (const [color, name] of ACCENTS) {
   button.setAttribute('aria-label', name);
   $('accent').appendChild(button);
 }
+
+// ---- Accent colour picker -----------------------------------------------------
+// WebKit on Windows has no colour dialog for <input type="color">, so the
+// picker is drawn here: a saturation/brightness square, a hue slider and a
+// hex field.
+(function accentPicker() {
+  const custom = document.createElement('button');
+  custom.id = 'accentCustom';
+  custom.className = 'custom-swatch';
+  custom.setAttribute('role', 'radio');
+  custom.setAttribute('aria-label', 'Custom colour');
+  custom.setAttribute('aria-haspopup', 'dialog');
+  $('accent').appendChild(custom);
+
+  const panel = document.createElement('div');
+  panel.className = 'color-picker';
+  panel.hidden = true;
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', 'Pick an accent colour');
+  panel.innerHTML = '<div class="sv"><div class="sv-thumb"></div></div>'
+    + '<input class="hue" type="range" min="0" max="359" step="1" aria-label="Hue">'
+    + '<div class="picker-row"><span class="preview"></span>'
+    + '<input class="hex" type="text" maxlength="7" spellcheck="false" aria-label="Hex colour">'
+    + '<button class="button apply" type="button">Use</button></div>';
+  $('accent').parentElement.appendChild(panel);
+  const sv = panel.querySelector('.sv'), thumb = panel.querySelector('.sv-thumb');
+  const hue = panel.querySelector('.hue'), hex = panel.querySelector('.hex');
+  const preview = panel.querySelector('.preview'), apply = panel.querySelector('.apply');
+  let h = 210, s = 0.77, v = 1;
+
+  const toHex = (n) => Math.round(n * 255).toString(16).padStart(2, '0');
+  function hsvToHex(hh, ss, vv) {
+    const f = (n) => { const k = (n + hh / 60) % 6; return vv - vv * ss * Math.max(0, Math.min(k, 4 - k, 1)); };
+    return '#' + toHex(f(5)) + toHex(f(3)) + toHex(f(1));
+  }
+  function hexToHsv(text) {
+    const r = parseInt(text.slice(1, 3), 16) / 255, g = parseInt(text.slice(3, 5), 16) / 255, b = parseInt(text.slice(5, 7), 16) / 255;
+    const max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+    let hh = 0;
+    if (d) hh = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return [(hh * 60 + 360) % 360, max ? d / max : 0, max];
+  }
+  function draw(fromHex) {
+    const color = hsvToHex(h, s, v);
+    sv.style.background = 'linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(' + h + ', 100%, 50%))';
+    thumb.style.left = (s * 100) + '%';
+    thumb.style.top = ((1 - v) * 100) + '%';
+    thumb.style.background = color;
+    hue.value = String(Math.round(h));
+    preview.style.background = color;
+    if (!fromHex) hex.value = color;
+    hex.classList.remove('invalid');
+  }
+  function open() {
+    const start = /^#[0-9a-f]{6}$/i.test(current && current.accent || '') ? current.accent : '#3aa0ff';
+    [h, s, v] = hexToHsv(start);
+    draw();
+    panel.hidden = false;
+    hex.focus();
+    hex.select();
+  }
+  const close = () => { panel.hidden = true; };
+  function use() {
+    const color = /^#[0-9a-f]{6}$/i.test(hex.value.trim()) ? hex.value.trim().toLowerCase() : hsvToHex(h, s, v);
+    close();
+    setSetting('accent', color);
+  }
+
+  custom.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (panel.hidden) open(); else close();
+  });
+  const pick = (event) => {
+    const box = sv.getBoundingClientRect();
+    s = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
+    v = 1 - Math.min(1, Math.max(0, (event.clientY - box.top) / box.height));
+    draw();
+  };
+  sv.addEventListener('pointerdown', (event) => {
+    sv.setPointerCapture(event.pointerId);
+    pick(event);
+    const move = (e) => pick(e);
+    const up = () => { sv.removeEventListener('pointermove', move); sv.removeEventListener('pointerup', up); };
+    sv.addEventListener('pointermove', move);
+    sv.addEventListener('pointerup', up);
+  });
+  hue.addEventListener('input', () => { h = Number(hue.value); draw(); });
+  hex.addEventListener('input', () => {
+    let text = hex.value.trim();
+    if (text && text[0] !== '#') text = '#' + text;
+    if (/^#[0-9a-f]{6}$/i.test(text)) {
+      [h, s, v] = hexToHsv(text);
+      draw(true);
+    } else hex.classList.add('invalid');
+  });
+  hex.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') use();
+    if (event.key === 'Escape') close();
+  });
+  apply.addEventListener('click', use);
+  panel.addEventListener('click', (event) => event.stopPropagation());
+  document.addEventListener('click', close);
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); });
+})();
 
 for (const id of ['startup', 'theme', 'accent', 'tabStyle', 'cookiePolicy', 'locationDefault', 'notificationsDefault',
   'palette', 'tabLayout', 'groupStyle', 'newTabShortcuts', 'httpsMode']) {

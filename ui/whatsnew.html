@@ -22,12 +22,20 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.6</span>
+      <span class="version">Version 0.9.7</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Bitwarden works, and a new logo</h2>
+    <h2 style="margin-top:0">Pick your own accent colour</h2>
+    <ul>
+      <li><strong>Accent colours:</strong> Settings › Appearance now offers Ocean and Amber, matching the logo, plus a colour picker for any colour you like (drag in the square, slide the hue, or type a hex code). Ocean is the new default. If you picked another colour before, Prism keeps it as your custom colour.</li>
+      <li><strong>Inspect extensions:</strong> an <em>Inspect</em> button on the Extensions page opens the developer tools for an extension's background page. Right-click an extension's button to inspect its popup, which then stays open until you click the button again.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Bitwarden works, and a new logo</h2>
     <ul>
       <li><strong>Bitwarden's popup loads.</strong> Prism now supports offscreen documents, the hidden pages some Manifest V3 extensions keep part of their data in. Bitwarden couldn't read its storage without them, so its background kept restarting.</li>
       <li>Extensions can see which of their pages are open (<code>runtime.getContexts</code>). Reloading an extension closes its popup, like in Chrome.</li>

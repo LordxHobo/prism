@@ -33,7 +33,7 @@ const SearchEngine kSearchEngines[] = {
     { L"bing", L"Bing", L"https://www.bing.com/search?q=%s" },
 };
 
-const wchar_t kDefaultAccent[] = L"#8b7cf6";
+const wchar_t kDefaultAccent[] = L"#3aa0ff";
 
 bool isOneOf(const std::wstring& value, std::initializer_list<const wchar_t*> allowed)
 {

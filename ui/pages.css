@@ -12,8 +12,8 @@
   --border: #2f2f39;
   --text: #ececf1;
   --text-dim: #9a9aa8;
-  --accent: #8b7cf6;
-  --accent-soft: rgba(139, 124, 246, 0.16);
+  --accent: #3aa0ff;
+  --accent-soft: rgba(58, 160, 255, 0.16);
   --good: #3ddc84;
   color-scheme: dark;
 }
@@ -25,7 +25,7 @@
   --border: #dcdce4;
   --text: #1a1a22;
   --text-dim: #5d5d6b;
-  --accent: #6d5ce8;
+  --accent: #1f7fd6;
   --accent-soft: rgba(109, 92, 232, 0.12);
   --good: #1a9c55;
   color-scheme: light;

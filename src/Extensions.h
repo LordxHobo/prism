@@ -47,6 +47,10 @@ void handlePageMessage(WKScriptMessageRef, WKCompletionListenerRef reply);
 // -1 for "under the toolbar's right end").
 std::string actionsJSON(int tabId);
 void actionClicked(HWND window, int tabId, const std::string& extensionId, int buttonRight, int buttonBottom);
+// Web Inspector for the extension's background page / its popup (opened and
+// kept open while inspected). False if there's no background or inspector.
+bool inspectBackground(const std::string& extensionId);
+void inspectPopup(HWND window, int tabId, const std::string& extensionId, int buttonRight, int buttonBottom);
 void showActionMenu(HWND window, const std::string& extensionId, int x, int y);
 void openOptionsPage(const std::string& extensionId, int windowId);
 

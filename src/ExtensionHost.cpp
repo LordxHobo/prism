@@ -637,6 +637,7 @@ struct HostView {
     int tabId { -1 };
     bool shown { false };
     bool inDialog { false };
+    bool inspecting { false }; // "Inspect popup": stays open when it loses focus
     int crashes { 0 };
     ULONGLONG lastCrash { 0 };
     ULONGLONG loadedAt { 0 };      // background page finished loading
@@ -748,7 +749,7 @@ LRESULT CALLBACK hostWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
     case WM_ACTIVATE:
         if (host && host->kind == Kind::Popup) {
             if (LOWORD(wParam) == WA_INACTIVE) {
-                if (!host->inDialog)
+                if (!host->inDialog && !host->inspecting)
                     PostMessageW(hwnd, WM_HOST_CLOSE, 0, 0);
             } else if (host->viewHwnd)
                 SetFocus(host->viewHwnd);
@@ -2638,6 +2639,36 @@ void actionClicked(HWND window, int tabId, const std::string& extId, int buttonR
     SetTimer(host->hwnd, kShowPopupTimer, 1500, nullptr);
     g_popup = std::move(host);
     refreshToolbars();
+}
+
+// Web Inspector for an extension's hidden pages (the Extensions page and the
+// button's right-click menu), so problems that don't end up as errors can be
+// looked at in the console.
+bool showInspector(WKPageRef page)
+{
+    if (!page || !WKPageGetInspector || !WKInspectorShow)
+        return false;
+    WKInspectorRef inspector = WKPageGetInspector(page);
+    if (!inspector)
+        return false;
+    WKInspectorShow(inspector);
+    return true;
+}
+
+bool inspectBackground(const std::string& extId)
+{
+    auto found = g_backgrounds.find(extId);
+    return found != g_backgrounds.end() && found->second && showInspector(found->second->page);
+}
+
+void inspectPopup(HWND window, int tabId, const std::string& extId, int buttonRight, int buttonBottom)
+{
+    if (!g_popup || g_popup->extId != extId)
+        actionClicked(window, tabId, extId, buttonRight, buttonBottom);
+    if (g_popup && g_popup->extId == extId) {
+        g_popup->inspecting = true;
+        showInspector(g_popup->page);
+    }
 }
 
 void showActionMenu(HWND window, const std::string& extId, int x, int y)

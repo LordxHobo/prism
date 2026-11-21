@@ -17,10 +17,10 @@
   --text-dim: #9a9aa8;
   --field: #16161a;
   --field-border: #3a3a44;
-  --field-focus: #8b7cf6;
+  --field-focus: #3aa0ff;
   --button-hover: rgba(255, 255, 255, 0.08);
   --button-active: rgba(255, 255, 255, 0.14);
-  --accent: #8b7cf6;
+  --accent: #3aa0ff;
   --accent-text: #ffffff;
   --shield: #3ddc84;
   --toast-bg: #ececf1;
@@ -43,10 +43,10 @@
   --text-dim: #5d5d6b;
   --field: #ffffff;
   --field-border: #c9c9d3;
-  --field-focus: #6d5ce8;
+  --field-focus: #1f7fd6;
   --button-hover: rgba(0, 0, 0, 0.06);
   --button-active: rgba(0, 0, 0, 0.11);
-  --accent: #6d5ce8;
+  --accent: #1f7fd6;
   --shield: #1a9c55;
   --toast-bg: #1a1a22;
   --toast-text: #ffffff;

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.7
+
+- **Accent colour**: the presets are now Ocean (#3aa0ff, the new default; was Violet #8b7cf6) and Amber (#ffb340), plus a custom swatch that opens Prism's own colour picker (saturation/brightness square, hue slider, hex field; WebKit on Windows has no `<input type="color">` dialog). A saved colour that isn't a preset shows as the custom swatch. Default `--accent` in toolbar.css / pages.css follows (light: #1f7fd6).
+- **Inspecting extensions**: `extensions::inspectBackground` / `inspectPopup` (`WKInspectorShow` on the host page). Extensions page: "Inspect" for extensions with a background (command `inspect`). Toolbar button menu: "Inspect popup" (opens it if needed; `HostView::inspecting` keeps it open when it loses focus) and "Inspect background page".
+
 ## 0.9.6
 
 - **chrome.offscreen**: `createDocument` opens a hidden extension page (a host view like the background, one per extension; "Only a single offscreen document may be created." otherwise) and resolves when it has loaded; `closeDocument`, `hasDocument`, `Reason`. A closed document is kept 30 s and reused by the next `createDocument` (Bitwarden opens and closes one around every localStorage call). Closed with the background (stop, reload, disable), on `window.close()` and when its process ends. Its context lives as long as the view (no re-poll expiry), listed as `OFFSCREEN_DOCUMENT`. Bitwarden MV3 keeps its secondary storage there (`OffscreenStorageService`); the old stub rejected, so storage reads in its background failed.

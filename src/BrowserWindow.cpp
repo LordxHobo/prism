@@ -3583,6 +3583,9 @@ void BrowserWindow::showHiddenActionMenu(const std::string& extensionId, int x, 
     AppendMenuW(menu, MF_STRING | (options ? 0 : MF_GRAYED), 1, L"Options");
     AppendMenuW(menu, MF_STRING, 2, L"Hide from toolbar");
     AppendMenuW(menu, MF_STRING, 3, L"Manage extension");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, 4, L"Inspect popup");
+    AppendMenuW(menu, MF_STRING, 5, L"Inspect background page");
     int choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_RIGHTALIGN, point.x, point.y, 0, m_hwnd, nullptr);
     DestroyMenu(menu);
     if (choice >= 100 && static_cast<size_t>(choice - 100) < itemIds.size()) {
@@ -3592,7 +3595,12 @@ void BrowserWindow::showHiddenActionMenu(const std::string& extensionId, int x, 
         extensions::menuItemClicked(extensionId, itemIds[choice - 100], context, tab ? tab->id : -1);
         return;
     }
-    if (choice == 1)
+    if (choice == 4)
+        extensions::inspectPopup(m_hwnd, tab ? tab->id : -1, extensionId, x, y);
+    else if (choice == 5) {
+        if (!extensions::inspectBackground(extensionId))
+            showToast(L"This extension has no background page running.");
+    } else if (choice == 1)
         extensions::openOptionsPage(extensionId, m_id);
     else if (choice == 2) {
         settings::setActionHidden(extensionId, true);

@@ -290,6 +290,16 @@ function render(data) {
       options.addEventListener('click', () => ask('openOptions', ext.id));
       actions.append(options);
     }
+    if (ext.enabled && ext.support && ext.support.background) {
+      const inspect = document.createElement('button');
+      inspect.className = 'button secondary';
+      inspect.textContent = 'Inspect';
+      inspect.title = 'Open the developer tools for its background page (console, network, errors)';
+      inspect.addEventListener('click', () => {
+        if (ask('inspect', ext.id) !== true) inspect.textContent = 'Not running';
+      });
+      actions.append(inspect);
+    }
     actions.append(remove, toggle);
 
     head.append(icon, info, actions);
