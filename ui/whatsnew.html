@@ -22,12 +22,20 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.11</span>
+      <span class="version">Version 0.9.12</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">A more detailed extension log</h2>
+    <h2 style="margin-top:0">Extensions see the browser they were made for</h2>
+    <ul>
+      <li>Inside their own pages, extensions from the Chrome Web Store (and unpacked ones) now see Prism as Chrome, and those from Firefox Add-ons see it as Firefox. Before, they saw Prism's Safari identity, and extensions like Bitwarden switched to their Safari version, which needs Apple's Safari app to work. Websites still see Prism as before.</li>
+      <li>The extension log also shows what an extension's pages receive: connections, messages and port messages, with the sender and how many listeners were waiting for them.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>A more detailed extension log</h2>
     <ul>
       <li>An extension's log (Extensions › Details › Background page › Show log) now also shows which browser features it uses: the first use of each, any calls that fail (with the message they were sending), and anything still waiting for an answer after 5 seconds. This helps find where an extension like Bitwarden gets stuck while starting.</li>
     </ul>

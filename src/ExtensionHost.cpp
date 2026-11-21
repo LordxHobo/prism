@@ -1644,6 +1644,7 @@ void extensionsChanged()
             std::string config = "{\"id\":" + json::quote(ext->id) + ",\"name\":" + json::quote(ext->name)
                 + ",\"base\":" + json::quote(baseURL(*ext)) + ",\"uiLanguage\":" + json::quote(ext->uiLanguage)
                 + ",\"manifest\":" + ext->manifestJSON + ",\"messages\":" + ext->messagesJSON
+                + ",\"family\":\"" + (ext->source == "firefox" ? "firefox" : "chrome") + "\""
                 + ",\"worker\":" + (ext->backgroundPage.empty() && ext->backgroundScripts.empty() && !ext->serviceWorker.empty() ? "true" : "false") + "}";
             scripts.push_back("/* Prism extension pages: " + ext->name + " */\n" + runtime + "(" + config + ");\n");
         }

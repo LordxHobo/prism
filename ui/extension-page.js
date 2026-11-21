@@ -26,6 +26,30 @@
 
   const base = config.base;
   const isBackground = /\/_prism_background\.html$/i.test(location.pathname);
+
+  // Extensions from the Chrome Web Store are written for Chrome, and those
+  // from Firefox Add-ons for Firefox. In their own pages Prism says it is that
+  // browser: with Prism's Safari user agent, extensions like Bitwarden switch
+  // to their Safari code, which expects Safari's native app.
+  (function presentAs(family) {
+    const ua = family === 'firefox'
+      ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:145.0) Gecko/20100101 Firefox/145.0'
+      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
+    const define = (name, value) => {
+      try { Object.defineProperty(navigator, name, { get: () => value, configurable: true }); } catch (error) { /* keep WebKit's */ }
+    };
+    define('userAgent', ua);
+    define('appVersion', ua.replace(/^Mozilla\//, ''));
+    define('vendor', family === 'firefox' ? '' : 'Google Inc.');
+    if (family !== 'firefox') {
+      const brands = [{ brand: 'Chromium', version: '142' }, { brand: 'Not_A Brand', version: '24' }];
+      define('userAgentData', Object.freeze({
+        brands, mobile: false, platform: 'Windows',
+        getHighEntropyValues: () => Promise.resolve({ brands, mobile: false, platform: 'Windows', platformVersion: '15.0.0', architecture: 'x86', bitness: '64', uaFullVersion: '142.0.0.0' }),
+        toJSON: () => ({ brands, mobile: false, platform: 'Windows' }),
+      }));
+    }
+  })(config.family);
   const manifest = config.manifest || {};
 
   // ---- The log Prism keeps for the Extensions page ----------------------------------
@@ -278,17 +302,34 @@
     });
   }
 
+  // What arrives, in the log: the first few of each kind.
+  const arrivals = new Map();
+  function traceArrival(key, text) {
+    const count = (arrivals.get(key) || 0) + 1;
+    arrivals.set(key, count);
+    if (count <= 3) pushLine('trace', text);
+  }
+  const actionOf = (message) => message && typeof message === 'object'
+    ? (message.command || message.action || message.type || message.name || '') : '';
+
   function handleEvent(event) {
     if (!event) return;
     switch (event.type) {
     case 'message':
+      traceArrival('message ' + actionOf(event.message), 'received message "' + String(actionOf(event.message)).slice(0, 80) + '"');
       dispatchMessage(event);
       break;
-    case 'connect':
+    case 'connect': {
+      const sender = event.sender || {};
+      traceArrival('connect ' + event.name, 'received connect "' + event.name + '" from ' + (sender.url || '?') + ' (origin ' + (sender.origin || 'none')
+        + (sender.frameId !== undefined ? ', frame ' + sender.frameId : '') + '; ' + onConnect.listeners.length + ' onConnect listeners)');
       onConnect.fire(makePort(event.port, event.name, event.sender).port);
       break;
+    }
     case 'portMessage': {
       const entry = ports.get(event.port);
+      traceArrival('portMessage ' + event.port + actionOf(event.message), 'received port message "' + String(actionOf(event.message)).slice(0, 80) + '" on port ' + event.port
+        + (entry ? ' (' + entry.onMessage.listeners.length + ' listeners)' : ' (port unknown here)'));
       if (entry) entry.onMessage.fire(event.message, entry.port);
       break;
     }
@@ -448,7 +489,7 @@
     setUninstallURL: resolved(undefined),
     requestUpdateCheck: resolved({ status: 'no_update' }),
     getPlatformInfo: resolved({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' }),
-    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.11', buildID: '0' }),
+    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.12', buildID: '0' }),
     getContexts: withCallback((filter) => call('runtime.getContexts').then((contexts) => {
       const f = filter || {};
       const has = (list, value) => !Array.isArray(list) || list.includes(value);

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.12
+
+- **Extensions see the browser they were made for**: in extension pages, `navigator.userAgent`, `appVersion`, `vendor` (and `userAgentData` for Chrome) say Chrome 142 for Chrome Web Store, file and folder installs, and Firefox 145 for Firefox Add-ons installs (`config.family`, from `Extension::source`). With Prism's Safari user agent, Bitwarden ran its Safari code paths (`isBrowserSafariApi`, `SafariApp.sendMessageToApp` → `browser.runtime.sendNativeMessage`, "Phishing detection is unavailable on Safari"). Content scripts and websites are unchanged.
+- Extension log: arrivals are traced too (first 3 of each kind): messages by command, connects with the port name, sender URL/origin/frame and the number of onConnect listeners, port messages with their action and listener count (or "port unknown here").
+
 ## 0.9.11
 
 - Extension log trace (`ui/extension-page.js` `call()`): level `trace` lines for the first use of each operation, failures (up to 3 per operation and message; `runtime.sendMessage` / `tabs.sendMessage` show the message's `command`/`type`/`name`/`action`/`method`, ports their name, storage calls the area and keys), calls unanswered after 5 s (and when they're answered), and pages without WebAssembly. `poll`, `console`, `log`, `respond`, `hello` and `popup.resize` aren't traced. The console buffer now starts before anything else, so early lines aren't lost.
