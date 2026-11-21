@@ -6,6 +6,7 @@
 - **runtime.getContexts** lists the extension's open pages (BACKGROUND, POPUP, TAB, OFFSCREEN_DOCUMENT) with Chrome's fields, filtered like Chrome; `runtime.ContextType`. It returned `[]`, so Bitwarden's `isAnyPopupOrPopoutOpen` was always false and it called `runtime.reload()` with its popup open ("Could not establish connection. Receiving end does not exist." while the background restarted).
 - `runtime.reload()` closes the extension's popup, like Chrome.
 - Background pages report problems on the Extensions page: process ended (memory, CPU, stopped, crashed; restart count resets after 5 minutes; when Prism gives up after 3), failed loads (`didFailProvisionalNavigation` / `didFailNavigation`, with the error), and loading without saying hello within 15 s.
+- Build fix: `util::appIcon`'s parameter was named `small`, which the Windows SDK defines as `char` (rpcndr.h), so MSVC failed on Util.cpp.
 - **Logo**: the Facet logo, Amber (`res/prism.ico` / `prism.svg`, icon 1, also the exe's file icon) for a light taskbar and Ocean (`res/prism-dark.ico` / `prism-dark.svg`, icon 2) for a dark one, picked from `SystemUsesLightTheme` (`util::appIcon`, `util::taskbarIsLight`) for windows, the window class and the tray icon, and updated on `WM_SETTINGCHANGE` "ImmersiveColorSet". Prism's pages show Ocean on dark pages and Amber (`ui/prism-light.svg`) on light ones.
 
 ## 0.9.5

@@ -327,14 +327,14 @@ bool taskbarIsLight()
     return status == ERROR_SUCCESS && value != 0;
 }
 
-HICON appIcon(bool small)
+HICON appIcon(bool smallIcon)
 {
     // Loaded once per size and variant (shared icons stay valid).
     static HICON icons[2][2] = { };
     int variant = taskbarIsLight() ? 0 : 1;
-    HICON& icon = icons[variant][small ? 1 : 0];
+    HICON& icon = icons[variant][smallIcon ? 1 : 0];
     if (!icon) {
-        int size = GetSystemMetrics(small ? SM_CXSMICON : SM_CXICON);
+        int size = GetSystemMetrics(smallIcon ? SM_CXSMICON : SM_CXICON);
         icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(variant == 0 ? 1 : 2), IMAGE_ICON, size, size, LR_SHARED));
         if (!icon)
             icon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1));
