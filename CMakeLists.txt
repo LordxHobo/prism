@@ -3,7 +3,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 cmake_minimum_required(VERSION 3.21)
-project(Prism VERSION 0.9.15 LANGUAGES CXX RC)
+project(Prism VERSION 0.9.16 LANGUAGES CXX RC)
 
 if(NOT WIN32)
     message(FATAL_ERROR "Prism currently builds for Windows only.")
@@ -108,6 +108,8 @@ add_custom_command(TARGET Prism POST_BUILD
 # asks Prism about every request pages make (see bundle/PrismBundle.cpp).
 add_library(PrismBundle SHARED
     bundle/PrismBundle.cpp
+    bundle/ContentScripts.cpp
+    bundle/ContentScripts.h
     bundle/BundleApi.h
     bundle/RequestKind.h
 )

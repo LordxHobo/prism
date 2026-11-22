@@ -107,6 +107,69 @@ typedef struct WKBundlePageResourceLoadClientV0 {
     X(WKURLCreateWithUTF8CString, WKURLRef, (const char*))
 
 // Optional functions: used when present.
+// ---- Extension content scripts in their own JavaScript worlds ----------------
+// (ContentScripts.cpp). Optional: without them, Prism runs content scripts
+// in the page's world as before (it checks the same functions itself).
+
+typedef const struct OpaqueWKBundleScriptWorld* WKBundleScriptWorldRef;
+
+typedef void (*WKBundlePageDidClearWindowObjectForFrameCallback)(WKBundlePageRef, WKBundleFrameRef, WKBundleScriptWorldRef, const void* clientInfo);
+
+typedef struct WKBundlePageLoaderClientBase {
+    int version;
+    const void* clientInfo;
+} WKBundlePageLoaderClientBase;
+
+// Version 0: the first 14 callbacks come before didClearWindowObjectForFrame.
+typedef struct WKBundlePageLoaderClientV0 {
+    WKBundlePageLoaderClientBase base;
+    void* beforeClearWindowObject[14];
+    WKBundlePageDidClearWindowObjectForFrameCallback didClearWindowObjectForFrame;
+    void* didCancelClientRedirectForFrame;
+    void* willPerformClientRedirectForFrame;
+    void* didHandleOnloadEventsForFrame;
+} WKBundlePageLoaderClientV0;
+
+// JavaScriptCore's C API (JavaScriptCore.dll).
+typedef const struct OpaqueJSContext* JSContextRef;
+typedef struct OpaqueJSContext* JSGlobalContextRef;
+typedef struct OpaqueJSString* JSStringRef;
+typedef const struct OpaqueJSValue* JSValueRef;
+typedef struct OpaqueJSValue* JSObjectRef;
+typedef unsigned JSPropertyAttributes;
+typedef JSValueRef (*JSObjectCallAsFunctionCallback)(JSContextRef, JSObjectRef function, JSObjectRef thisObject, size_t argumentCount, const JSValueRef arguments[], JSValueRef* exception);
+constexpr JSPropertyAttributes kPrismJSReadOnlyDontEnumDontDelete = (1 << 1) | (1 << 2) | (1 << 3);
+
+#define PRISM_BUNDLE_CONTENT(X) \
+    X(WKBundlePageSetPageLoaderClient, void, (WKBundlePageRef, WKBundlePageLoaderClientBase*)) \
+    X(WKBundleScriptWorldCreateWorld, WKBundleScriptWorldRef, ()) \
+    X(WKBundleScriptWorldNormalWorld, WKBundleScriptWorldRef, ()) \
+    X(WKBundleFrameGetJavaScriptContextForWorld, JSGlobalContextRef, (WKBundleFrameRef, WKBundleScriptWorldRef)) \
+    X(WKBundlePageGetMainFrame, WKBundleFrameRef, (WKBundlePageRef))
+
+#define PRISM_JSC(X) \
+    X(JSStringCreateWithUTF8CString, JSStringRef, (const char*)) \
+    X(JSStringRelease, void, (JSStringRef)) \
+    X(JSStringGetMaximumUTF8CStringSize, size_t, (JSStringRef)) \
+    X(JSStringGetUTF8CString, size_t, (JSStringRef, char*, size_t)) \
+    X(JSEvaluateScript, JSValueRef, (JSContextRef, JSStringRef, JSObjectRef, JSStringRef, int, JSValueRef*)) \
+    X(JSContextGetGlobalObject, JSObjectRef, (JSContextRef)) \
+    X(JSContextGetGlobalContext, JSGlobalContextRef, (JSContextRef)) \
+    X(JSGlobalContextRetain, JSGlobalContextRef, (JSGlobalContextRef)) \
+    X(JSGlobalContextRelease, void, (JSGlobalContextRef)) \
+    X(JSObjectMakeFunctionWithCallback, JSObjectRef, (JSContextRef, JSStringRef, JSObjectCallAsFunctionCallback)) \
+    X(JSObjectSetProperty, void, (JSContextRef, JSObjectRef, JSStringRef, JSValueRef, JSPropertyAttributes, JSValueRef*)) \
+    X(JSObjectGetProperty, JSValueRef, (JSContextRef, JSObjectRef, JSStringRef, JSValueRef*)) \
+    X(JSValueIsObject, bool, (JSContextRef, JSValueRef)) \
+    X(JSValueToObject, JSObjectRef, (JSContextRef, JSValueRef, JSValueRef*)) \
+    X(JSObjectIsFunction, bool, (JSContextRef, JSObjectRef)) \
+    X(JSObjectCallAsFunction, JSValueRef, (JSContextRef, JSObjectRef, JSObjectRef, size_t, const JSValueRef*, JSValueRef*)) \
+    X(JSValueMakeString, JSValueRef, (JSContextRef, JSStringRef)) \
+    X(JSValueMakeNumber, JSValueRef, (JSContextRef, double)) \
+    X(JSValueMakeUndefined, JSValueRef, (JSContextRef)) \
+    X(JSValueToStringCopy, JSStringRef, (JSContextRef, JSValueRef, JSValueRef*)) \
+    X(JSValueToNumber, double, (JSContextRef, JSValueRef, JSValueRef*))
+
 #define PRISM_BUNDLE_OPTIONAL(X) \
     X(WKBundlePageGetWebPageProxyIdentifierForTesting, uint64_t, (WKBundlePageRef)) \
     X(WKBundleFrameGetParentFrame, WKBundleFrameRef, (WKBundleFrameRef)) \

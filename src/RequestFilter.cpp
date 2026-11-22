@@ -210,7 +210,13 @@ void didReceiveSynchronousMessageWithListener(WKContextRef, WKStringRef name, WK
         auto value = Ref<WKStringRef>::adopt(WKStringCreateWithUTF8CString(text.c_str()));
         WKMessageListenerSendReply(held.get(), value.get());
     };
-    if (toUTF8(name) != "prism:check") {
+    std::string message = toUTF8(name);
+    if (message == "prism:contentScripts?") {
+        // A new web process: the extension content scripts it should run.
+        reply(extensions::contentScriptsPayload());
+        return;
+    }
+    if (message != "prism:check") {
         reply("");
         return;
     }
@@ -237,7 +243,17 @@ WKTypeRef initializationUserData(WKContextRef, const void*)
 
 void didReceivePageMessage(WKPageRef page, WKStringRef name, WKTypeRef body, const void*)
 {
-    if (toUTF8(name) != "prism:page")
+    std::string message = toUTF8(name);
+    // Extension content scripts in their own world (PrismBundle).
+    if (message == "prism:content") {
+        extensions::handleBundleContentMessage(page, bodyText(body));
+        return;
+    }
+    if (message == "prism:execResult") {
+        extensions::executeFinished(bodyText(body));
+        return;
+    }
+    if (message != "prism:page")
         return;
     uint64_t id = std::strtoull(bodyText(body).c_str(), nullptr, 10);
     if (id)

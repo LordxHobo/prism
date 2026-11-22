@@ -22,12 +22,20 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.15</span>
+      <span class="version">Version 0.9.16</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">A new Extensions panel</h2>
+    <h2 style="margin-top:0">Extensions in their own space</h2>
+    <ul>
+      <li><strong>Isolated content scripts:</strong> the scripts extensions add to websites (Bitwarden's autofill, uBlock's page cleanup and so on) now run in a JavaScript space of their own, like in Chrome. They still see and change the page, but the website can't see, hook into or tamper with them. Scripts that extensions run on demand (executeScript) use the same space.</li>
+      <li><strong>Passwords button:</strong> a lock button next to the Extensions button opens your saved passwords.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>A new Extensions panel</h2>
     <ul>
       <li><strong>Extensions panel:</strong> the puzzle button opens a panel listing your extensions, grouped by whether they can see and change the site you're on. Click one to open it, pin it to the toolbar, or use ≡ for its options, inspecting and managing. "Manage extensions" is at the bottom.</li>
       <li><strong>Icons from protected sites:</strong> when a site turns away Prism's own icon request (common behind bot checks), the page you have open now fetches its icon instead. Bookmarks for such sites get their icon the next time you visit them.</li>

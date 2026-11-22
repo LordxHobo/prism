@@ -60,9 +60,9 @@ std::string fail(const std::string& message)
     return "{\"ok\":false,\"error\":" + json::quote(message) + "}";
 }
 
-void complete(WKCompletionListenerRef listener, const std::string& json)
+void complete(const Reply& listener, const std::string& json)
 {
-    WKCompletionListenerComplete(listener, stringUTF8(json).get());
+    listener.send(json);
 }
 
 std::string raw(const std::string& text, const json::Value& value)
@@ -239,7 +239,7 @@ struct Context {
     bool mainFrame { true };
     int frameId { 0 };
     std::string url;
-    Ref<WKCompletionListenerRef> poll;
+    Reply poll;
     ULONGLONG pollSince { 0 };
     ULONGLONG repollDeadline { 0 }; // must ask again by then, or it's gone
     std::vector<std::string> queue;
@@ -250,7 +250,7 @@ int g_nextContext = 1;
 int g_nextFrameId = 1;
 
 struct PendingMessage {
-    Ref<WKCompletionListenerRef> listener;
+    Reply listener;
     std::set<int> waiting;
 };
 std::map<int, PendingMessage> g_pending;
@@ -276,7 +276,7 @@ void flush(Context& context)
         batch += (i ? "," : "") + context.queue[i];
     batch += "]";
     context.queue.clear();
-    Ref<WKCompletionListenerRef> listener = std::move(context.poll);
+    Reply listener = std::move(context.poll);
     context.poll = { };
     context.repollDeadline = GetTickCount64() + 8000;
     complete(listener.get(), ok(batch));
@@ -296,7 +296,7 @@ void finishPending(int messageId, const std::string& result)
     auto found = g_pending.find(messageId);
     if (found == g_pending.end())
         return;
-    Ref<WKCompletionListenerRef> listener = std::move(found->second.listener);
+    Reply listener = std::move(found->second.listener);
     g_pending.erase(found);
     complete(listener.get(), ok(result));
 }
@@ -662,7 +662,7 @@ struct HostView {
     bool reportedSilent { false }; // "didn't start" already logged
     // chrome.offscreen documents (hidden, like backgrounds)
     bool offscreen { false };
-    Ref<WKCompletionListenerRef> created; // createDocument() waits for the load
+    Reply created; // createDocument() waits for the load
     ULONGLONG closeAt { 0 };              // closeDocument() was called; kept a while for reuse
 };
 
@@ -1009,7 +1009,7 @@ void hostDidFailNavigation(WKPageRef, WKNavigationRef, WKErrorRef error, WKTypeR
 {
     HostView* host = hostFromClientInfo(clientInfo);
     if (host && host->offscreen && host->created) {
-        Ref<WKCompletionListenerRef> listener = std::move(host->created);
+        Reply listener = std::move(host->created);
         complete(listener.get(), fail("The offscreen document couldn't load."));
         return;
     }
@@ -1031,7 +1031,7 @@ void hostDidFinishNavigation(WKPageRef, WKNavigationRef, WKTypeRef, const void* 
 {
     HostView* host = hostFromClientInfo(clientInfo);
     if (host && host->offscreen && host->created) {
-        Ref<WKCompletionListenerRef> listener = std::move(host->created);
+        Reply listener = std::move(host->created);
         complete(listener.get(), ok());
         return;
     }
@@ -1101,7 +1101,7 @@ void closeOffscreen(const std::string& extId)
     std::unique_ptr<HostView> host = std::move(found->second);
     g_offscreen.erase(found);
     if (host->created) {
-        Ref<WKCompletionListenerRef> listener = std::move(host->created);
+        Reply listener = std::move(host->created);
         complete(listener.get(), fail("The offscreen document was closed."));
     }
     killContextsOfPage(host->page);
@@ -1346,7 +1346,7 @@ void ensureTick()
 
 // Sends a message to `targets` and answers `listener` with the first
 // response (or none).
-void sendToTargets(const Context& from, const std::vector<int>& targets, const std::string& messageJSON, WKCompletionListenerRef listener)
+void sendToTargets(const Context& from, const std::vector<int>& targets, const std::string& messageJSON, const Reply& listener)
 {
     if (targets.empty()) {
         complete(listener, fail("Could not establish connection. Receiving end does not exist."));
@@ -1354,7 +1354,7 @@ void sendToTargets(const Context& from, const std::vector<int>& targets, const s
     }
     int messageId = g_nextMessage++;
     PendingMessage& pending = g_pending[messageId];
-    pending.listener = Ref<WKCompletionListenerRef>::retain(listener);
+    pending.listener = Reply(listener);
     std::string event = "{\"type\":\"message\",\"id\":" + std::to_string(messageId) + ",\"message\":" + messageJSON + ",\"sender\":" + senderJSON(from) + "}";
     for (int target : targets) {
         pending.waiting.insert(target);
@@ -1387,12 +1387,12 @@ std::vector<int> contentTargets(const std::string& extId, int tabId, int frameId
 
 // Operations every context can use: waiting for events, answering messages,
 // sending messages and using ports. Returns false if `op` isn't one of them.
-bool commonOperation(Context& context, const std::string& op, const std::string& text, const json::Value& message, WKCompletionListenerRef listener)
+bool commonOperation(Context& context, const std::string& op, const std::string& text, const json::Value& message, const Reply& listener)
 {
     if (op == "poll") {
         if (context.poll)
             complete(context.poll.get(), ok("[]"));
-        context.poll = Ref<WKCompletionListenerRef>::retain(listener);
+        context.poll = Reply(listener);
         context.pollSince = GetTickCount64();
         context.repollDeadline = 0;
         flush(context);
@@ -1506,11 +1506,13 @@ bool commonOperation(Context& context, const std::string& op, const std::string&
 // Running code in tabs (tabs.executeScript, scripting.executeScript, insertCSS)
 
 struct ScriptCall {
-    Ref<WKCompletionListenerRef> listener;
+    Reply listener;
     bool wrapInArray { false }; // tabs.executeScript returns [result]
     int frameId { 0 };
     bool scripting { false };   // scripting.executeScript returns [{frameId, result}]
 };
+
+void finishScriptCall(std::unique_ptr<ScriptCall> call, const std::string& text);
 
 void scriptFinished(WKTypeRef result, WKErrorRef, void* context)
 {
@@ -1518,6 +1520,34 @@ void scriptFinished(WKTypeRef result, WKErrorRef, void* context)
     std::string text;
     if (result && WKGetTypeID(result) == WKStringGetTypeID())
         text = util::toUTF8(toWide(static_cast<WKStringRef>(result)));
+    finishScriptCall(std::move(call), text);
+}
+
+// executeScript in an extension's own world (PrismBundle runs it and sends
+// "prism:execResult"); a page that never answers fails after 10 s.
+struct PendingExec {
+    std::unique_ptr<ScriptCall> call;
+    ULONGLONG deadline { 0 };
+};
+std::map<int, PendingExec> g_execCalls;
+int g_nextExec = 1;
+
+void CALLBACK execTimeouts(HWND, UINT, UINT_PTR id, DWORD)
+{
+    ULONGLONG now = GetTickCount64();
+    for (auto it = g_execCalls.begin(); it != g_execCalls.end();) {
+        if (now >= it->second.deadline) {
+            complete(it->second.call->listener, fail("The script didn't run (the page went away or didn't answer)."));
+            it = g_execCalls.erase(it);
+        } else
+            ++it;
+    }
+    if (g_execCalls.empty())
+        KillTimer(nullptr, id);
+}
+
+void finishScriptCall(std::unique_ptr<ScriptCall> call, const std::string& text)
+{
     json::Value parsed;
     std::string value = "null";
     if (!text.empty() && json::parse(text, parsed) && parsed.isObject()) {
@@ -1566,6 +1596,16 @@ void runInTab(Extension& ext, int tabId, const std::string& script, std::unique_
     }
     if (!mayScript(ext, tab)) {
         complete(call->listener.get(), fail("Cannot access contents of the page. Extension manifest must request permission to access the respective host."));
+        return;
+    }
+    if (Extension* own = &ext; isolatedContentScripts() && WKPagePostMessageToInjectedBundle) {
+        // In the extension's own world, like its content scripts.
+        int id = g_nextExec++;
+        bool first = g_execCalls.empty();
+        g_execCalls[id] = { std::move(call), GetTickCount64() + 10000 };
+        WKPagePostMessageToInjectedBundle(tab.page, stringUTF8("prism:exec").get(), stringUTF8(std::to_string(id) + "\t" + own->id + "\t" + script).get());
+        if (first)
+            SetTimer(nullptr, 0, 1000, execTimeouts);
         return;
     }
     WKPageEvaluateJavaScriptInMainFrame(tab.page, stringUTF8(script).get(), call.release(), scriptFinished);
@@ -1705,12 +1745,20 @@ void storageChanged(Extension& ext, const std::string& area, const std::string& 
     }
 }
 
-void handleContentMessage(Extension& ext, WKScriptMessageRef message, const std::string& text, const json::Value& parsed, WKCompletionListenerRef listener)
+void handleContentMessage(Extension& ext, WKScriptMessageRef message, const std::string& text, const json::Value& parsed, const Reply& listener)
+{
+    WKFrameInfoRef frame = WKScriptMessageGetFrameInfo(message);
+    ContentFrame from;
+    from.page = frame ? WKFrameInfoGetPage(frame) : nullptr;
+    from.mainFrame = frame && WKFrameInfoGetIsMainFrame(frame);
+    handleContentMessage(ext, from, text, parsed, listener);
+}
+
+void handleContentMessage(Extension& ext, const ContentFrame& from, const std::string& text, const json::Value& parsed, const Reply& listener)
 {
     std::string op = parsed["op"].asString();
     perf::Scope busy("an extension's content script message", ext.name + ": " + op);
-    WKFrameInfoRef frame = WKScriptMessageGetFrameInfo(message);
-    WKPageRef page = frame ? WKFrameInfoGetPage(frame) : nullptr;
+    WKPageRef page = from.page;
 
     if (op == "hello") {
         Context context;
@@ -1718,7 +1766,7 @@ void handleContentMessage(Extension& ext, WKScriptMessageRef message, const std:
         context.extId = ext.id;
         context.kind = Kind::Content;
         context.page = page;
-        context.mainFrame = frame && WKFrameInfoGetIsMainFrame(frame);
+        context.mainFrame = from.mainFrame;
         context.frameId = context.mainFrame ? 0 : g_nextFrameId++;
         context.url = parsed["url"].asString();
         context.repollDeadline = GetTickCount64() + 10000;
@@ -1872,7 +1920,7 @@ std::vector<std::string> permissionItems(const json::Value& value)
     return out;
 }
 
-void pageOperation(Extension& ext, Context& context, const std::string& op, const std::string& text, const json::Value& message, WKCompletionListenerRef listener)
+void pageOperation(Extension& ext, Context& context, const std::string& op, const std::string& text, const json::Value& message, const Reply& listener)
 {
     if (commonOperation(context, op, text, message, listener))
         return;
@@ -1964,7 +2012,7 @@ void pageOperation(Extension& ext, Context& context, const std::string& op, cons
             return;
         }
         host->offscreen = true;
-        host->created = Ref<WKCompletionListenerRef>::retain(listener);
+        host->created = Reply(listener);
         consoleNote(ext.id, "prism", "Opening offscreen document " + full.substr(baseURL(ext).size()) + ".");
         WKPageLoadURL(host->page, url(util::fromUTF8(full)).get());
         g_offscreen[ext.id] = std::move(host);
@@ -2042,7 +2090,7 @@ void pageOperation(Extension& ext, Context& context, const std::string& op, cons
         for (auto& pair : message["headers"].items())
             request.headers.emplace_back(util::fromUTF8(pair[0].asString()), util::fromUTF8(pair[1].asString()));
         request.body = decodeBase64(message["body"].asString());
-        auto held = Ref<WKCompletionListenerRef>::retain(listener);
+        auto held = Reply(listener);
         std::thread([request, held] {
             http::Response response;
             std::wstring error;
@@ -2145,7 +2193,7 @@ void pageOperation(Extension& ext, Context& context, const std::string& op, cons
         int tabId = targetTab(context, message["tabId"]);
         const json::Value& details = message["details"];
         auto call = std::make_unique<ScriptCall>();
-        call->listener = Ref<WKCompletionListenerRef>::retain(listener);
+        call->listener = Reply(listener);
         if (op == "tabs.executeScript") {
             call->wrapInArray = true;
             std::string code = details["code"].isString() ? details["code"].asString() : readFiles(ext, details["files"]);
@@ -2166,7 +2214,7 @@ void pageOperation(Extension& ext, Context& context, const std::string& op, cons
         const json::Value& details = message["details"];
         int tabId = static_cast<int>(details["target"]["tabId"].asNumber(-1));
         auto call = std::make_unique<ScriptCall>();
-        call->listener = Ref<WKCompletionListenerRef>::retain(listener);
+        call->listener = Reply(listener);
         if (op == "scripting.executeScript") {
             call->scripting = true;
             std::string script;
@@ -3316,6 +3364,19 @@ void windowRemoved(int windowId)
 void windowFocused(int windowId)
 {
     broadcastTabEvent("windows.onFocusChanged", [&](const Extension&) { return "[" + std::to_string(windowId) + "]"; });
+}
+
+void executeFinished(const std::string& body)
+{
+    size_t tab = body.find('\t');
+    if (tab == std::string::npos)
+        return;
+    auto found = g_execCalls.find(atoi(body.substr(0, tab).c_str()));
+    if (found == g_execCalls.end())
+        return;
+    std::unique_ptr<ScriptCall> call = std::move(found->second.call);
+    g_execCalls.erase(found);
+    finishScriptCall(std::move(call), body.substr(tab + 1));
 }
 
 } // namespace extensions

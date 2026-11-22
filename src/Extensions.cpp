@@ -36,6 +36,10 @@ namespace fs = std::filesystem;
 
 namespace extensions {
 
+bool isolatedContentScripts();
+extern std::string g_contentPayload;
+void contentStorage(Extension&, const std::string& op, const std::string& text, const json::Value& parsed, const Reply& listener);
+
 using namespace wk;
 
 namespace {
@@ -765,11 +769,14 @@ std::string joinFiles(const fs::path& dir, const std::vector<std::string>& files
     return out;
 }
 
-std::string buildUserScript(const Extension& ext)
+std::string buildUserScript(const Extension& ext, bool isolated)
 {
     std::string config = "{\"id\":" + json::quote(ext.id);
     config += ",\"name\":" + json::quote(ext.name);
-    config += ",\"token\":" + json::quote(ext.token);
+    // In its own world the scripts talk through PrismBundle, which knows
+    // which extension they are; in the page's world they need the token.
+    config += isolated ? std::string(",\"isolated\":true") : ",\"token\":" + json::quote(ext.token);
+    config += std::string(",\"family\":\"") + (ext.source == "firefox" ? "firefox" : "chrome") + "\"";
     config += ",\"uiLanguage\":" + json::quote(ext.uiLanguage);
     config += ",\"base\":" + json::quote(internal::baseURL(ext));
     config += ",\"manifest\":" + ext.manifestJSON;
@@ -805,14 +812,29 @@ std::string buildUserScript(const Extension& ext)
 
 void rebuildUserScripts()
 {
+    bool isolated = isolatedContentScripts();
     std::vector<std::string> sources;
+    std::string payload;
+    int count = 0;
     if (!g_runtimeSource.empty()) {
         for (auto& ext : g_extensions) {
-            if (ext->enabled && !ext->contentScripts.empty())
-                sources.push_back(buildUserScript(*ext));
+            if (!ext->enabled || ext->contentScripts.empty())
+                continue;
+            std::string source = buildUserScript(*ext, isolated);
+            if (isolated) {
+                payload += ext->id + "\t" + std::to_string(source.size()) + "\n" + source;
+                count++;
+            } else
+                sources.push_back(std::move(source));
         }
     }
     engine::setUserScripts("extensions", std::move(sources));
+    if (isolated) {
+        // Every web process gets them (they ask at start, see RequestFilter).
+        g_contentPayload = std::to_string(count) + "\n" + payload;
+        if (WKContextRef context = engine::context())
+            WKContextPostMessageToInjectedBundle(context, wk::stringUTF8("prism:contentScripts").get(), wk::stringUTF8(g_contentPayload).get());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1615,17 +1637,98 @@ void handleScriptMessage(WKScriptMessageRef message, WKCompletionListenerRef lis
         host::handleContentMessage(*ext, message, text, parsed, listener);
         return;
     }
+    contentStorage(*ext, op, text, parsed, listener);
+}
+
+void contentStorage(Extension& ext, const std::string& op, const std::string& text, const json::Value& parsed, const Reply& listener)
+{
     std::string error;
-    std::string result = storageOperation(*ext, op, text, parsed, error);
+    std::string result = storageOperation(ext, op, text, parsed, error);
     if (error.empty() && op != "storage.get" && op != "storage.bytes") {
         json::Value changed;
         if (json::parse(result, changed))
-            host::storageChanged(*ext, parsed["area"].asString(), rawOf(result, changed["changes"]), static_cast<int>(parsed["ctx"].asNumber(0)));
+            host::storageChanged(ext, parsed["area"].asString(), rawOf(result, changed["changes"]), static_cast<int>(parsed["ctx"].asNumber(0)));
     }
     if (!error.empty())
-        reply(listener, "{\"ok\":false,\"error\":" + json::quote(error) + "}");
+        listener.send("{\"ok\":false,\"error\":" + json::quote(error) + "}");
     else
-        reply(listener, "{\"ok\":true,\"result\":" + (result.empty() ? std::string("null") : result) + "}");
+        listener.send("{\"ok\":true,\"result\":" + (result.empty() ? std::string("null") : result) + "}");
+}
+
+// Content scripts in their own JavaScript world (PrismBundle's
+// ContentScripts.cpp): "<document>\t<1 = main frame>\t<extension>\t<call
+// id>\t<message>". Only the bundle can send these (pages can't), and it
+// names the extension whose world the message came from, so no token.
+void handleBundleContentMessage(WKPageRef page, const std::string& body)
+{
+    size_t at[4];
+    size_t position = 0;
+    for (int i = 0; i < 4; i++) {
+        at[i] = body.find('\t', position);
+        if (at[i] == std::string::npos)
+            return;
+        position = at[i] + 1;
+    }
+    std::string document = body.substr(0, at[0]);
+    bool mainFrame = body.substr(at[0] + 1, at[1] - at[0] - 1) == "1";
+    std::string extensionId = body.substr(at[1] + 1, at[2] - at[1] - 1);
+    std::string callId = body.substr(at[2] + 1, at[3] - at[2] - 1);
+    std::string text = body.substr(at[3] + 1);
+
+    auto heldPage = wk::Ref<WKPageRef>::retain(page);
+    Reply listener([heldPage, document, callId](const std::string& answer) {
+        if (WKPagePostMessageToInjectedBundle)
+            WKPagePostMessageToInjectedBundle(heldPage.get(), wk::stringUTF8("prism:contentReply").get(), wk::stringUTF8(document + "\t" + callId + "\t" + answer).get());
+    });
+    Extension* ext = findExtension(extensionId);
+    json::Value parsed;
+    if (!ext || !ext->enabled) {
+        listener.send("{\"ok\":false,\"error\":\"Unknown extension\"}");
+        return;
+    }
+    if (text.size() > 64 * 1024 * 1024 || !json::parse(text, parsed) || !parsed.isObject()) {
+        listener.send("{\"ok\":false,\"error\":\"Invalid message\"}");
+        return;
+    }
+    std::string op = parsed["op"].asString();
+    if (op.rfind("storage.", 0) == 0) {
+        contentStorage(*ext, op, text, parsed, listener);
+        return;
+    }
+    host::ContentFrame from;
+    from.page = page;
+    from.mainFrame = mainFrame;
+    host::handleContentMessage(*ext, from, text, parsed, listener);
+}
+
+// Whether content scripts run in their own JavaScript world: PrismBundle is
+// there and this WebKit has what it needs (the same functions the bundle
+// looks up; they live in the same DLLs in this process).
+bool isolatedContentScripts()
+{
+    static int answer = -1;
+    if (answer < 0) {
+        answer = 0;
+        std::error_code error;
+        std::wstring bundle = requestfilter::bundlePath();
+        HMODULE webkit = GetModuleHandleW(L"WebKit2.dll");
+        if (!webkit)
+            webkit = GetModuleHandleW(L"WebKit.dll");
+        HMODULE jsc = GetModuleHandleW(L"JavaScriptCore.dll");
+        if (!bundle.empty() && fs::exists(bundle, error) && webkit && jsc && WKPagePostMessageToInjectedBundle
+            && GetProcAddress(webkit, "WKBundleFrameGetJavaScriptContextForWorld") && GetProcAddress(webkit, "WKBundleScriptWorldCreateWorld")
+            && GetProcAddress(webkit, "WKBundlePageSetPageLoaderClient") && GetProcAddress(webkit, "WKBundlePageGetMainFrame")
+            && GetProcAddress(jsc, "JSEvaluateScript") && GetProcAddress(jsc, "JSObjectMakeFunctionWithCallback"))
+            answer = 1;
+    }
+    return answer == 1;
+}
+
+std::string g_contentPayload = "0\n"; // what PrismBundle gets (see ContentScripts.cpp)
+
+std::string contentScriptsPayload()
+{
+    return g_contentPayload;
 }
 
 std::string handleCommand(const std::wstring& command, const std::wstring& argument, HWND owner)
@@ -1947,7 +2050,9 @@ std::string injectionScript(const Extension& ext, const std::string& code)
         return "undefined";
     std::string config = "{\"id\":" + json::quote(ext.id);
     config += ",\"name\":" + json::quote(ext.name);
-    config += ",\"token\":" + json::quote(ext.token);
+    // Runs where the extension's content scripts run (see buildUserScript).
+    config += isolatedContentScripts() ? std::string(",\"isolated\":true") : ",\"token\":" + json::quote(ext.token);
+    config += std::string(",\"family\":\"") + (ext.source == "firefox" ? "firefox" : "chrome") + "\"";
     config += ",\"uiLanguage\":" + json::quote(ext.uiLanguage);
     config += ",\"base\":" + json::quote(baseURL(ext));
     config += ",\"manifest\":" + ext.manifestJSON;

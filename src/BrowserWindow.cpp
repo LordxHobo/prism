@@ -876,6 +876,8 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
         ShellExecuteW(m_hwnd, L"open", settings::downloadDirectory().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     } else if (command == L"settings") {
         openInternalPage(L"settings");
+    } else if (command == L"passwords") {
+        openInternalPage(L"passwords");
     } else if (command == L"extensions") {
         openInternalPage(L"extensions");
     } else if (command == L"extensionsMenu") {

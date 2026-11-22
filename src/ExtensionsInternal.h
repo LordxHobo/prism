@@ -13,11 +13,53 @@
 
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace extensions {
+
+// Where an answer to an extension script goes: a WebKit script message's
+// completion listener (pages, and content scripts in the page's world), or a
+// message back to PrismBundle (content scripts in their own world). Copies
+// share one answer; only the first send() counts.
+class Reply {
+public:
+    Reply() = default;
+    Reply(WKCompletionListenerRef listener) // NOLINT: implicit on purpose
+        : m_state(listener ? std::make_shared<State>() : nullptr)
+    {
+        if (m_state)
+            m_state->listener = wk::Ref<WKCompletionListenerRef>::retain(listener);
+    }
+    explicit Reply(std::function<void(const std::string&)> send)
+        : m_state(std::make_shared<State>())
+    {
+        m_state->send = std::move(send);
+    }
+    explicit operator bool() const { return m_state && !m_state->done; }
+    void send(const std::string& json) const
+    {
+        if (!m_state || m_state->done)
+            return;
+        m_state->done = true;
+        if (m_state->listener)
+            wk::WKCompletionListenerComplete(m_state->listener.get(), wk::stringUTF8(json).get());
+        else if (m_state->send)
+            m_state->send(json);
+    }
+    const Reply& get() const { return *this; } // reads like the Ref it replaced
+
+private:
+    struct State {
+        wk::Ref<WKCompletionListenerRef> listener;
+        std::function<void(const std::string&)> send;
+        bool done { false };
+    };
+    std::shared_ptr<State> m_state;
+};
 
 struct ContentScript {
     std::vector<std::string> matches, excludeMatches, includeGlobs, excludeGlobs, js, css;
@@ -147,7 +189,13 @@ void removed(const std::string& id);
 // Closes the extension's background page and popups (before its files change).
 void stop(const std::string& id);
 // Content scripts' messages that aren't storage (messaging, ports, polling).
-void handleContentMessage(Extension&, WKScriptMessageRef, const std::string& text, const json::Value& message, WKCompletionListenerRef reply);
+void handleContentMessage(Extension&, WKScriptMessageRef, const std::string& text, const json::Value& message, const Reply& reply);
+// The frame a content script message came from.
+struct ContentFrame {
+    WKPageRef page { nullptr };
+    bool mainFrame { false };
+};
+void handleContentMessage(Extension&, const ContentFrame&, const std::string& text, const json::Value& message, const Reply& reply);
 // Storage changes go to every part of the extension.
 void storageChanged(Extension&, const std::string& area, const std::string& changesJSON, int fromContext);
 // The background page's state for the Extensions page: {"state": "none" |

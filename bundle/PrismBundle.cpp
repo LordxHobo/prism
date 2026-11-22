@@ -18,6 +18,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "BundleApi.h"
+#include "ContentScripts.h"
 #include "RequestKind.h"
 
 #include <windows.h>
@@ -25,12 +26,13 @@
 #include <string>
 #include <unordered_map>
 
-namespace {
-
+// WebKit's functions (shared with ContentScripts.cpp).
 #define PRISM_BUNDLE_DEFINE(name, ret, params) ret (*name) params = nullptr;
 PRISM_BUNDLE_REQUIRED(PRISM_BUNDLE_DEFINE)
 PRISM_BUNDLE_OPTIONAL(PRISM_BUNDLE_DEFINE)
 #undef PRISM_BUNDLE_DEFINE
+
+namespace {
 
 WKBundleRef g_bundle = nullptr;
 bool g_filtering = false;
@@ -299,6 +301,7 @@ WKBundlePageResourceLoadClientV0 g_resourceClient = {
 void didCreatePage(WKBundleRef, WKBundlePageRef page, const void*)
 {
     WKBundlePageSetResourceLoadClient(page, &g_resourceClient.base);
+    content::pageCreated(page);
     // Lets Prism match this page's requests to its tab.
     WKStringRef name = WKStringCreateWithUTF8CString("prism:page");
     WKStringRef body = WKStringCreateWithUTF8CString(std::to_string(pageIdentifier(page)).c_str());
@@ -307,19 +310,36 @@ void didCreatePage(WKBundleRef, WKBundlePageRef page, const void*)
     WKRelease(name);
 }
 
+void willDestroyPage(WKBundleRef, WKBundlePageRef page, const void*)
+{
+    content::pageDestroyed(page);
+}
+
 void didReceiveMessage(WKBundleRef, WKStringRef name, WKTypeRef body, const void*)
 {
-    if (toUTF8(name) == "prism:filter")
+    std::string message = toUTF8(name);
+    if (message == "prism:filter")
         applyConfig(bodyString(body));
+    else if (message == "prism:contentScripts")
+        content::scriptsChanged(bodyString(body));
+}
+
+void didReceiveMessageToPage(WKBundleRef, WKBundlePageRef page, WKStringRef name, WKTypeRef body, const void*)
+{
+    std::string message = toUTF8(name);
+    if (message == "prism:contentReply")
+        content::reply(bodyString(body));
+    else if (message == "prism:exec")
+        content::execute(page, bodyString(body));
 }
 
 WKBundleClientV1 g_bundleClient = {
     { 1, nullptr },
     didCreatePage,
-    nullptr,
+    willDestroyPage,
     nullptr,
     didReceiveMessage,
-    nullptr,
+    didReceiveMessageToPage,
 };
 
 } // namespace
@@ -330,6 +350,7 @@ extern "C" __declspec(dllexport) void WKBundleInitialize(WKBundleRef bundle, WKT
         return; // a WebKit this bundle doesn't know: pages just aren't filtered
     g_bundle = bundle;
     applyConfig(bodyString(initializationUserData));
+    content::initialize(bundle); // extension content scripts in their own worlds
     WKBundleSetClient(bundle, &g_bundleClient.base);
 }
 

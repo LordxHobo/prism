@@ -870,6 +870,7 @@ elements.extensions.addEventListener('click', () => {
   send('extensionsMenu', Math.round(rect.right) + ',' + Math.round(rect.bottom + 4));
 });
 $('home').addEventListener('click', () => send('home'));
+$('passwords').addEventListener('click', () => send('passwords'));
 $('sidebarToggle').addEventListener('click', () => send('sidebarToggle'));
 $('sidebarNewTab').addEventListener('click', () => send('newtab'));
 

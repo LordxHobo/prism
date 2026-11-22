@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.16
+
+- **Content scripts in isolated worlds** (`bundle/ContentScripts.*`): PrismBundle creates one `WKBundleScriptWorld` per extension and, on each `didClearWindowObjectForFrame` for the normal world (every new document, all frames), evaluates each extension's content-script runtime (ui/extension-runtime.js + config + scripts; it still checks matches/run_at itself) in that extension's world, with `__prismNative(text, id)` defined there. Messages go to Prism as page messages `prism:content` ("<document>\t<main frame>\t<extension>\t<call id>\t<message>"; no token needed, only the bundle can send them); answers come back with `WKPagePostMessageToInjectedBundle` `prism:contentReply` and are handed to the world's `__prismReceive` (shared by every runtime copy in that world). Worlds' contexts are retained per document and released on the next document in the frame, `didRemoveFrameFromHierarchy`, page destruction, or past 2000. New web processes ask for the scripts with the synchronous `prism:contentScripts?`; changes are broadcast as `prism:contentScripts` (length-prefixed payload).
+- tabs/scripting.executeScript and insertCSS/removeCSS run in the extension's world in the main frame (`prism:exec` → `prism:execResult`, 10 s timeout).
+- In their world, content scripts also get `chrome` (and `browser` for Firefox Add-ons installs) as globals.
+- `extensions::Reply` (WebKit completion listener or a callback) replaces `Ref<WKCompletionListenerRef>` in ExtensionHost, so content-script answers can go either way. Falls back to the page world when the bundle is missing or WebKit lacks the bundle world/JavaScriptCore functions (`isolatedContentScripts()` checks the same exports in the UI process).
+- Bundle function tables: `PRISM_BUNDLE_CONTENT` (page loader client V0, script worlds, frame JS contexts, main frame) and `PRISM_JSC` (JavaScriptCore.dll), verified against WebKit's headers. UI: `WKPagePostMessageToInjectedBundle`.
+- Toolbar: a lock button (Passwords) between the Extensions button and the menu.
+
 ## 0.9.15
 
 - **Extensions panel** (`src/ExtensionsPanel.*`, `ui/extensions-panel.*`, like the Shields panel): the puzzle button opens a panel instead of a native menu. Extensions with buttons, grouped "Full access" / "No access needed" for the current website (`actionsJSON` `access`: host permissions or content script matches for the tab's URL); click opens the popup (or sends action.onClicked) under the puzzle button, pin = show on the toolbar (`settings::setActionHidden`), ≡ = Options, Manage extension, Inspect popup, Inspect background page; "Manage extensions" footer.

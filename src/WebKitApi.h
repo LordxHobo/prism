@@ -627,6 +627,7 @@ typedef struct WKPageContextMenuClientV4 {
     X(WKContextPostMessageToInjectedBundle, void, (WKContextRef, WKStringRef, WKTypeRef)) \
     X(WKMessageListenerSendReply, void, (WKMessageListenerRef, WKTypeRef)) \
     X(WKPageSetPageInjectedBundleClient, void, (WKPageRef, const WKPageInjectedBundleClientBase*)) \
+    X(WKPagePostMessageToInjectedBundle, void, (WKPageRef, WKStringRef, WKTypeRef)) \
     X(WKPageSetPageContextMenuClient, void, (WKPageRef, const WKPageContextMenuClientBase*)) \
     X(WKContextMenuItemCreateAsAction, WKContextMenuItemRef, (WKContextMenuItemTag, WKStringRef, bool)) \
     X(WKContextMenuItemCreateAsCheckableAction, WKContextMenuItemRef, (WKContextMenuItemTag, WKStringRef, bool, bool)) \

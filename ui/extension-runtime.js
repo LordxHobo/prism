@@ -10,22 +10,50 @@
 // entry's styles and scripts at the right time, giving them a chrome.* /
 // browser.* object for the APIs Prism supports.
 //
-// WebKit's Windows API can only run scripts in the page's own JavaScript
-// world (not an isolated one like Chrome does), so this code is careful:
+// Normally (config.isolated) PrismBundle runs this in the extension's own
+// JavaScript world, like Chrome: the page can't see or touch it, and it
+// talks to Prism through __prismNative, which only exists in that world.
+// Without the bundle it runs in the page's own world, so this code is
+// careful either way:
 // - everything it relies on is captured before any page script runs, and
 // - the per-extension token that proves a message comes from the extension
-//   is never stored anywhere a page script can reach.
+//   (page world only) is never stored anywhere a page script can reach.
 (function (config, scripts) {
   'use strict';
 
   const win = window;
   const doc = document;
+  const native = config.isolated ? win.__prismNative : null;
   const handlers = win.webkit && win.webkit.messageHandlers;
-  const handler = handlers && handlers.prismExtension;
-  if (!handler) return;
+  const handler = !config.isolated && handlers && handlers.prismExtension;
+  if (!native && !handler) return;
+
+  // In the extension's world, answers come back through __prismReceive(id,
+  // text), shared by every copy of this runtime in the world (content
+  // scripts and executeScript files).
+  function isolatedPost(text) {
+    let shared = win.__prismShared;
+    if (!shared) {
+      shared = { next: 1, pending: new Map() };
+      Object.defineProperty(win, '__prismShared', { value: shared });
+      Object.defineProperty(win, '__prismReceive', {
+        value: (id, answer) => {
+          const resolve = shared.pending.get(id);
+          if (!resolve) return;
+          shared.pending.delete(id);
+          resolve(answer);
+        },
+      });
+    }
+    return new Promise((resolve) => {
+      const id = shared.next++;
+      shared.pending.set(id, resolve);
+      native(text, id);
+    });
+  }
 
   // ---- Captured built-ins -----------------------------------------------
-  const post = handler.postMessage.bind(handler);
+  const post = native ? isolatedPost : handler.postMessage.bind(handler);
   const stringify = JSON.stringify;
   const parseJSON = JSON.parse;
   const PromiseCtor = Promise;
@@ -492,6 +520,12 @@
     if (entry.css) addStyle(entry.css);
     const script = scripts[i];
     if (typeof script !== 'function') continue;
+    // In its own world the extension's scripts also see chrome/browser as
+    // globals, like in Chrome and Firefox (the page can't see them there).
+    if (native && !win.chrome) {
+      defineProperty(win, 'chrome', { value: api, writable: true, configurable: true });
+      if (config.family === 'firefox') defineProperty(win, 'browser', { value: api, writable: true, configurable: true });
+    }
     whenReady(entry.runAt, () => {
       try {
         apply(script, win, [api, api]);

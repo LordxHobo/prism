@@ -41,6 +41,14 @@ std::string handleCommand(const std::wstring& command, const std::wstring& argum
 // The script message handler extension pages (background, popup, options)
 // talk to; see ui/extension-page.js.
 void handlePageMessage(WKScriptMessageRef, WKCompletionListenerRef reply);
+// Content scripts in their own JavaScript world talk through PrismBundle:
+// its "prism:content" page messages, and the scripts it asks for at start
+// ("prism:contentScripts?").
+void handleBundleContentMessage(WKPageRef, const std::string& body);
+std::string contentScriptsPayload();
+// "prism:execResult": "<call id>\t<result JSON>" (executeScript in an extension's world).
+void executeFinished(const std::string& body);
+bool isolatedContentScripts();
 
 // Toolbar buttons for the tab `tabId` (JSON array), and what happens when
 // one is clicked or right-clicked (position in the toolbar's CSS pixels;
