@@ -29,6 +29,7 @@ struct Request {
     std::wstring url;
     std::vector<std::pair<std::wstring, std::wstring>> headers;
     std::string body;
+    std::wstring userAgent; // "" = Prism's own ("Prism/<version>")
 };
 struct Response {
     int status { 0 };

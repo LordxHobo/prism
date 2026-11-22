@@ -20,6 +20,8 @@ namespace icons {
 namespace {
 
 constexpr size_t kMaxIconBytes = 512 * 1024;
+// Prism's own user agent (as WebKit sends it), for fetching icons.
+const wchar_t kBrowserAgent[] = L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
 constexpr ULONGLONG kRefreshAfterMs = 7ULL * 24 * 60 * 60 * 1000;
 
 struct Saved {
@@ -148,8 +150,12 @@ std::wstring extensionFor(const std::string& data)
     if (starts("\xFF\xD8\xFF", 3)) return L"jpg";
     if (starts("RIFF", 4) && data.size() > 12 && memcmp(data.data() + 8, "WEBP", 4) == 0) return L"webp";
     if (starts("BM", 2)) return L"bmp";
-    // SVG: text that has an <svg tag near the start.
-    std::string head = data.substr(0, 1024);
+    // AVIF (an ISO "ftyp" box naming avif/avis), in case a server sends it anyway.
+    if (data.size() > 12 && memcmp(data.data() + 4, "ftyp", 4) == 0 && (memcmp(data.data() + 8, "avif", 4) == 0 || memcmp(data.data() + 8, "avis", 4) == 0))
+        return L"avif";
+    // SVG: text that has an <svg tag near the start (after any XML header,
+    // doctype and comments).
+    std::string head = data.substr(0, 16 * 1024);
     for (auto& c : head)
         c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
     if (head.find("<svg") != std::string::npos)
@@ -279,7 +285,9 @@ void pageLoaded(const std::wstring& pageURL, const std::wstring& iconURL)
         auto fetch = [](const std::wstring& url, std::string& data) {
             http::Request request;
             request.url = url;
-            request.headers.push_back({ L"Accept", L"image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5" });
+            // No AVIF: image CDNs (Shopify, GitBook, ...) would send it.
+            request.headers.push_back({ L"Accept", L"image/png,image/svg+xml,image/x-icon,image/webp,image/*;q=0.8,*/*;q=0.5" });
+            request.userAgent = kBrowserAgent; // some sites turn away anything that isn't a browser
             http::Response response;
             std::wstring error;
             if (!http::request(request, response, error, kMaxIconBytes) || response.status < 200 || response.status >= 300)
@@ -395,6 +403,7 @@ void prefetchNext()
             http::Request request;
             request.url = front;
             request.headers.push_back({ L"Accept", L"text/html,application/xhtml+xml;q=0.9,*/*;q=0.5" });
+            request.userAgent = kBrowserAgent;
             http::Response response;
             std::wstring error;
             if (http::request(request, response, error, 1024 * 1024) && response.status >= 200 && response.status < 300)
@@ -406,7 +415,9 @@ void prefetchNext()
                 return false;
             http::Request request;
             request.url = url;
-            request.headers.push_back({ L"Accept", L"image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5" });
+            // No AVIF: image CDNs (Shopify, GitBook, ...) would send it.
+            request.headers.push_back({ L"Accept", L"image/png,image/svg+xml,image/x-icon,image/webp,image/*;q=0.8,*/*;q=0.5" });
+            request.userAgent = kBrowserAgent; // some sites turn away anything that isn't a browser
             http::Response response;
             std::wstring error;
             if (!http::request(request, response, error, kMaxIconBytes) || response.status < 200 || response.status >= 300)

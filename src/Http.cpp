@@ -163,7 +163,7 @@ bool request(const Request& input, Response& output, std::wstring& error, size_t
         return false;
     }
 
-    std::wstring agent = L"Prism/" PRISM_VERSION_WSTRING;
+    std::wstring agent = input.userAgent.empty() ? std::wstring(L"Prism/" PRISM_VERSION_WSTRING) : input.userAgent;
     HINTERNET rawSession = WinHttpOpen(agent.c_str(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!rawSession)
         rawSession = WinHttpOpen(agent.c_str(), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);

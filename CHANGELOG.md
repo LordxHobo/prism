@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.14
+
+- **Site icons**: icon and front-page requests send Prism's browser user agent (`http::Request::userAgent`; Prism's own "Prism/<version>" stays the default) and no longer offer AVIF in `Accept` (image CDNs such as Shopify's and GitBook's answered with AVIF, which `extensionFor` rejected). AVIF answers are recognized anyway (`ftyp` avif/avis → .avif), and SVG is sniffed in the first 16 KB instead of 1 KB (long XML headers/comments).
+
 ## 0.9.13
 
 - **Bookmark icons**: the bookmarks bar (`toolbar.js` `bookmarkMark`) and prism://bookmarks show `item.icon` (letter if missing or it fails to load); bookmark folder and overflow menus get the icon as a 32-bit menu bitmap (`src/MenuIcons.*`, WIC, cached per file; SVG icons can't be decoded there). `icons::prefetch(url)` fetches icons for sites not visited yet: one site at a time, the front page's `<link rel="icon">` (SVG or ~32 px preferred, then shortcut icon, then apple-touch-icon; relative, `//` and `&amp;` handled) or /favicon.ico, no cookies, public hosts only. Bookmarks prefetch 4 s after start and after each change. `icons::filePathFor`. Links windowscodecs.
