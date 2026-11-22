@@ -593,3 +593,28 @@ window.prismSettingsChanged = () => {
 const startSection = new URLSearchParams(location.search).get('section');
 if (startSection) requestAnimationFrame(() => window.prismShowSection(startSection));
 updateCurrentSection();
+
+// ---- About › Performance ------------------------------------------------------------
+function showPerformance(data) {
+  if (!data) return;
+  const parts = [];
+  parts.push(data.stalls ? data.stalls + ' time' + (data.stalls === 1 ? '' : 's') + ' Prism was busy for a quarter second or more (longest ' + data.longest + ' ms).' : 'Prism hasn\u2019t been noticeably busy.');
+  for (const ext of data.extensions || [])
+    parts.push(ext.name + ' made ' + ext.slow + ' request' + (ext.slow === 1 ? '' : 's') + ' wait (longest ' + ext.worst + ' ms' + (ext.timedOut ? ', ' + ext.timedOut + ' without an answer' : '') + ').');
+  $('perfSummary').textContent = parts.join(' ');
+  $('perfLog').textContent = (data.lines || []).join('\n') || 'Nothing noted yet.';
+  $('perfLog').scrollTop = $('perfLog').scrollHeight;
+}
+$('perfRefresh').addEventListener('click', () => showPerformance(ask('perf.log')));
+$('perfClear').addEventListener('click', () => showPerformance(ask('perf.clear')));
+$('perfCopy').addEventListener('click', () => {
+  const area = document.createElement('textarea');
+  area.value = $('perfSummary').textContent + '\n\n' + $('perfLog').textContent;
+  document.body.appendChild(area);
+  area.select();
+  document.execCommand('copy');
+  area.remove();
+  $('perfCopy').textContent = 'Copied';
+  setTimeout(() => { $('perfCopy').textContent = 'Copy'; }, 1500);
+});
+showPerformance(ask('perf.log'));

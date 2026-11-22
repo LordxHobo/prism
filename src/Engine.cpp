@@ -7,6 +7,8 @@
 #include "Blocker.h"
 #include "Extensions.h"
 #include "Passwords.h"
+#include "Tabs.h"
+#include "Icons.h"
 #include "RequestFilter.h"
 #include "Shields.h"
 #include "Settings.h"
@@ -212,6 +214,20 @@ bool initialize(std::wstring& error)
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { shields::handleScriptMessage(message, reply); }, nullptr);
     WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismExtensionPage").get(),
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { extensions::handlePageMessage(message, reply); }, nullptr);
+    // Site icons the page fetched itself (when Prism couldn't): only for the
+    // tab's own site, from its main frame.
+    WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismIcon").get(),
+        [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) {
+            WKCompletionListenerComplete(reply, stringUTF8("null").get());
+            WKTypeRef body = WKScriptMessageGetBody(message);
+            WKFrameInfoRef frame = WKScriptMessageGetFrameInfo(message);
+            if (!body || WKGetTypeID(body) != WKStringGetTypeID() || !frame || !WKFrameInfoGetIsMainFrame(frame))
+                return;
+            tabs::Info tab;
+            if (!tabs::findByPage(WKFrameInfoGetPage(frame), tab) || isInternalURL(tab.url))
+                return;
+            icons::storeFromPage(tab.url, util::toUTF8(toWide(static_cast<WKStringRef>(body))));
+        }, nullptr);
     WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismPasswords").get(),
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { passwords::handleScriptMessage(message, reply); }, nullptr);
     WKPageConfigurationSetUserContentController(s_pageConfiguration.get(), s_userContent.get());

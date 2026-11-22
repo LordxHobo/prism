@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "RequestFilter.h"
+#include "Perf.h"
 
 #include "Blocker.h"
 #include "Extensions.h"
@@ -214,6 +215,7 @@ void didReceiveSynchronousMessageWithListener(WKContextRef, WKStringRef name, WK
         return;
     }
     g_active = true;
+    perf::Scope busy("checking a page's request");
     answer(bodyText(body), reply);
 }
 

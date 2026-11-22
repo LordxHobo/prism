@@ -12,6 +12,7 @@
 #include "Icons.h"
 #include "Permissions.h"
 #include "Passwords.h"
+#include "Perf.h"
 #include "Privacy.h"
 #include "Settings.h"
 #include "Shields.h"
@@ -64,6 +65,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     privacy::initialize();
     // Prism Passwords: opens the vault with Windows if that's on.
     passwords::initialize();
+    perf::start(); // notes when Prism's main thread keeps pages waiting
         icons::setChangeListener([] { BrowserWindow::refreshToolbars(); });
     // Your own CSS for Prism's interface and for websites.
     usercss::initialize([] { BrowserWindow::applyInterfaceCSS(); });

@@ -14,6 +14,7 @@
 #include "Engine.h"
 #include "Http.h"
 #include "Json.h"
+#include "Perf.h"
 #include "Util.h"
 
 #include <algorithm>
@@ -1032,6 +1033,7 @@ void saveDirtyStores()
         KillTimer(nullptr, g_saveTimer);
         g_saveTimer = 0;
     }
+    perf::Scope busy("saving extension storage");
     auto dirty = std::move(g_dirtyStores);
     g_dirtyStores.clear();
     for (auto& [id, area] : dirty) {

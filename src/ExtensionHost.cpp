@@ -22,6 +22,7 @@
 #include "ExtensionServer.h"
 #include "Http.h"
 #include "Json.h"
+#include "Perf.h"
 #include "RequestFilter.h"
 #include "Tabs.h"
 #include "Util.h"
@@ -320,6 +321,9 @@ std::vector<WebRequestListener> g_webRequestListeners;
 
 struct WebRequestPending {
     std::function<void(WebRequestDecision)> done;
+    ULONGLONG started { 0 };
+    std::string url;
+    std::map<int, std::string> extensionOf; // context -> extension name (for the performance log)
     std::set<std::pair<int, int>> waiting; // (context, listener) still to answer
     WebRequestDecision decision;
     ULONGLONG deadline { 0 };
@@ -347,6 +351,20 @@ void finishWebRequest(const std::string& requestId)
         return;
     auto done = std::move(found->second.done);
     WebRequestDecision decision = found->second.decision;
+    ULONGLONG waited = GetTickCount64() - found->second.started;
+    if (found->second.started && waited >= 250) {
+        // Who held the page's request up: those still not answering, or all of them.
+        std::set<std::string> names;
+        for (auto& [contextId, listenerId] : found->second.waiting)
+            names.insert(found->second.extensionOf[contextId]);
+        if (names.empty())
+            for (auto& [contextId, name] : found->second.extensionOf)
+                names.insert(name);
+        std::string who;
+        for (auto& name : names)
+            who += (who.empty() ? "" : ", ") + name;
+        perf::noteWebRequest(who, waited, !found->second.waiting.empty(), found->second.url);
+    }
     g_webRequestPending.erase(found);
     if (done)
         done(decision);
@@ -1690,6 +1708,7 @@ void storageChanged(Extension& ext, const std::string& area, const std::string& 
 void handleContentMessage(Extension& ext, WKScriptMessageRef message, const std::string& text, const json::Value& parsed, WKCompletionListenerRef listener)
 {
     std::string op = parsed["op"].asString();
+    perf::Scope busy("an extension's content script message", ext.name + ": " + op);
     WKFrameInfoRef frame = WKScriptMessageGetFrameInfo(message);
     WKPageRef page = frame ? WKFrameInfoGetPage(frame) : nullptr;
 
@@ -2579,6 +2598,7 @@ void handlePageMessage(WKScriptMessageRef message, WKCompletionListenerRef liste
         return;
     }
     std::string op = parsed["op"].asString();
+    perf::Scope busy("an extension page's message", ext->name + ": " + op + (text.size() > 100000 ? ", " + std::to_string(text.size() / 1024) + " KB" : ""));
 
     // One context per extension page.
     Context* context = nullptr;
@@ -2646,6 +2666,26 @@ void handlePageMessage(WKScriptMessageRef message, WKCompletionListenerRef liste
 // ---------------------------------------------------------------------------
 // Toolbar
 
+// What an extension can do on a tab's site, for the Extensions panel:
+// "full" (it can read and change the page) or "none".
+std::string siteAccess(const Extension& ext, int tabId)
+{
+    tabs::Info tab;
+    if (!tabs::find(tabId, tab))
+        return "none";
+    std::string url = util::toUTF8(tab.url);
+    if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0)
+        return "none";
+    for (auto& host : ext.hosts)
+        if (matchesPattern(host, url))
+            return "full";
+    for (auto& script : ext.contentScripts)
+        for (auto& pattern : script.matches)
+            if (matchesPattern(pattern, url))
+                return "full";
+    return "none";
+}
+
 std::string actionsJSON(int tabId)
 {
     std::string json = "[";
@@ -2663,6 +2703,7 @@ std::string actionsJSON(int tabId)
             + ",\"badgeTextColor\":" + json::quote(actionValue(*ext, "badgeTextColor", tabId))
             + ",\"enabled\":" + (actionValue(*ext, "enabled", tabId) == "0" ? "false" : "true")
             + ",\"options\":" + (ext->optionsPage.empty() ? "false" : "true")
+            + ",\"access\":" + json::quote(siteAccess(*ext, tabId))
             + ",\"open\":" + (g_popup && g_popup->extId == ext->id ? "true" : "false") + "}";
         first = false;
     }
@@ -2924,15 +2965,19 @@ void webRequestBefore(const WebRequestDetails& details, std::string& requestId, 
         Extension* ext = internal::findEnabled(context->second.extId);
         bool wantsAnswer = listener->blocking && ext && ext->hasPermission("webRequestBlocking");
         deliver(context->second, webRequestEvent(*listener, detailsJSON, wantsAnswer));
-        if (wantsAnswer)
+        if (wantsAnswer) {
             pending.waiting.insert({ listener->context, listener->id });
+            pending.extensionOf[listener->context] = ext->name;
+        }
     }
     if (pending.waiting.empty()) {
         done({ });
         return;
     }
     pending.done = std::move(done);
-    pending.deadline = GetTickCount64() + kWebRequestWait;
+    pending.started = GetTickCount64();
+    pending.url = details.url;
+    pending.deadline = pending.started + kWebRequestWait;
     g_webRequestPending[id] = std::move(pending);
     ensureWebRequestTimer();
 }

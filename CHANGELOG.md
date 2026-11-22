@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.15
+
+- **Extensions panel** (`src/ExtensionsPanel.*`, `ui/extensions-panel.*`, like the Shields panel): the puzzle button opens a panel instead of a native menu. Extensions with buttons, grouped "Full access" / "No access needed" for the current website (`actionsJSON` `access`: host permissions or content script matches for the tab's URL); click opens the popup (or sends action.onClicked) under the puzzle button, pin = show on the toolbar (`settings::setActionHidden`), ≡ = Options, Manage extension, Inspect popup, Inspect background page; "Manage extensions" footer.
+- **Icons the page fetches**: when Prism's own icon request fails (including sites that failed while prefetching bookmarks), `icons::pageLoaded`'s `askPage` runs once per site: the tab fetches the icon (and /favicon.ico) itself with its own connection and cookies and posts it base64 to the `prismIcon` handler (main frame only, stored for the tab's own site after the usual type check; ≤512 KB).
+- **Performance log** (`src/Perf.*`): a 50 ms main-thread heartbeat plus a watchdog thread note stalls of 250 ms or more with what the main thread was doing (`perf::Scope` around extension page/content messages with extension and operation, Shields page questions, request checks, storage saves); webRequest answers that kept a request waiting 250 ms or more are noted per extension (at most one line per extension per 5 s, timeouts counted). Settings › About › Performance (commands `perf.log`, `perf.clear`).
+
 ## 0.9.14
 
 - **Site icons**: icon and front-page requests send Prism's browser user agent (`http::Request::userAgent`; Prism's own "Prism/<version>" stays the default) and no longer offer AVIF in `Accept` (image CDNs such as Shopify's and GitBook's answered with AVIF, which `extensionFor` rejected). AVIF answers are recognized anyway (`ftyp` avif/avis → .avif), and SVG is sniffed in the first 16 KB instead of 1 KB (long XML headers/comments).

@@ -205,6 +205,7 @@ private:
     void showTabMenu(int tabId, POINT screen);
     void showGroupMenu(int groupId, POINT screen);
     void showExtensionsMenu(POINT screen);
+    void showExtensionsPanel(const std::wstring& coordinates); // the puzzle button
     void showHiddenActionMenu(const std::string& extensionId, int x, int y);
     void closeTabs(const std::vector<int>& ids);
 

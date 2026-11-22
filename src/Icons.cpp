@@ -255,12 +255,21 @@ const std::string& pageScript()
     return script;
 }
 
-void pageLoaded(const std::wstring& pageURL, const std::wstring& iconURL)
+std::set<std::wstring> g_askedPage; // sites whose page was asked to fetch its icon
+
+void pageLoaded(const std::wstring& pageURL, const std::wstring& iconURL, std::function<void(const std::wstring&)> askPage)
 {
     scan();
     std::wstring site = siteOf(pageURL);
-    if (site.empty() || g_inFlight.count(site) || g_failed.count(site))
+    if (site.empty() || g_inFlight.count(site))
         return;
+    if (g_failed.count(site)) {
+        if (askPage && !g_askedPage.count(site) && !g_saved.count(site)) {
+            g_askedPage.insert(site);
+            askPage(iconURL);
+        }
+        return;
+    }
     auto saved = g_saved.find(site);
     if (saved != g_saved.end() && nowMilliseconds() - saved->second.savedAt < kRefreshAfterMs)
         return;
@@ -281,7 +290,7 @@ void pageLoaded(const std::wstring& pageURL, const std::wstring& iconURL)
     }
     g_inFlight.insert(site);
     std::wstring fallback = L"https://" + site + L"/favicon.ico";
-    std::thread([site, iconURL, fallback] {
+    std::thread([site, iconURL, fallback, askPage] {
         auto fetch = [](const std::wstring& url, std::string& data) {
             http::Request request;
             request.url = url;
@@ -297,12 +306,17 @@ void pageLoaded(const std::wstring& pageURL, const std::wstring& iconURL)
         };
         std::string data;
         bool ok = fetch(iconURL, data) || (iconURL != fallback && fetch(fallback, data));
-        util::postToMainThread([site, ok, data = std::move(data)] {
+        util::postToMainThread([site, ok, data = std::move(data), askPage, iconURL] {
             g_inFlight.erase(site);
             if (ok)
                 store(site, data);
-            else
+            else {
                 g_failed.insert(site);
+                if (askPage && !g_askedPage.count(site)) {
+                    g_askedPage.insert(site);
+                    askPage(iconURL);
+                }
+            }
         });
     }).detach();
 }
@@ -470,6 +484,20 @@ std::wstring fileURLFor(const std::wstring& pageURL)
     if (saved == g_saved.end())
         return { };
     return util::fileURLFromPath(saved->second.file) + L"?" + std::to_wstring(saved->second.savedAt);
+}
+
+bool storeFromPage(const std::wstring& pageURL, const std::string& base64)
+{
+    scan();
+    std::wstring site = siteOf(pageURL);
+    if (site.empty() || base64.size() > kMaxIconBytes * 2)
+        return false;
+    std::string data;
+    if (!decodeDataURL("data:image/x;base64," + base64, data) || data.empty() || extensionFor(data).empty())
+        return false;
+    g_failed.erase(site);
+    store(site, data);
+    return true;
 }
 
 std::wstring filePathFor(const std::wstring& pageURL)

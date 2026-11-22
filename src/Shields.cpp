@@ -8,6 +8,7 @@
 #include "Engine.h"
 #include "Http.h"
 #include "Json.h"
+#include "Perf.h"
 #include "RequestFilter.h"
 #include "Util.h"
 
@@ -802,6 +803,7 @@ void handleScriptMessage(WKScriptMessageRef message, WKCompletionListenerRef lis
         return reply("null");
 
     const std::string& op = parsed["op"].asString();
+    perf::Scope busy("a Prism Shields question from a page", op);
     auto raw = [&](const json::Value& value) {
         return value.isArray() ? text.substr(value.start(), value.end() - value.start()) : std::string("[]");
     };

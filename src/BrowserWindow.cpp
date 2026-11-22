@@ -13,8 +13,10 @@
 #include "Http.h"
 #include "Icons.h"
 #include "Permissions.h"
+#include "ExtensionsPanel.h"
 #include "MenuIcons.h"
 #include "Passwords.h"
+#include "Perf.h"
 #include "Privacy.h"
 #include "RequestFilter.h"
 #include "Shields.h"
@@ -877,7 +879,7 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
     } else if (command == L"extensions") {
         openInternalPage(L"extensions");
     } else if (command == L"extensionsMenu") {
-        showExtensionsMenu(toolbarPoint(argument));
+        showExtensionsPanel(argument);
     } else if (command == L"home") {
         if (tab) {
             navigate(tab, L"prism://newtab");
@@ -2001,6 +2003,12 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
                 refreshToolbars();
             } else if (isSettings && command.rfind(L"privacy.", 0) == 0)
                 answer = privacy::handleCommand(command.substr(8), argument);
+            else if (isSettings && command == L"perf.log")
+                answer = perf::logJSON();
+            else if (isSettings && command == L"perf.clear") {
+                perf::clear();
+                answer = perf::logJSON();
+            }
             else if (isSettings && command.rfind(L"usercss.", 0) == 0)
                 answer = usercss::handleCommand(command.substr(8), argument);
             else if (isNewTab && command == L"data")
@@ -3089,6 +3097,8 @@ void BrowserWindow::showBookmarkMenu(long long id, POINT screen)
 namespace {
 struct IconRequest {
     std::wstring url;
+    HWND hwnd;
+    int tabId;
 };
 }
 
@@ -3099,14 +3109,41 @@ void BrowserWindow::requestIcon(Tab* tab)
     std::wstring scheme = schemeOf(tab->url);
     if (scheme != L"http" && scheme != L"https")
         return;
-    auto* request = new IconRequest { tab->url };
+    auto* request = new IconRequest { tab->url, m_hwnd, tab->id };
     WKPageEvaluateJavaScriptInMainFrame(tab->page, stringUTF8(icons::pageScript()).get(), request, [](WKTypeRef result, WKErrorRef, void* context) {
         std::unique_ptr<IconRequest> request(static_cast<IconRequest*>(context));
         std::wstring icon;
         if (result && WKGetTypeID(result) == WKStringGetTypeID())
             icon = toWide(static_cast<WKStringRef>(result));
-        if (!icon.empty())
-            icons::pageLoaded(request->url, icon);
+        if (icon.empty())
+            return;
+        HWND hwnd = request->hwnd;
+        int tabId = request->tabId;
+        std::wstring pageURL = request->url;
+        icons::pageLoaded(pageURL, icon, [hwnd, tabId, pageURL](const std::wstring& iconURL) {
+            // Prism couldn't fetch it (sites behind bot checks turn it away):
+            // the page fetches its own icon and hands it over ("prismIcon").
+            auto* window = BrowserWindow::fromHWND(hwnd);
+            Tab* tab = window ? window->findTab(tabId) : nullptr;
+            if (!tab || tab->url != pageURL)
+                return;
+            std::string script = "(function (urls) {"
+                "  const handler = window.webkit && webkit.messageHandlers && webkit.messageHandlers.prismIcon;"
+                "  if (!handler) return;"
+                "  const next = (i) => {"
+                "    if (i >= urls.length) return;"
+                "    fetch(urls[i], { credentials: 'include' }).then((r) => r.ok ? r.arrayBuffer() : null).then((buffer) => {"
+                "      if (!buffer || !buffer.byteLength || buffer.byteLength > 524288) return next(i + 1);"
+                "      const bytes = new Uint8Array(buffer);"
+                "      let text = '';"
+                "      for (let j = 0; j < bytes.length; j += 8192) text += String.fromCharCode.apply(null, bytes.subarray(j, j + 8192));"
+                "      handler.postMessage(btoa(text));"
+                "    }).catch(() => next(i + 1));"
+                "  };"
+                "  next(0);"
+                "})([" + json::quote(util::toUTF8(iconURL)) + ", \"/favicon.ico\"]);";
+            WKPageEvaluateJavaScriptInMainFrame(tab->page, stringUTF8(script).get(), nullptr, nullptr);
+        });
     });
 }
 
@@ -3551,6 +3588,89 @@ void BrowserWindow::showGroupMenu(int groupId, POINT screen)
 
 // ---------------------------------------------------------------------------
 // Extensions menu (the puzzle button) and showing or hiding their buttons
+
+void BrowserWindow::showExtensionsPanel(const std::wstring& coordinates)
+{
+    // The Extensions button: its panel, anchored at the button's bottom-right.
+    POINT anchor = toolbarPoint(coordinates);
+    POINT toolbarAnchor = anchor;
+    ScreenToClient(m_toolbarHwnd, &toolbarAnchor);
+    double scale = scaleFactor();
+    HWND hwnd = m_hwnd;
+    int popupX = static_cast<int>(toolbarAnchor.x / scale), popupY = static_cast<int>(toolbarAnchor.y / scale);
+
+    extensionspanel::Callbacks callbacks;
+    callbacks.list = [hwnd] {
+        auto* window = BrowserWindow::fromHWND(hwnd);
+        Tab* tab = window ? window->activeTab() : nullptr;
+        json::Value actions;
+        json::parse(extensions::actionsJSON(tab ? tab->id : -1), actions);
+        std::string site;
+        if (tab) {
+            std::wstring url = tab->url;
+            size_t start = url.find(L"://");
+            if (start != std::wstring::npos && (url.rfind(L"http", 0) == 0)) {
+                std::wstring host = url.substr(start + 3);
+                host = host.substr(0, host.find_first_of(L"/?#"));
+                if (host.rfind(L"www.", 0) == 0)
+                    host.erase(0, 4);
+                site = util::toUTF8(host);
+            }
+        }
+        std::string json = "{\"site\":" + json::quote(site) + ",\"extensions\":[";
+        bool first = true;
+        for (auto& action : actions.items()) {
+            std::string id = action["id"].asString();
+            json += std::string(first ? "" : ",") + "{\"id\":" + json::quote(id) + ",\"name\":" + json::quote(action["name"].asString())
+                + ",\"icon\":" + json::quote(action["icon"].asString()) + ",\"badge\":" + json::quote(action["badge"].asString())
+                + ",\"access\":" + json::quote(action["access"].asString()) + ",\"enabled\":" + (action["enabled"].asBool(true) ? "true" : "false")
+                + ",\"options\":" + (action["options"].asBool() ? "true" : "false")
+                + ",\"pinned\":" + (settings::isActionHidden(id) ? "false" : "true") + "}";
+            first = false;
+        }
+        return json + "]}";
+    };
+    callbacks.openAction = [hwnd, popupX, popupY](const std::string& id) {
+        auto* window = BrowserWindow::fromHWND(hwnd);
+        if (!window)
+            return;
+        Tab* tab = window->activeTab();
+        extensions::actionClicked(hwnd, tab ? tab->id : -1, id, popupX, popupY);
+    };
+    callbacks.setPinned = [](const std::string& id, bool pinned) {
+        settings::setActionHidden(id, !pinned);
+        refreshToolbars();
+    };
+    callbacks.hasOptions = [hwnd](const std::string& id) {
+        auto* window = BrowserWindow::fromHWND(hwnd);
+        Tab* tab = window ? window->activeTab() : nullptr;
+        json::Value actions;
+        json::parse(extensions::actionsJSON(tab ? tab->id : -1), actions);
+        for (auto& action : actions.items())
+            if (action["id"].asString() == id)
+                return action["options"].asBool();
+        return false;
+    };
+    callbacks.menuChoice = [hwnd, popupX, popupY](const std::string& id, const std::string& choice) {
+        auto* window = BrowserWindow::fromHWND(hwnd);
+        if (!window)
+            return;
+        Tab* tab = window->activeTab();
+        if (choice == "options")
+            extensions::openOptionsPage(id, window->m_id);
+        else if (choice == "manage")
+            window->openInternalPage(L"extensions");
+        else if (choice == "inspectPopup")
+            extensions::inspectPopup(hwnd, tab ? tab->id : -1, id, popupX, popupY);
+        else if (choice == "inspectBackground" && !extensions::inspectBackground(id))
+            window->showToast(L"This extension has no background page running.");
+    };
+    callbacks.manage = [hwnd] {
+        if (auto* window = BrowserWindow::fromHWND(hwnd))
+            window->openInternalPage(L"extensions");
+    };
+    extensionspanel::toggle(m_hwnd, anchor, scale, std::move(callbacks));
+}
 
 void BrowserWindow::showExtensionsMenu(POINT screen)
 {

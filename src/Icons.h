@@ -22,7 +22,12 @@ void setChangeListener(std::function<void()>);
 const std::string& pageScript();
 
 // `iconURL` is what pageScript() returned on the page at `pageURL`.
-void pageLoaded(const std::wstring& pageURL, const std::wstring& iconURL);
+// `askPage` is called (once per site and session) when Prism can't fetch the
+// icon itself, e.g. a site behind a bot check: the page then fetches it with
+// its own connection and hands it over through storeFromPage().
+void pageLoaded(const std::wstring& pageURL, const std::wstring& iconURL, std::function<void(const std::wstring& iconURL)> askPage = { });
+// An icon the page fetched itself (base64), for the page's own site.
+bool storeFromPage(const std::wstring& pageURL, const std::string& base64);
 
 // For pages Prism hasn't visited yet (bookmarks): looks up the site's icon
 // in its front page (or /favicon.ico) in the background, one site at a time.

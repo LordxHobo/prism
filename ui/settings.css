@@ -442,3 +442,15 @@ ul.tips li { margin: 6px 0; }
 .site-rule .head textarea { margin-top: 0; font-family: inherit; flex: 1; min-height: 38px; }
 .site-rule .head .remove { flex: none; }
 .site-rule .sites { rows: 1; }
+
+.perfLog {
+  max-height: 260px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  white-space: pre-wrap;
+  font: 12px/1.45 ui-monospace, Consolas, monospace;
+}
