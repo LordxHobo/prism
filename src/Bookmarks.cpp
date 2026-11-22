@@ -155,11 +155,29 @@ void save()
     util::writeFileAtomically(bookmarksFile(), json);
 }
 
+// Icons for bookmarked sites Prism hasn't visited yet (the bar first).
+void prefetchIcons(const Node& node)
+{
+    for (auto& child : node.children) {
+        if (child->folder)
+            prefetchIcons(*child);
+        else
+            icons::prefetch(child->url);
+    }
+}
+
+void prefetchAllIcons()
+{
+    prefetchIcons(g_bar);
+    prefetchIcons(g_other);
+}
+
 void changed()
 {
     save();
     if (g_listener)
         g_listener();
+    prefetchAllIcons();
 }
 
 Node* addNode(Node& parent, bool folder, const std::wstring& title, const std::wstring& url, long long added = 0, int index = -1)
@@ -522,6 +540,13 @@ void load()
 void setChangeListener(std::function<void()> listener)
 {
     g_listener = std::move(listener);
+    // Set once at start: fetch missing bookmark icons a few seconds later,
+    // after the first pages have started loading.
+    SetTimer(nullptr, 0, 4000, [](HWND, UINT, UINT_PTR id, DWORD) {
+        KillTimer(nullptr, id);
+        load();
+        prefetchAllIcons();
+    });
 }
 
 const Node* find(long long id)

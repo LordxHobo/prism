@@ -81,6 +81,8 @@ public:
     static void refreshToolbars();
     // A tab's "Save password?" offer appeared or went away (Passwords.h).
     static void passwordOfferChanged(int tabId);
+    // Remembers maximized or the size and place, for the next window (prism.ini WindowPlacement).
+    void savePlacement();
     // Sends your interface CSS (usercss::interfaceCSS) to every toolbar.
     static void applyInterfaceCSS();
 

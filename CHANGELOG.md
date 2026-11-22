@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.13
+
+- **Bookmark icons**: the bookmarks bar (`toolbar.js` `bookmarkMark`) and prism://bookmarks show `item.icon` (letter if missing or it fails to load); bookmark folder and overflow menus get the icon as a 32-bit menu bitmap (`src/MenuIcons.*`, WIC, cached per file; SVG icons can't be decoded there). `icons::prefetch(url)` fetches icons for sites not visited yet: one site at a time, the front page's `<link rel="icon">` (SVG or ~32 px preferred, then shortcut icon, then apple-touch-icon; relative, `//` and `&amp;` handled) or /favicon.ico, no cookies, public hosts only. Bookmarks prefetch 4 s after start and after each change. `icons::filePathFor`. Links windowscodecs.
+- **Window placement**: windows open maximized unless the last closed window wasn't (prism.ini `WindowPlacement` = maximized,left,top,right,bottom, saved on WM_DESTROY; the first window gets the saved normal size and place when it's on a monitor).
+
 ## 0.9.12
 
 - **Extensions see the browser they were made for**: in extension pages, `navigator.userAgent`, `appVersion`, `vendor` (and `userAgentData` for Chrome) say Chrome 142 for Chrome Web Store, file and folder installs, and Firefox 145 for Firefox Add-ons installs (`config.family`, from `Extension::source`). With Prism's Safari user agent, Bitwarden ran its Safari code paths (`isBrowserSafariApi`, `SafariApp.sendMessageToApp` → `browser.runtime.sendNativeMessage`, "Phishing detection is unavailable on Safari"). Content scripts and websites are unchanged.

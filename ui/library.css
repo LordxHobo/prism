@@ -99,6 +99,14 @@ h2.day {
   font-variant-numeric: tabular-nums;
 }
 
+.site-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 2px;
+  object-fit: contain;
+}
+
 .mark {
   flex: none;
   width: 22px;

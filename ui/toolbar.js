@@ -619,7 +619,15 @@ function bookmarkMark(item) {
     letter = new URL(item.url).hostname.replace(/^www\./, '')[0] || letter;
   } catch (e) { /* not a URL */ }
   mark.textContent = letter;
-  return mark;
+  if (!item.icon) return mark;
+  // The site's icon, with the letter if it can't be shown.
+  const icon = document.createElement('img');
+  icon.className = 'icon';
+  icon.alt = '';
+  icon.draggable = false;
+  icon.src = item.icon;
+  icon.addEventListener('error', () => icon.replaceWith(mark), { once: true });
+  return icon;
 }
 
 let bookmarksKey = '';

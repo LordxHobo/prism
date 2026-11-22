@@ -13,6 +13,7 @@
 #include "Http.h"
 #include "Icons.h"
 #include "Permissions.h"
+#include "MenuIcons.h"
 #include "Passwords.h"
 #include "Privacy.h"
 #include "RequestFilter.h"
@@ -365,9 +366,36 @@ BrowserWindow* BrowserWindow::open(const std::vector<std::wstring>& startURLs, i
         CW_USEDEFAULT, CW_USEDEFAULT, width, height, nullptr, nullptr, GetModuleHandleW(nullptr), window);
     if (!hwnd)
         return nullptr; // windowProc deleted `window` in WM_NCDESTROY.
-    ShowWindow(hwnd, SW_SHOWNORMAL);
+    // Like the last window that was closed: maximized (also the first time),
+    // or at its size and place.
+    std::wstring saved = util::readSetting(L"WindowPlacement", L"");
+    int maximized = 1, left = 0, top = 0, right = 0, bottom = 0;
+    if (!saved.empty())
+        swscanf_s(saved.c_str(), L"%d,%d,%d,%d,%d", &maximized, &left, &top, &right, &bottom);
+    RECT normal = { left, top, right, bottom };
+    static bool s_placedFirst = false;
+    if (!s_placedFirst && right - left >= 200 && bottom - top >= 150 && MonitorFromRect(&normal, MONITOR_DEFAULTTONULL)) {
+        WINDOWPLACEMENT placement = { sizeof(placement) };
+        GetWindowPlacement(hwnd, &placement);
+        placement.rcNormalPosition = normal;
+        placement.showCmd = SW_HIDE;
+        SetWindowPlacement(hwnd, &placement);
+    }
+    s_placedFirst = true;
+    ShowWindow(hwnd, maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
     UpdateWindow(hwnd);
     return window;
+}
+
+void BrowserWindow::savePlacement()
+{
+    WINDOWPLACEMENT placement = { sizeof(placement) };
+    if (!GetWindowPlacement(m_hwnd, &placement))
+        return;
+    bool maximized = placement.showCmd == SW_SHOWMAXIMIZED || (placement.showCmd == SW_SHOWMINIMIZED && (placement.flags & WPF_RESTORETOMAXIMIZED));
+    const RECT& r = placement.rcNormalPosition;
+    util::writeSetting(L"WindowPlacement", std::to_wstring(maximized ? 1 : 0) + L"," + std::to_wstring(r.left) + L"," + std::to_wstring(r.top)
+        + L"," + std::to_wstring(r.right) + L"," + std::to_wstring(r.bottom));
 }
 
 BrowserWindow* BrowserWindow::fromHWND(HWND hwnd)
@@ -544,6 +572,7 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         DestroyWindow(m_hwnd);
         return 0;
     case WM_DESTROY:
+        savePlacement();
         onDestroy();
         return 0;
     }
@@ -2938,6 +2967,7 @@ void appendBookmarkItems(HMENU menu, const bookmarks::Node& folder, std::vector<
             commands.push_back({ child->url, { } });
             urls.push_back(child->url);
             AppendMenuW(menu, MF_STRING, commands.size(), menuText(child->title.empty() ? child->url : child->title).c_str());
+            menuicons::apply(menu, static_cast<UINT>(commands.size()), child->url);
         }
     }
     if (urls.size() >= 2) {
@@ -2999,6 +3029,7 @@ void BrowserWindow::showBookmarkOverflow(const std::vector<long long>& ids, POIN
         } else {
             commands.push_back({ node->url, { } });
             AppendMenuW(menu, MF_STRING, commands.size(), menuText(node->title.empty() ? node->url : node->title).c_str());
+            menuicons::apply(menu, static_cast<UINT>(commands.size()), node->url);
         }
     }
     int choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTALIGN, screen.x, screen.y, 0, m_hwnd, nullptr);

@@ -24,8 +24,16 @@ const std::string& pageScript();
 // `iconURL` is what pageScript() returned on the page at `pageURL`.
 void pageLoaded(const std::wstring& pageURL, const std::wstring& iconURL);
 
+// For pages Prism hasn't visited yet (bookmarks): looks up the site's icon
+// in its front page (or /favicon.ico) in the background, one site at a time.
+// Does nothing when the site already has a fresh icon.
+void prefetch(const std::wstring& pageURL);
+
 // file:/// URL of the saved icon for this page's site, or "" if there's none.
 std::wstring fileURLFor(const std::wstring& pageURL);
+
+// The saved icon file itself (for native menus), or "".
+std::wstring filePathFor(const std::wstring& pageURL);
 
 // Deletes every saved icon (with browsing history).
 void clear();

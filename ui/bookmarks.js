@@ -239,6 +239,16 @@ function makeEntry(node, showPath) {
     mark = document.createElement('span');
     mark.className = 'mark';
     mark.textContent = hostOf(node.url)[0] || '•';
+    if (node.icon) {
+      // The site's icon, with the letter if it can't be shown.
+      const letter = mark;
+      mark = document.createElement('img');
+      mark.className = 'site-icon';
+      mark.alt = '';
+      mark.draggable = false;
+      mark.src = node.icon;
+      mark.addEventListener('error', () => mark.replaceWith(letter), { once: true });
+    }
   }
 
   const title = document.createElement('a');

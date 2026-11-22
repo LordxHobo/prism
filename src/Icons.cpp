@@ -7,7 +7,9 @@
 #include "Http.h"
 #include "Util.h"
 
+#include <algorithm>
 #include <cwctype>
+#include <vector>
 #include <set>
 #include <thread>
 #include <unordered_map>
@@ -297,6 +299,159 @@ void pageLoaded(const std::wstring& pageURL, const std::wstring& iconURL)
     }).detach();
 }
 
+namespace {
+
+// The icon a page's HTML lists: <link rel="icon" ...>, preferring SVG or
+// a size near 32 px, then "shortcut icon", then apple-touch-icon. "" if none.
+std::wstring iconFromHTML(const std::string& html, const std::wstring& pageURL)
+{
+    std::string lowerHTML = html;
+    for (auto& c : lowerHTML)
+        c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    auto attribute = [&](const std::string& tag, const std::string& lowerTag, const char* name) {
+        std::string key = std::string(name) + "=";
+        for (size_t at = lowerTag.find(key); at != std::string::npos; at = lowerTag.find(key, at + 1)) {
+            if (at > 0 && !isspace(static_cast<unsigned char>(lowerTag[at - 1])))
+                continue;
+            size_t start = at + key.size();
+            if (start >= tag.size())
+                return std::string();
+            char quote = tag[start];
+            if (quote == '"' || quote == '\'') {
+                size_t end = tag.find(quote, start + 1);
+                return end == std::string::npos ? std::string() : tag.substr(start + 1, end - start - 1);
+            }
+            size_t end = tag.find_first_of(" \t\r\n>", start);
+            return tag.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        }
+        return std::string();
+    };
+    std::string best;
+    int bestScore = -1;
+    size_t limit = std::min(lowerHTML.size(), static_cast<size_t>(256 * 1024));
+    for (size_t at = lowerHTML.find("<link"); at != std::string::npos && at < limit; at = lowerHTML.find("<link", at + 5)) {
+        size_t end = lowerHTML.find('>', at);
+        if (end == std::string::npos)
+            break;
+        std::string tag = html.substr(at, end - at);
+        std::string lowerTag = lowerHTML.substr(at, end - at);
+        std::string rel = attribute(tag, lowerTag, "rel");
+        for (auto& c : rel)
+            c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+        std::string href = attribute(tag, lowerTag, "href");
+        if (href.empty() || rel.find("icon") == std::string::npos || rel.find("mask-icon") != std::string::npos)
+            continue;
+        std::string type = attribute(tag, lowerTag, "type");
+        std::string sizes = attribute(tag, lowerTag, "sizes");
+        int score = rel.find("apple-touch-icon") != std::string::npos ? 10 : 30;
+        if (type.find("svg") != std::string::npos || href.find(".svg") != std::string::npos)
+            score += 50;
+        int size = atoi(sizes.c_str());
+        if (size >= 16 && size <= 64)
+            score += 20 - std::abs(size - 32) / 4;
+        if (score > bestScore) {
+            bestScore = score;
+            best = href;
+        }
+    }
+    if (best.empty())
+        return { };
+    // Entities in attribute values (&amp; is common).
+    for (size_t amp = best.find("&amp;"); amp != std::string::npos; amp = best.find("&amp;", amp + 1))
+        best.replace(amp, 5, "&");
+    std::wstring href = util::fromUTF8(best);
+    if (href.rfind(L"http://", 0) == 0 || href.rfind(L"https://", 0) == 0 || href.rfind(L"data:", 0) == 0)
+        return href;
+    std::wstring scheme = pageURL.substr(0, pageURL.find(L"://"));
+    size_t hostStart = pageURL.find(L"://") + 3;
+    size_t pathStart = pageURL.find(L'/', hostStart);
+    std::wstring origin = pageURL.substr(0, pathStart);
+    if (href.rfind(L"//", 0) == 0)
+        return scheme + L":" + href;
+    if (!href.empty() && href[0] == L'/')
+        return origin + href;
+    std::wstring base = pathStart == std::wstring::npos ? origin + L"/" : pageURL.substr(0, pageURL.find_last_of(L'/') + 1);
+    size_t query = base.find_first_of(L"?#");
+    if (query != std::wstring::npos)
+        base = base.substr(0, base.rfind(L'/', query) + 1);
+    return base + href;
+}
+
+std::vector<std::wstring> g_prefetchQueue;
+bool g_prefetching = false;
+
+void prefetchNext()
+{
+    if (g_prefetching || g_prefetchQueue.empty())
+        return;
+    std::wstring site = g_prefetchQueue.front();
+    g_prefetchQueue.erase(g_prefetchQueue.begin());
+    g_prefetching = true;
+    g_inFlight.insert(site);
+    std::thread([site] {
+        std::wstring front = L"https://" + site + L"/";
+        std::wstring iconURL;
+        {
+            http::Request request;
+            request.url = front;
+            request.headers.push_back({ L"Accept", L"text/html,application/xhtml+xml;q=0.9,*/*;q=0.5" });
+            http::Response response;
+            std::wstring error;
+            if (http::request(request, response, error, 1024 * 1024) && response.status >= 200 && response.status < 300)
+                iconURL = iconFromHTML(response.body, response.url.empty() ? front : response.url);
+        }
+        std::wstring fallback = L"https://" + site + L"/favicon.ico";
+        auto fetch = [](const std::wstring& url, std::string& data) {
+            if (!isFetchable(url))
+                return false;
+            http::Request request;
+            request.url = url;
+            request.headers.push_back({ L"Accept", L"image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5" });
+            http::Response response;
+            std::wstring error;
+            if (!http::request(request, response, error, kMaxIconBytes) || response.status < 200 || response.status >= 300)
+                return false;
+            data = std::move(response.body);
+            return !data.empty() && !extensionFor(data).empty();
+        };
+        std::string data;
+        bool ok = false;
+        if (iconURL.rfind(L"data:", 0) == 0)
+            ok = decodeDataURL(util::toUTF8(iconURL), data) && !extensionFor(data).empty();
+        else if (!iconURL.empty())
+            ok = fetch(iconURL, data);
+        if (!ok)
+            ok = fetch(fallback, data);
+        util::postToMainThread([site, ok, data = std::move(data)] {
+            g_inFlight.erase(site);
+            g_prefetching = false;
+            if (ok)
+                store(site, data);
+            else
+                g_failed.insert(site);
+            prefetchNext();
+        });
+    }).detach();
+}
+
+} // namespace
+
+void prefetch(const std::wstring& pageURL)
+{
+    scan();
+    if (!isFetchable(pageURL))
+        return;
+    std::wstring site = siteOf(pageURL);
+    if (site.empty() || g_inFlight.count(site) || g_failed.count(site)
+        || std::find(g_prefetchQueue.begin(), g_prefetchQueue.end(), site) != g_prefetchQueue.end())
+        return;
+    auto saved = g_saved.find(site);
+    if (saved != g_saved.end() && nowMilliseconds() - saved->second.savedAt < kRefreshAfterMs)
+        return;
+    g_prefetchQueue.push_back(site);
+    prefetchNext();
+}
+
 std::wstring fileURLFor(const std::wstring& pageURL)
 {
     scan();
@@ -304,6 +459,13 @@ std::wstring fileURLFor(const std::wstring& pageURL)
     if (saved == g_saved.end())
         return { };
     return util::fileURLFromPath(saved->second.file) + L"?" + std::to_wstring(saved->second.savedAt);
+}
+
+std::wstring filePathFor(const std::wstring& pageURL)
+{
+    scan();
+    auto saved = g_saved.find(siteOf(pageURL));
+    return saved == g_saved.end() ? std::wstring() : saved->second.file;
 }
 
 void clear()

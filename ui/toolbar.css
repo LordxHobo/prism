@@ -529,6 +529,13 @@ button {
   text-overflow: ellipsis;
 }
 
+.bookmark .icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
 .bookmark .mark {
   flex: none;
   width: 14px;
