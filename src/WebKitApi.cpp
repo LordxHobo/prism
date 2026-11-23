@@ -15,14 +15,49 @@ PRISM_WK_REQUIRED(PRISM_WK_DEFINE)
 PRISM_WK_OPTIONAL(PRISM_WK_DEFINE)
 #undef PRISM_WK_DEFINE
 
+// Prism's own WebKit build plays media through GStreamer, which comes in a
+// gstreamer\ folder next to WebKit (bin\ with its libraries, lib\gstreamer-1.0\
+// with its plugins). WebKit2.dll links to those libraries, so Windows has to
+// find them both here and in WebKit's web processes, which inherit PATH.
+// GStreamer is told to use only these plugins (not a GStreamer installed
+// elsewhere on the PC) and to keep its plugin list in Prism's data folder.
+static void setUpGStreamer(const std::wstring& dir)
+{
+    std::wstring gst = dir + L"\\gstreamer";
+    std::wstring bin = gst + L"\\bin";
+    DWORD attributes = GetFileAttributesW(bin.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY))
+        return; // WebKit's own build: media through Media Foundation
+
+    AddDllDirectory(bin.c_str());
+
+    std::wstring path = bin;
+    DWORD length = GetEnvironmentVariableW(L"PATH", nullptr, 0);
+    if (length) {
+        std::wstring current(length, L'\0');
+        current.resize(GetEnvironmentVariableW(L"PATH", current.data(), length));
+        path += L";" + current;
+    }
+    SetEnvironmentVariableW(L"PATH", path.c_str());
+
+    SetEnvironmentVariableW(L"GST_PLUGIN_SYSTEM_PATH_1_0", (gst + L"\\lib\\gstreamer-1.0").c_str());
+    SetEnvironmentVariableW(L"GST_PLUGIN_SCANNER_1_0", (gst + L"\\libexec\\gstreamer-1.0\\gst-plugin-scanner.exe").c_str());
+    SetEnvironmentVariableW(L"GST_REGISTRY_1_0", (util::dataDirectory() + L"\\gstreamer-registry.bin").c_str());
+    SetEnvironmentVariableW(L"GST_PLUGIN_PATH_1_0", nullptr);
+    SetEnvironmentVariableW(L"GST_PLUGIN_PATH", nullptr);
+}
+
 bool load(std::wstring& error)
 {
     std::wstring dir = util::exeDirectory();
     std::wstring dllPath = dir + L"\\WebKit2.dll";
+    setUpGStreamer(dir);
 
     // WebKit's own DLLs and its support libraries live next to Prism.exe.
     // LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR makes Windows look for WebKit2.dll's
-    // dependencies in that same folder (and not in random PATH folders).
+    // dependencies in that same folder (and not in random PATH folders);
+    // LOAD_LIBRARY_SEARCH_DEFAULT_DIRS includes the gstreamer\bin folder
+    // added above.
     HMODULE module = LoadLibraryExW(dllPath.c_str(), nullptr,
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (!module) {

@@ -6,3 +6,5 @@
 *.rc text eol=crlf
 *.ico binary
 *.png binary
+# WebKit patches must keep their exact bytes (LF), or git apply fails on them.
+webkit/patches/*.patch -text

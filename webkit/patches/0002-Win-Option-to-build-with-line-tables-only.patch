@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Prism <prism@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 18:00:21 +0100
+Subject: [PATCH 2/2] [Win] Option to build with line tables only
+
+WEBKIT_MSVC_LINE_TABLES_ONLY=ON keeps call stacks symbolized (functions and
+lines) without full debug info, so the build directory is a fraction of the
+size. Prism's CI saves its build directory between stages.
+---
+ Source/cmake/OptionsMSVC.cmake | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/Source/cmake/OptionsMSVC.cmake b/Source/cmake/OptionsMSVC.cmake
+index 4b4d676b3..d3cb6d841 100644
+--- a/Source/cmake/OptionsMSVC.cmake
++++ b/Source/cmake/OptionsMSVC.cmake
+@@ -75,8 +75,14 @@ endfunction()
+ # Use AT&T syntax for inline asm
+ MSVC_ADD_COMPILE_OPTIONS(/clang:-masm=att)
+ 
+-# Create pdb files for debugging purposes, also for Release builds
+-MSVC_ADD_COMPILE_OPTIONS(/Zi /GS)
++# Create pdb files for debugging purposes, also for Release builds.
++# WEBKIT_MSVC_LINE_TABLES_ONLY keeps only line tables (call stacks still
++# resolve to functions and lines), which makes the objects much smaller.
++if (WEBKIT_MSVC_LINE_TABLES_ONLY)
++    MSVC_ADD_COMPILE_OPTIONS(/Zi /clang:-gline-tables-only /GS)
++else ()
++    MSVC_ADD_COMPILE_OPTIONS(/Zi /GS)
++endif ()
+ 
+ # Disable ICF (identical code folding) optimization,
+ # as it makes it unsafe to pointer-compare functions with identical definitions.
+-- 
+2.43.0
+

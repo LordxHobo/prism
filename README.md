@@ -38,6 +38,7 @@ dist\Prism.exe
 | `ui/` | The browser interface (tab strip, address bar, bookmarks bar) and Prism's own pages (`prism://newtab`, `prism://history`, `prism://bookmarks`, `prism://settings`, ...), drawn by WebKit itself. |
 | `scripts/` | Downloads the WebKit runtime and builds Prism. |
 | `webkit.lock` | The exact WebKit version Prism uses. |
+| `webkit/` | Prism's own WebKit build (GStreamer media playback for streaming video), built on GitHub Actions. |
 
 ## Roadmap
 
@@ -49,7 +50,7 @@ dist\Prism.exe
 - [x] Bookmarks, history, find in page, permission prompts (v0.6; printing moves to v0.9)
 - [x] Customization, tab groups and vertical tabs (v0.7)
 - [x] Privacy: fingerprinting protection, HTTPS first/only, per-site settings, tracking-parameter removal (v0.8)
-- [ ] Full network filtering, extensions part 3, and Prism's own WebKit build for printing, camera and microphone (v0.9)
+- [ ] Full network filtering, extensions part 3, and Prism's own WebKit build for streaming video, printing, camera and microphone (v0.9)
 - [ ] Polish (v0.10), then 1.0 and Linux
 
 ## License

@@ -1,0 +1,130 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# One stage of the WebKit build (see webkit.yml). The work is done by
+# webkit/ci.ps1.
+
+name: WebKit build stage
+
+on:
+  workflow_call:
+    inputs:
+      stage:
+        type: number
+        required: true
+      fresh:
+        type: boolean
+        default: false
+    outputs:
+      more:
+        description: "'true' when the build ran out of time and another stage should continue it"
+        value: ${{ jobs.build.outputs.more }}
+
+jobs:
+  build:
+    name: Stage ${{ inputs.stage }}
+    runs-on: windows-2025
+    timeout-minutes: 355
+    outputs:
+      more: ${{ steps.build.outputs.more }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PRISM_STAGE: ${{ inputs.stage }}
+      PRISM_FRESH: ${{ inputs.fresh }}
+
+    steps:
+      - name: Note the start time
+        shell: pwsh
+        run: '"PRISM_JOB_START=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" >> $env:GITHUB_ENV'
+
+      - uses: actions/checkout@v4
+
+      - name: Set up the Visual Studio C++ tools
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install the build tools and GStreamer
+        shell: pwsh
+        run: ./webkit/ci.ps1 -Step Tools
+
+      - name: Get the WebKit source and apply Prism's patches
+        shell: pwsh
+        run: ./webkit/ci.ps1 -Step Source
+
+      - name: Work out the dependency cache key
+        id: key
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((Get-Content C:\wk\vcpkg.json, C:\wk\vcpkg-configuration.json -Raw) -join '')))).Hash.Substring(0, 16)
+          "vcpkg=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Restore the vcpkg dependency cache
+        uses: actions/cache/restore@v4
+        with:
+          path: C:\vcpkg-cache
+          key: vcpkg-${{ steps.key.outputs.vcpkg }}
+          restore-keys: vcpkg-
+
+      - name: Restore the build progress
+        shell: pwsh
+        run: ./webkit/ci.ps1 -Step Restore
+
+      - name: Configure WebKit
+        shell: pwsh
+        run: ./webkit/ci.ps1 -Step Configure
+
+      - name: Save the vcpkg dependency cache
+        if: ${{ always() && inputs.stage == 1 }}
+        uses: actions/cache/save@v4
+        with:
+          path: C:\vcpkg-cache
+          key: vcpkg-${{ steps.key.outputs.vcpkg }}
+        continue-on-error: true
+
+      - name: Build WebKit
+        id: build
+        shell: pwsh
+        run: ./webkit/ci.ps1 -Step Build
+
+      - name: Save the build progress
+        id: save
+        if: ${{ always() && steps.build.outputs.state != '' }}
+        shell: pwsh
+        run: ./webkit/ci.ps1 -Step Archive
+
+      - name: Upload the build progress
+        if: ${{ always() && steps.save.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.state }}
+          path: C:\wk-state
+          retention-days: 7
+          compression-level: 0
+
+      - name: Remove older build progress
+        if: ${{ always() && steps.save.outcome == 'success' }}
+        shell: pwsh
+        run: ./webkit/ci.ps1 -Step Prune
+        continue-on-error: true
+
+      - name: Upload the compile errors
+        if: ${{ always() && steps.build.outputs.errors == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: webkit-errors-stage${{ inputs.stage }}
+          path: C:\wk-logs
+          retention-days: 14
+
+      - name: Package and publish
+        if: ${{ steps.build.outputs.done == 'true' }}
+        shell: pwsh
+        run: ./webkit/ci.ps1 -Step Package
+
+      - name: Fail when the build had errors
+        if: ${{ steps.build.outputs.errors == 'true' }}
+        shell: pwsh
+        run: |
+          Write-Host "WebKit didn't compile. Download the webkit-errors-stage${{ inputs.stage }} artifact (or see the run's summary) for the errors."
+          exit 1

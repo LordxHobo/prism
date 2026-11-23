@@ -22,12 +22,21 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.17</span>
+      <span class="version">Version 0.9.18</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Reading views (ACI)</h2>
+    <h2 style="margin-top:0">Streaming video: Prism's own WebKit</h2>
+    <ul>
+      <li><strong>Why YouTube said "Your browser can't play this video":</strong> WebKit's Windows builds can't stream video (they have no Media Source Extensions), so YouTube and most video sites refuse to play.</li>
+      <li><strong>The fix:</strong> Prism now builds its own WebKit on GitHub Actions, with the media player WebKit uses on Linux and smart TVs (GStreamer). It plays streaming video, with hardware decoding where your graphics card supports it.</li>
+      <li>Once that build is out, <code>fetch-webkit.ps1 -Prism</code> switches Prism to it. Prism sets up its video playback by itself; nothing needs installing.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Reading views (ACI)</h2>
     <ul>
       <li><strong>Read any article your way:</strong> press <strong>Aa</strong> in the address bar (or F9) and Prism shows the article in a view made for how you read. The original page stays untouched underneath; "Original page" or Esc takes you back.</li>
       <li><strong>Focus:</strong> one calm column without ads, sidebars, pop-ups or moving things, a reading progress bar, and an option to bold the start of each word.</li>

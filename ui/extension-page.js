@@ -489,7 +489,7 @@
     setUninstallURL: resolved(undefined),
     requestUpdateCheck: resolved({ status: 'no_update' }),
     getPlatformInfo: resolved({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' }),
-    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.17', buildID: '0' }),
+    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.18', buildID: '0' }),
     getContexts: withCallback((filter) => call('runtime.getContexts').then((contexts) => {
       const f = filter || {};
       const has = (list, value) => !Array.isArray(list) || list.includes(value);

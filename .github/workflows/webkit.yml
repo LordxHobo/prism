@@ -1,0 +1,77 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Builds Prism's own WebKit: the WebKit revision in webkit/BASE with the
+# patches in webkit/patches applied (GStreamer media playback, so streaming
+# video such as YouTube works). Start it from the Actions tab ("WebKit" >
+# "Run workflow"). See webkit/README.md.
+#
+# A full WebKit build takes longer than the 6 hours one GitHub job may run,
+# so it's split into stages: each stage builds for about 5 hours, saves its
+# progress, and the next stage carries on. A run also starts from the
+# progress the previous run saved, so after a fix only what changed is
+# compiled again.
+#
+# The finished build is published as a Release named webkit-..., which
+# scripts\fetch-webkit.ps1 -Prism downloads.
+
+name: WebKit
+
+on:
+  workflow_dispatch:
+    inputs:
+      fresh:
+        description: 'Start from scratch (ignore the progress earlier runs saved)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # publish the Release
+  actions: write # read and remove the saved build progress
+
+concurrency:
+  group: webkit-build
+  cancel-in-progress: false
+
+jobs:
+  stage1:
+    uses: ./.github/workflows/webkit-stage.yml
+    with:
+      stage: 1
+      fresh: ${{ inputs.fresh }}
+
+  stage2:
+    needs: stage1
+    if: ${{ !cancelled() && needs.stage1.outputs.more == 'true' }}
+    uses: ./.github/workflows/webkit-stage.yml
+    with:
+      stage: 2
+
+  stage3:
+    needs: stage2
+    if: ${{ !cancelled() && needs.stage2.outputs.more == 'true' }}
+    uses: ./.github/workflows/webkit-stage.yml
+    with:
+      stage: 3
+
+  stage4:
+    needs: stage3
+    if: ${{ !cancelled() && needs.stage3.outputs.more == 'true' }}
+    uses: ./.github/workflows/webkit-stage.yml
+    with:
+      stage: 4
+
+  stage5:
+    needs: stage4
+    if: ${{ !cancelled() && needs.stage4.outputs.more == 'true' }}
+    uses: ./.github/workflows/webkit-stage.yml
+    with:
+      stage: 5
+
+  stage6:
+    needs: stage5
+    if: ${{ !cancelled() && needs.stage5.outputs.more == 'true' }}
+    uses: ./.github/workflows/webkit-stage.yml
+    with:
+      stage: 6

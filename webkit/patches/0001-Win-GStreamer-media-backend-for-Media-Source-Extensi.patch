@@ -1,0 +1,509 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Prism <prism@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 17:58:48 +0100
+Subject: [PATCH 1/2] [Win] GStreamer media backend, for Media Source
+ Extensions
+
+The Windows port plays media through Media Foundation, which only handles
+plain files: there is no Media Source Extensions backend, so sites that
+stream with MSE (YouTube and most video sites) can't play video.
+
+Add a USE_GSTREAMER option to the Windows port that builds WebKit's
+GStreamer media player and its MSE support against GStreamer's MSVC
+binaries:
+
+- cmake/GStreamerWin.cmake finds GStreamer and GLib in GSTREAMER_ROOT
+  without pkg-config, so the copies of zlib, libxml2 etc. that come with
+  GStreamer aren't picked over vcpkg's.
+- WTF builds its GLib smart pointers and helpers when USE(GSTREAMER) is on
+  (GLib's types only; the event loop stays RunLoopWin).
+- GLib's default main context, which bus signal watches use, is dispatched
+  from a main RunLoop timer.
+- fnmatch() comes from g_pattern_match_simple() on Windows.
+---
+ Source/WTF/wtf/Platform.h                     |  5 +-
+ Source/WTF/wtf/PlatformWin.cmake              | 29 ++++++
+ Source/WTF/wtf/glib/GRefPtr.cpp               |  4 +-
+ Source/WTF/wtf/glib/GRefPtr.h                 |  4 +-
+ Source/WTF/wtf/glib/GThreadSafeWeakPtr.h      |  4 +-
+ Source/WTF/wtf/glib/GUniquePtr.h              |  4 +-
+ Source/WTF/wtf/glib/GWeakPtr.h                |  4 +-
+ Source/WTF/wtf/glib/RunLoopSourcePriority.h   |  4 +-
+ Source/WebCore/PlatformWin.cmake              |  4 +
+ Source/WebCore/platform/GStreamer.cmake       | 12 ++-
+ .../graphics/gstreamer/GStreamerCommon.cpp    | 30 ++++++
+ .../graphics/gstreamer/GStreamerCommon.h      |  9 ++
+ .../gstreamer/GStreamerRegistryScanner.cpp    |  2 +
+ .../gstreamer/ImageDecoderGStreamer.cpp       |  5 +
+ Source/cmake/GStreamerWin.cmake               | 95 +++++++++++++++++++
+ Source/cmake/OptionsWin.cmake                 | 12 +++
+ 16 files changed, 210 insertions(+), 17 deletions(-)
+ create mode 100644 Source/cmake/GStreamerWin.cmake
+
+diff --git a/Source/WTF/wtf/Platform.h b/Source/WTF/wtf/Platform.h
+index c72041c29..4d5af4cec 100644
+--- a/Source/WTF/wtf/Platform.h
++++ b/Source/WTF/wtf/Platform.h
+@@ -90,7 +90,8 @@
+    belong as part of Platform.h at all. */
+ 
+ 
+-#if USE(GLIB)
++/* The Windows port uses GLib only through GStreamer, without GLib's event loop. */
++#if USE(GLIB) || USE(GSTREAMER)
+ #define GLIB_VERSION_MIN_REQUIRED GLIB_VERSION_2_56
+ #define GLIB_VERSION_MAX_ALLOWED G_ENCODE_VERSION(2, 74)
+ #endif
+@@ -148,7 +149,7 @@
+ #endif
+ 
+ /* FIXME: This does not belong in Platform.h and should instead be included in another mechanism (prefix header, config.h, etc) */
+-#if USE(GLIB)
++#if USE(GLIB) || USE(GSTREAMER)
+ #include <wtf/glib/GTypedefs.h>
+ #endif
+ 
+diff --git a/Source/WTF/wtf/PlatformWin.cmake b/Source/WTF/wtf/PlatformWin.cmake
+index bc9cd6453..7f3a962ba 100644
+--- a/Source/WTF/wtf/PlatformWin.cmake
++++ b/Source/WTF/wtf/PlatformWin.cmake
+@@ -42,3 +42,32 @@ list(APPEND WTF_LIBRARIES
+     synchronization
+     winmm
+ )
++
++# GLib helpers for the GStreamer media backend (GLib's types and smart
++# pointers only: the event loop stays RunLoopWin).
++if (USE_GSTREAMER)
++    list(APPEND WTF_SOURCES
++        glib/GMallocString.cpp
++        glib/GRefPtr.cpp
++        glib/GSpanExtras.cpp
++    )
++
++    list(APPEND WTF_PUBLIC_HEADERS
++        glib/GLibExtras.h
++        glib/GMallocString.h
++        glib/GRefPtr.h
++        glib/GSpanExtras.h
++        glib/GThreadSafeWeakPtr.h
++        glib/GTypedefs.h
++        glib/GUniquePtr.h
++        glib/GWeakPtr.h
++        glib/RunLoopSourcePriority.h
++        glib/WTFGType.h
++    )
++
++    list(APPEND WTF_LIBRARIES
++        GLib::Gio
++        GLib::Object
++        GLib::GLib
++    )
++endif ()
+diff --git a/Source/WTF/wtf/glib/GRefPtr.cpp b/Source/WTF/wtf/glib/GRefPtr.cpp
+index f009addfb..d8e374cb5 100644
+--- a/Source/WTF/wtf/glib/GRefPtr.cpp
++++ b/Source/WTF/wtf/glib/GRefPtr.cpp
+@@ -19,7 +19,7 @@
+ #include "config.h"
+ #include <wtf/glib/GRefPtr.h>
+ 
+-#if USE(GLIB)
++#if USE(GLIB) || USE(GSTREAMER)
+ #include <gio/gio.h>
+ 
+ namespace WTF {
+@@ -29,4 +29,4 @@ WTF_DEFINE_GREF_TRAITS(GResource, g_resource_ref, g_resource_unref)
+ 
+ } // namespace WTF
+ 
+-#endif // USE(GLIB)
++#endif // USE(GLIB) || USE(GSTREAMER)
+diff --git a/Source/WTF/wtf/glib/GRefPtr.h b/Source/WTF/wtf/glib/GRefPtr.h
+index 7679bfc3f..c470afd4e 100644
+--- a/Source/WTF/wtf/glib/GRefPtr.h
++++ b/Source/WTF/wtf/glib/GRefPtr.h
+@@ -23,7 +23,7 @@
+ 
+ #pragma once
+ 
+-#if USE(GLIB)
++#if USE(GLIB) || USE(GSTREAMER)
+ 
+ #include <algorithm>
+ #include <glib-object.h>
+@@ -382,4 +382,4 @@ WTF_DEFINE_GREF_TRAITS_INLINE(GVariant, g_variant_ref_sink, g_variant_unref, g_v
+ using WTF::GRefPtr;
+ using WTF::adoptGRef;
+ 
+-#endif // USE(GLIB)
++#endif // USE(GLIB) || USE(GSTREAMER)
+diff --git a/Source/WTF/wtf/glib/GThreadSafeWeakPtr.h b/Source/WTF/wtf/glib/GThreadSafeWeakPtr.h
+index 06d30538e..21abb8864 100644
+--- a/Source/WTF/wtf/glib/GThreadSafeWeakPtr.h
++++ b/Source/WTF/wtf/glib/GThreadSafeWeakPtr.h
+@@ -20,7 +20,7 @@
+ 
+ #pragma once
+ 
+-#if USE(GLIB)
++#if USE(GLIB) || USE(GSTREAMER)
+ 
+ #include "GRefPtr.h"
+ 
+@@ -80,4 +80,4 @@ private:
+ 
+ using WTF::GThreadSafeWeakPtr;
+ 
+-#endif // USE(GLIB)
++#endif // USE(GLIB) || USE(GSTREAMER)
+diff --git a/Source/WTF/wtf/glib/GUniquePtr.h b/Source/WTF/wtf/glib/GUniquePtr.h
+index e40410969..96bc968e5 100644
+--- a/Source/WTF/wtf/glib/GUniquePtr.h
++++ b/Source/WTF/wtf/glib/GUniquePtr.h
+@@ -20,7 +20,7 @@
+ 
+ #pragma once
+ 
+-#if USE(GLIB)
++#if USE(GLIB) || USE(GSTREAMER)
+ 
+ #include <gio/gio.h>
+ #include <utility>
+@@ -141,4 +141,4 @@ using WTF::GUniquePtr;
+ using WTF::GUniqueOutPtr;
+ using WTF::GFreeDeleter;
+ 
+-#endif // USE(GLIB)
++#endif // USE(GLIB) || USE(GSTREAMER)
+diff --git a/Source/WTF/wtf/glib/GWeakPtr.h b/Source/WTF/wtf/glib/GWeakPtr.h
+index 5e6a56e01..14bb95fc4 100644
+--- a/Source/WTF/wtf/glib/GWeakPtr.h
++++ b/Source/WTF/wtf/glib/GWeakPtr.h
+@@ -20,7 +20,7 @@
+ 
+ #pragma once
+ 
+-#if USE(GLIB)
++#if USE(GLIB) || USE(GSTREAMER)
+ 
+ #include <glib-object.h>
+ #include <wtf/Noncopyable.h>
+@@ -114,4 +114,4 @@ private:
+ 
+ using WTF::GWeakPtr;
+ 
+-#endif // USE(GLIB)
++#endif // USE(GLIB) || USE(GSTREAMER)
+diff --git a/Source/WTF/wtf/glib/RunLoopSourcePriority.h b/Source/WTF/wtf/glib/RunLoopSourcePriority.h
+index 768b21d34..798e131c1 100644
+--- a/Source/WTF/wtf/glib/RunLoopSourcePriority.h
++++ b/Source/WTF/wtf/glib/RunLoopSourcePriority.h
+@@ -19,7 +19,7 @@
+ 
+ #pragma once
+ 
+-#if USE(GLIB)
++#if USE(GLIB) || USE(GSTREAMER)
+ 
+ namespace WTF {
+ 
+@@ -83,4 +83,4 @@ enum RunLoopSourcePriority {
+ 
+ using WTF::RunLoopSourcePriority;
+ 
+-#endif // USE(GLIB)
++#endif // USE(GLIB) || USE(GSTREAMER)
+diff --git a/Source/WebCore/PlatformWin.cmake b/Source/WebCore/PlatformWin.cmake
+index 3207b155f..a41207faa 100644
+--- a/Source/WebCore/PlatformWin.cmake
++++ b/Source/WebCore/PlatformWin.cmake
+@@ -16,6 +16,10 @@ if (USE_DAWN)
+     include(platform/Dawn.cmake)
+ endif ()
+ 
++if (USE_GSTREAMER)
++    include(platform/GStreamer.cmake)
++endif ()
++
+ list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
+     "${WEBCORE_DIR}/accessibility/win"
+     "${WEBCORE_DIR}/page/win"
+diff --git a/Source/WebCore/platform/GStreamer.cmake b/Source/WebCore/platform/GStreamer.cmake
+index ce1c66972..505d97d3d 100644
+--- a/Source/WebCore/platform/GStreamer.cmake
++++ b/Source/WebCore/platform/GStreamer.cmake
+@@ -1,9 +1,15 @@
+ include(CheckCXXSymbolExists)
+ 
+ if (ENABLE_VIDEO OR ENABLE_WEB_AUDIO)
+-    list(APPEND WebCore_LIBRARIES
+-        GLib::GioUnix
+-    )
++    if (WIN32)
++        list(APPEND WebCore_LIBRARIES
++            GLib::Gio
++        )
++    else ()
++        list(APPEND WebCore_LIBRARIES
++            GLib::GioUnix
++        )
++    endif ()
+ 
+     list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
+         "${WEBCORE_DIR}/Modules/mediastream/gstreamer"
+diff --git a/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.cpp b/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.cpp
+index 43946e778..ef83da2a8 100644
+--- a/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.cpp
++++ b/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.cpp
+@@ -38,15 +38,19 @@
+ #include "SharedBuffer.h"
+ #include "VideoSinkGStreamer.h"
+ #include "WebKitAudioSinkGStreamer.h"
++#if !OS(WINDOWS)
+ #include <fnmatch.h>
++#endif
+ #include <mutex>
+ #include <wtf/FileSystem.h>
+ #include <wtf/HashMap.h>
++#include <wtf/MainThread.h>
+ #include <wtf/MallocSpan.h>
+ #include <wtf/MediaTime.h>
+ #include <wtf/NeverDestroyed.h>
+ #include <wtf/PrintStream.h>
+ #include <wtf/RecursiveLockAdapter.h>
++#include <wtf/RunLoop.h>
+ #include <wtf/RuntimeApplicationChecks.h>
+ #include <wtf/Scope.h>
+ #include <wtf/TZoneMallocInlines.h>
+@@ -489,7 +493,11 @@ bool ensureGStreamerInitialized()
+         int argc = parameters.size() + 1;
+         char** argv = g_new0(char*, argc + 1);
+         auto argvSpan = unsafeMakeSpan(argv, argc);
++#if OS(WINDOWS)
++        argvSpan[0] = g_strdup("WebKitWebProcess");
++#else
+         argvSpan[0] = gStrdup(FileSystem::currentExecutableName());
++#endif
+         for (auto [arg, parameter] : zippedRange(argvSpan.subspan(1), parameters))
+             arg = gStrdup(parameter.utf8());
+ 
+@@ -1151,10 +1159,32 @@ static void dumpPipeline(const GRefPtr<GstElement>& pipeline, String&& dotFileNa
+     }), data, reinterpret_cast<GDestroyNotify>(destroyAsyncPipelineDumpData));
+ }
+ 
++#if OS(WINDOWS)
++// gst_bus_add_signal_watch() attaches a GSource to GLib's default main
++// context. GTK and WPE run that context as their main loop; on Windows the
++// main loop is a Win32 message loop, so dispatch the context from a timer.
++static void ensureGLibMainContextIsDispatched()
++{
++    ensureOnMainThread([] {
++        static NeverDestroyed<std::unique_ptr<RunLoop::Timer>> timer;
++        if (timer.get())
++            return;
++        timer.get() = makeUnique<RunLoop::Timer>(RunLoop::mainSingleton(), "GLibMainContextDispatch"_s, [] {
++            auto* context = g_main_context_default();
++            for (unsigned i = 0; i < 100 && g_main_context_iteration(context, FALSE); ++i) { }
++        });
++        timer.get()->startRepeating(8_ms);
++    });
++}
++#endif
++
+ void connectSimpleBusMessageCallback(GstElement* pipeline, Function<void(GstMessage*)>&& customHandler, AsynchronousPipelineDumping asynchronousPipelineDumping)
+ {
+     GRefPtr bus = adoptGRef(gst_pipeline_get_bus(GST_PIPELINE(pipeline)));
+     gst_bus_add_signal_watch_full(bus.get(), RunLoopSourcePriority::RunLoopDispatcher);
++#if OS(WINDOWS)
++    ensureGLibMainContextIsDispatched();
++#endif
+ 
+     auto data = createMessageBusData();
+     data->pipeline.reset(pipeline);
+diff --git a/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.h b/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.h
+index 5eff4ddbf..915d4edd7 100644
+--- a/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.h
++++ b/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.h
+@@ -71,6 +71,15 @@ typedef struct _GstGLMemory GstGLMemory;
+ 
+ namespace WebCore {
+ 
++#if OS(WINDOWS)
++// POSIX fnmatch() without flags, for the glob patterns used to match element
++// and codec names (only '*' and '?'). Returns 0 on a match, like fnmatch().
++inline int fnmatch(const char* pattern, const char* string, int)
++{
++    return g_pattern_match_simple(pattern, string) ? 0 : 1;
++}
++#endif
++
+ class FloatSize;
+ class IntSize;
+ class SharedBuffer;
+diff --git a/Source/WebCore/platform/graphics/gstreamer/GStreamerRegistryScanner.cpp b/Source/WebCore/platform/graphics/gstreamer/GStreamerRegistryScanner.cpp
+index f235c97de..0248d852c 100644
+--- a/Source/WebCore/platform/graphics/gstreamer/GStreamerRegistryScanner.cpp
++++ b/Source/WebCore/platform/graphics/gstreamer/GStreamerRegistryScanner.cpp
+@@ -27,7 +27,9 @@
+ #include "GStreamerCommon.h"
+ #include "PlatformScreen.h"
+ #include "ScreenProperties.h"
++#if !OS(WINDOWS)
+ #include <fnmatch.h>
++#endif
+ #include <gst/pbutils/codec-utils.h>
+ #include <wtf/NeverDestroyed.h>
+ #include <wtf/PrintStream.h>
+diff --git a/Source/WebCore/platform/graphics/gstreamer/ImageDecoderGStreamer.cpp b/Source/WebCore/platform/graphics/gstreamer/ImageDecoderGStreamer.cpp
+index 75f95d0c1..e1ba1cf43 100644
+--- a/Source/WebCore/platform/graphics/gstreamer/ImageDecoderGStreamer.cpp
++++ b/Source/WebCore/platform/graphics/gstreamer/ImageDecoderGStreamer.cpp
+@@ -291,8 +291,13 @@ void ImageDecoderGStreamer::storeDecodedSample(GRefPtr<GstSample>&& sample)
+ void ImageDecoderGStreamer::pushEncodedData(const FragmentedSharedBuffer& sharedBuffer)
+ {
+     auto data = sharedBuffer.makeContiguous();
++#if USE(GLIB)
+     auto bytes = data->createGBytes();
+     GRefPtr buffer = adoptGRef(gst_buffer_new_wrapped_bytes(bytes.get()));
++#else
++    auto span = data->span();
++    GRefPtr buffer = adoptGRef(gst_buffer_new_memdup(span.data(), span.size()));
++#endif
+     m_eos = false;
+     m_error = false;
+ 
+diff --git a/Source/cmake/GStreamerWin.cmake b/Source/cmake/GStreamerWin.cmake
+new file mode 100644
+index 000000000..5412f726d
+--- /dev/null
++++ b/Source/cmake/GStreamerWin.cmake
+@@ -0,0 +1,95 @@
++# GStreamer (and the GLib it is built on) for the Windows port, taken from
++# GStreamer's MSVC development files rather than pkg-config: those files also
++# carry zlib, libxml2, libpng and friends, and pkg-config hints would make
++# CMake pick them over the vcpkg builds the rest of WebKit uses. Only the
++# gstreamer-1.0 and glib-2.0 header folders are added to the include path.
++
++if (NOT GSTREAMER_ROOT)
++    if (DEFINED ENV{GSTREAMER_ROOT})
++        set(GSTREAMER_ROOT "$ENV{GSTREAMER_ROOT}")
++    elseif (DEFINED ENV{GSTREAMER_1_0_ROOT_MSVC_X86_64})
++        set(GSTREAMER_ROOT "$ENV{GSTREAMER_1_0_ROOT_MSVC_X86_64}")
++    endif ()
++endif ()
++if (NOT GSTREAMER_ROOT OR NOT EXISTS "${GSTREAMER_ROOT}/include/gstreamer-1.0/gst/gst.h")
++    message(FATAL_ERROR "USE_GSTREAMER needs GStreamer's MSVC development files. Set GSTREAMER_ROOT to the folder that has include\\gstreamer-1.0 (was '${GSTREAMER_ROOT}').")
++endif ()
++file(TO_CMAKE_PATH "${GSTREAMER_ROOT}" GSTREAMER_ROOT)
++message(STATUS "GStreamer: ${GSTREAMER_ROOT}")
++
++set(GLIB_INCLUDE_DIRS
++    "${GSTREAMER_ROOT}/include/glib-2.0"
++    "${GSTREAMER_ROOT}/lib/glib-2.0/include"
++)
++set(_gst_include_dirs "${GSTREAMER_ROOT}/include/gstreamer-1.0" ${GLIB_INCLUDE_DIRS})
++
++function(_gst_win_find_library _variable _name)
++    find_library(${_variable} NAMES ${_name} PATHS "${GSTREAMER_ROOT}/lib" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
++    if (NOT ${_variable})
++        message(FATAL_ERROR "GStreamer library ${_name}.lib not found in ${GSTREAMER_ROOT}/lib")
++    endif ()
++endfunction()
++
++# Same targets as FindGLib.cmake.
++function(_gst_win_glib_target _target _name)
++    _gst_win_find_library(GLIB_WIN_${_name}_LIBRARY ${_name})
++    if (NOT TARGET ${_target})
++        add_library(${_target} UNKNOWN IMPORTED GLOBAL)
++        set_target_properties(${_target} PROPERTIES
++            IMPORTED_LOCATION "${GLIB_WIN_${_name}_LIBRARY}"
++            INTERFACE_INCLUDE_DIRECTORIES "${GLIB_INCLUDE_DIRS}"
++        )
++    endif ()
++endfunction()
++
++_gst_win_glib_target(GLib::GLib glib-2.0)
++_gst_win_glib_target(GLib::Object gobject-2.0)
++_gst_win_glib_target(GLib::Module gmodule-2.0)
++_gst_win_glib_target(GLib::Gio gio-2.0)
++set_property(TARGET GLib::Object APPEND PROPERTY INTERFACE_LINK_LIBRARIES GLib::GLib)
++set_property(TARGET GLib::Gio APPEND PROPERTY INTERFACE_LINK_LIBRARIES GLib::Object)
++set(GLib_FOUND TRUE)
++
++# The variables FindGStreamer.cmake sets, as platform/GStreamer.cmake uses them.
++foreach (_component
++        "GSTREAMER;gstreamer-1.0"
++        "GSTREAMER_BASE;gstbase-1.0"
++        "GSTREAMER_ALLOCATORS;gstallocators-1.0"
++        "GSTREAMER_APP;gstapp-1.0"
++        "GSTREAMER_AUDIO;gstaudio-1.0"
++        "GSTREAMER_PBUTILS;gstpbutils-1.0"
++        "GSTREAMER_TAG;gsttag-1.0"
++        "GSTREAMER_VIDEO;gstvideo-1.0")
++    list(GET _component 0 _prefix)
++    list(GET _component 1 _library)
++    _gst_win_find_library(${_prefix}_LIBRARIES ${_library})
++    set(${_prefix}_INCLUDE_DIRS ${_gst_include_dirs})
++    set(PC_${_prefix}_FOUND TRUE)
++endforeach ()
++
++if (ENABLE_WEB_AUDIO)
++    _gst_win_find_library(GSTREAMER_FFT_LIBRARIES gstfft-1.0)
++    set(GSTREAMER_FFT_INCLUDE_DIRS ${_gst_include_dirs})
++    set(PC_GSTREAMER_FFT_FOUND TRUE)
++endif ()
++
++file(STRINGS "${GSTREAMER_ROOT}/include/gstreamer-1.0/gst/gstversion.h" _gst_version_lines REGEX "#define GST_VERSION_(MAJOR|MINOR|MICRO) ")
++foreach (_line IN LISTS _gst_version_lines)
++    string(REGEX REPLACE ".*#define GST_VERSION_([A-Z]+) +\\(?([0-9]+).*" "\\1;\\2" _pair "${_line}")
++    list(GET _pair 0 _part)
++    list(GET _pair 1 _number)
++    set(_gst_version_${_part} ${_number})
++endforeach ()
++set(GSTREAMER_VERSION "${_gst_version_MAJOR}.${_gst_version_MINOR}.${_gst_version_MICRO}")
++if (GSTREAMER_VERSION VERSION_LESS 1.20.0)
++    message(FATAL_ERROR "GStreamer 1.20 or newer is needed, found ${GSTREAMER_VERSION}")
++endif ()
++message(STATUS "GStreamer version: ${GSTREAMER_VERSION}")
++
++# No GL sink (WebKit's Windows compositor paints video frames itself), no
++# MPEG-TS metadata, no static GStreamer.
++SET_AND_EXPOSE_TO_BUILD(USE_GSTREAMER_GL OFF)
++SET_AND_EXPOSE_TO_BUILD(USE_GSTREAMER_MPEGTS OFF)
++SET_AND_EXPOSE_TO_BUILD(USE_GSTREAMER_FULL OFF)
++SET_AND_EXPOSE_TO_BUILD(ENABLE_MEDIA_TELEMETRY OFF)
++SET_AND_EXPOSE_TO_BUILD(USE_LIBWEBRTC OFF)
+diff --git a/Source/cmake/OptionsWin.cmake b/Source/cmake/OptionsWin.cmake
+index 77e170263..df22f5ace 100644
+--- a/Source/cmake/OptionsWin.cmake
++++ b/Source/cmake/OptionsWin.cmake
+@@ -62,6 +62,14 @@ WEBKIT_OPTION_BEGIN()
+ WEBKIT_OPTION_DEFINE(USE_SKIA_OPENTYPE_SVG "Whether to use the Skia built-in support for OpenType SVG fonts." PUBLIC ON)
+ WEBKIT_OPTION_DEPEND(USE_SKIA_OPENTYPE_SVG USE_SKIA)
+ 
++# GStreamer media backend: Media Source Extensions (and so sites like
++# YouTube) need it, the Media Foundation player only plays plain files.
++# Needs the GStreamer MSVC development files (GSTREAMER_ROOT, or the
++# GSTREAMER_1_0_ROOT_MSVC_X86_64 variable set by GStreamer's installer).
++WEBKIT_OPTION_DEFINE(USE_GSTREAMER "Whether to use GStreamer for media playback" PUBLIC OFF)
++WEBKIT_OPTION_DEPEND(USE_GSTREAMER ENABLE_VIDEO)
++WEBKIT_OPTION_DEPEND(ENABLE_MEDIA_SOURCE USE_GSTREAMER)
++
+ # FIXME: Most of these options should not be public.
+ # TODO: Audit the features list
+ WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_API_TESTS PUBLIC ON)
+@@ -176,6 +184,10 @@ else ()
+     SET_AND_EXPOSE_TO_BUILD(USE_CAIRO ON)
+ endif ()
+ 
++if (USE_GSTREAMER)
++    include(GStreamerWin)
++endif ()
++
+ if (USE_WOFF2)
+     find_package(WOFF2 1.0.2 COMPONENTS dec)
+     if (NOT WOFF2_FOUND)
+-- 
+2.43.0
+

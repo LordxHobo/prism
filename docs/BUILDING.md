@@ -44,6 +44,16 @@ powershell -ExecutionPolicy Bypass -File scripts\fetch-webkit.ps1 -Update
 
 This switches to the newest WebKit build and updates `webkit.lock`. Test it, then commit `webkit.lock`.
 
+### Prism's own WebKit build (streaming video)
+
+WebKit's own Windows builds can't play streaming video (YouTube and most video sites). Prism builds its own WebKit with GStreamer media playback on GitHub Actions; see [webkit/README.md](../webkit/README.md). Once a build is published:
+
+```bat
+powershell -ExecutionPolicy Bypass -File scripts\fetch-webkit.ps1 -Prism
+```
+
+Commit `webkit.lock` afterwards. `-Update` then keeps to Prism's builds, and `-Stock` switches back to WebKit's own.
+
 ## If the WebKit download fails
 
 WebKit's build infrastructure changes from time to time. If the script can't find a build:

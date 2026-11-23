@@ -17,8 +17,26 @@
     webkit.lock is rewritten. Commit webkit.lock afterwards so every build of
     Prism uses the same WebKit.
 
+    Prism also builds its own WebKit on GitHub Actions (webkit/README.md),
+    with media playback through GStreamer so streaming video like YouTube
+    works. -Prism switches to the newest of those builds; webkit.lock then
+    remembers that, and -Update keeps to Prism's builds. -Stock switches back
+    to WebKit's own builds.
+
 .PARAMETER Update
     Switch to the newest successful WebKit build and update webkit.lock.
+
+.PARAMETER Prism
+    Use the newest of Prism's own WebKit builds (a Release named webkit-...
+    in Prism's GitHub repository) and update webkit.lock.
+
+.PARAMETER Stock
+    Go back to WebKit's own builds from build.webkit.org (no streaming video)
+    and update webkit.lock.
+
+.PARAMETER Repo
+    The GitHub repository with Prism's WebKit builds (owner/name). By
+    default, the one this folder was cloned from.
 
 .PARAMETER Archive
     Use a WebKit build zip you downloaded yourself instead (see docs\BUILDING.md).
@@ -34,6 +52,9 @@
 [CmdletBinding()]
 param(
     [switch]$Update,
+    [switch]$Prism,
+    [switch]$Stock,
+    [string]$Repo,
     [string]$Archive,
     [switch]$KeepSymbols
 )
@@ -92,6 +113,42 @@ function Find-LatestRevision {
     throw "Couldn't find a downloadable WebKit build among the last 25 Windows builds. See docs\BUILDING.md for the manual steps."
 }
 
+# Prism's own builds are Releases named webkit-<revision>-r<run> with a
+# webkit-win64.zip, in Prism's GitHub repository.
+function Get-PrismRepo {
+    if ($Repo) { return $Repo }
+    $origin = git -C $Root remote get-url origin 2>$null
+    if ($origin -match 'github\.com[:/]([^/]+)/([^/]+?)(\.git)?/?$') { return "$($Matches[1])/$($Matches[2])" }
+    throw "Couldn't work out Prism's GitHub repository from git; pass it with -Repo owner/name."
+}
+
+function Find-LatestPrismBuild {
+    $repository = Get-PrismRepo
+    Write-Step "Looking up the newest Prism WebKit build in $repository"
+    $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/releases?per_page=50" -UseBasicParsing
+    foreach ($release in $releases) {
+        if ($release.draft -or -not $release.tag_name.StartsWith('webkit-')) { continue }
+        $asset = $release.assets | Where-Object { $_.name -eq 'webkit-win64.zip' } | Select-Object -First 1
+        if ($asset) {
+            Write-Host "    Found $($release.tag_name)"
+            return [pscustomobject]@{ revision = $release.tag_name; url = $asset.browser_download_url }
+        }
+    }
+    throw "No Prism WebKit build in $repository yet. Run the WebKit workflow on GitHub (Actions > WebKit > Run workflow); see webkit\README.md."
+}
+
+function Write-PrismLock($Build) {
+    $lock = [ordered]@{
+        revision = $Build.revision
+        url = $Build.url
+        builder = 'prism'
+        source = 'prism'
+        updated = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+    }
+    $json = $lock | ConvertTo-Json
+    [System.IO.File]::WriteAllText($LockFile, ($json -replace "`r`n", "`n") + "`n", (New-Object System.Text.UTF8Encoding $false))
+}
+
 function Read-Lock {
     if (-not (Test-Path $LockFile)) { return $null }
     return Get-Content $LockFile -Raw | ConvertFrom-Json
@@ -132,21 +189,32 @@ if ($Archive) {
     $revision = [IO.Path]::GetFileNameWithoutExtension($zip)
     Write-Step "Using your WebKit archive: $zip"
 } else {
+    if ($Prism -and $Stock) { throw "Use -Prism or -Stock, not both." }
     $lock = Read-Lock
-    if ($Update -or -not $lock) {
-        $revision = Find-LatestRevision
-        Write-Lock $revision
+    $usePrism = $Prism -or ($lock -and $lock.source -eq 'prism' -and -not $Stock)
+    $url = $null
+    if ($Prism -or $Stock -or $Update -or -not $lock) {
+        if ($usePrism) {
+            $build = Find-LatestPrismBuild
+            Write-PrismLock $build
+            $revision = $build.revision
+            $url = $build.url
+        } else {
+            $revision = Find-LatestRevision
+            Write-Lock $revision
+        }
         Write-Host "    Pinned WebKit $revision in webkit.lock (commit this file)."
     } else {
         $revision = $lock.revision
+        if ($usePrism) { $url = $lock.url }
         Write-Step "Using WebKit $revision (pinned in webkit.lock)"
     }
+    if (-not $url) { $url = Get-ArchiveUrl $revision }
 
     $zip = Join-Path $Cache ("webkit-" + ($revision -replace '[^\w.-]', '_') + ".zip")
     if (Test-Path $zip) {
         Write-Host "    Already downloaded."
     } else {
-        $url = Get-ArchiveUrl $revision
         Write-Step "Downloading WebKit (a few hundred MB)"
         Write-Host "    $url"
         Get-File $url $zip
