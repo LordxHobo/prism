@@ -22,12 +22,20 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.18</span>
+      <span class="version">Version 0.9.19</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Streaming video: Prism's own WebKit</h2>
+    <h2 style="margin-top:0">Prism's own WebKit: first fixes</h2>
+    <ul>
+      <li>Fixes the compile errors from the first build of Prism's own WebKit: GStreamer now replaces Windows' old video player instead of sitting next to it, and WebKit reads GLib's Windows headers properly.</li>
+      <li>When the WebKit build fails, its summary now starts with a short list of the distinct errors and leaves out the thousands of warnings.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Streaming video: Prism's own WebKit</h2>
     <ul>
       <li><strong>Why YouTube said "Your browser can't play this video":</strong> WebKit's Windows builds can't stream video (they have no Media Source Extensions), so YouTube and most video sites refuse to play.</li>
       <li><strong>The fix:</strong> Prism now builds its own WebKit on GitHub Actions, with the media player WebKit uses on Linux and smart TVs (GStreamer). It plays streaming video, with hardware decoding where your graphics card supports it.</li>

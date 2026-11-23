@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.19
+
+- `webkit/patches/0001` (first CI round): `USE_MEDIA_FOUNDATION` is off with `USE_GSTREAMER` (the Media Foundation player doesn't implement the MSE `load()` and is abstract with `ENABLE_MEDIA_SOURCE`); `dwrite` stays linked for FontCacheSkiaWin. `wtf/glib/GRefPtr.h` and `GSpanExtras.h` include `<gio/gio.h>`/`<glib.h>` on Windows instead of forward-declaring GLib functions (GLib declares them dllimport, and a plain declaration first makes that an error). SharedBuffer.h includes GStreamerCommon.h, so this reached nearly every WebCore file.
+- `webkit/ci.ps1`: the error report keeps only errors (each with the 6 lines after it, up to 80 lines per failed step), drops warnings, and starts with the distinct error messages and how often each occurred.
+
 ## 0.9.18
 
 - **Prism's own WebKit build** (`webkit/`, `.github/workflows/webkit.yml`, `webkit-stage.yml`): WebKit's Windows builds use Media Foundation and have no Media Source Extensions, so YouTube ("Your browser can't play this video") and most video sites can't play. Prism builds the WebKit commit in `webkit/BASE` with `webkit/patches` on GitHub Actions:

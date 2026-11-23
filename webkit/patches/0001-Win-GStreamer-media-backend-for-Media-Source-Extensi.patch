@@ -20,24 +20,29 @@ binaries:
 - GLib's default main context, which bus signal watches use, is dispatched
   from a main RunLoop timer.
 - fnmatch() comes from g_pattern_match_simple() on Windows.
+- GStreamer replaces the Media Foundation player, which has no MSE support
+  (DirectWrite stays linked for fonts).
+- GRefPtr.h and GSpanExtras.h include GLib's headers on Windows instead of
+  forward-declaring its functions, whose real declarations are dllimport.
 ---
  Source/WTF/wtf/Platform.h                     |  5 +-
  Source/WTF/wtf/PlatformWin.cmake              | 29 ++++++
  Source/WTF/wtf/glib/GRefPtr.cpp               |  4 +-
- Source/WTF/wtf/glib/GRefPtr.h                 |  4 +-
+ Source/WTF/wtf/glib/GRefPtr.h                 | 10 +-
+ Source/WTF/wtf/glib/GSpanExtras.h             |  6 ++
  Source/WTF/wtf/glib/GThreadSafeWeakPtr.h      |  4 +-
  Source/WTF/wtf/glib/GUniquePtr.h              |  4 +-
  Source/WTF/wtf/glib/GWeakPtr.h                |  4 +-
  Source/WTF/wtf/glib/RunLoopSourcePriority.h   |  4 +-
- Source/WebCore/PlatformWin.cmake              |  4 +
+ Source/WebCore/PlatformWin.cmake              |  7 ++
  Source/WebCore/platform/GStreamer.cmake       | 12 ++-
  .../graphics/gstreamer/GStreamerCommon.cpp    | 30 ++++++
  .../graphics/gstreamer/GStreamerCommon.h      |  9 ++
  .../gstreamer/GStreamerRegistryScanner.cpp    |  2 +
  .../gstreamer/ImageDecoderGStreamer.cpp       |  5 +
  Source/cmake/GStreamerWin.cmake               | 95 +++++++++++++++++++
- Source/cmake/OptionsWin.cmake                 | 12 +++
- 16 files changed, 210 insertions(+), 17 deletions(-)
+ Source/cmake/OptionsWin.cmake                 | 20 +++-
+ 17 files changed, 232 insertions(+), 18 deletions(-)
  create mode 100644 Source/cmake/GStreamerWin.cmake
 
 diff --git a/Source/WTF/wtf/Platform.h b/Source/WTF/wtf/Platform.h
@@ -120,10 +125,10 @@ index f009addfb..d8e374cb5 100644
 -#endif // USE(GLIB)
 +#endif // USE(GLIB) || USE(GSTREAMER)
 diff --git a/Source/WTF/wtf/glib/GRefPtr.h b/Source/WTF/wtf/glib/GRefPtr.h
-index 7679bfc3f..c470afd4e 100644
+index 7679bfc3f..6910a5afa 100644
 --- a/Source/WTF/wtf/glib/GRefPtr.h
 +++ b/Source/WTF/wtf/glib/GRefPtr.h
-@@ -23,7 +23,7 @@
+@@ -23,12 +23,17 @@
  
  #pragma once
  
@@ -132,12 +137,54 @@ index 7679bfc3f..c470afd4e 100644
  
  #include <algorithm>
  #include <glib-object.h>
-@@ -382,4 +382,4 @@ WTF_DEFINE_GREF_TRAITS_INLINE(GVariant, g_variant_ref_sink, g_variant_unref, g_v
+ #include <wtf/HashTraits.h>
+ 
++#if OS(WINDOWS)
++// GLib's Windows headers declare its functions __declspec(dllimport), and a
++// plain forward declaration seen first makes the real one an error.
++#include <gio/gio.h>
++#else
+ extern "C" {
+     typedef struct _GDBusConnection GDBusConnection;
+     typedef struct _GDBusNodeInfo GDBusNodeInfo;
+@@ -46,6 +51,7 @@ extern "C" {
+     gpointer g_object_ref_sink(gpointer);
+ #endif
+ };
++#endif // OS(WINDOWS)
+ 
+ namespace WTF {
+ 
+@@ -382,4 +388,4 @@ WTF_DEFINE_GREF_TRAITS_INLINE(GVariant, g_variant_ref_sink, g_variant_unref, g_v
  using WTF::GRefPtr;
  using WTF::adoptGRef;
  
 -#endif // USE(GLIB)
 +#endif // USE(GLIB) || USE(GSTREAMER)
+diff --git a/Source/WTF/wtf/glib/GSpanExtras.h b/Source/WTF/wtf/glib/GSpanExtras.h
+index 71cb76d21..ee8ee7b99 100644
+--- a/Source/WTF/wtf/glib/GSpanExtras.h
++++ b/Source/WTF/wtf/glib/GSpanExtras.h
+@@ -24,6 +24,11 @@
+ #include <wtf/glib/GRefPtr.h>
+ #include <wtf/glib/GUniquePtr.h>
+ 
++#if OS(WINDOWS)
++// GLib's Windows headers declare its functions __declspec(dllimport), and a
++// plain forward declaration seen first makes the real one an error.
++#include <glib.h>
++#else
+ extern "C" {
+ void* g_malloc(size_t);
+ void* g_malloc0(size_t);
+@@ -33,6 +38,7 @@ void* g_try_malloc0(size_t);
+ void* g_try_realloc(void*, size_t);
+ void g_strfreev(char**);
+ }
++#endif
+ 
+ namespace WTF {
+ 
 diff --git a/Source/WTF/wtf/glib/GThreadSafeWeakPtr.h b/Source/WTF/wtf/glib/GThreadSafeWeakPtr.h
 index 06d30538e..21abb8864 100644
 --- a/Source/WTF/wtf/glib/GThreadSafeWeakPtr.h
@@ -215,7 +262,7 @@ index 768b21d34..798e131c1 100644
 -#endif // USE(GLIB)
 +#endif // USE(GLIB) || USE(GSTREAMER)
 diff --git a/Source/WebCore/PlatformWin.cmake b/Source/WebCore/PlatformWin.cmake
-index 3207b155f..a41207faa 100644
+index 3207b155f..530c9491c 100644
 --- a/Source/WebCore/PlatformWin.cmake
 +++ b/Source/WebCore/PlatformWin.cmake
 @@ -16,6 +16,10 @@ if (USE_DAWN)
@@ -229,6 +276,16 @@ index 3207b155f..a41207faa 100644
  list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
      "${WEBCORE_DIR}/accessibility/win"
      "${WEBCORE_DIR}/page/win"
+@@ -206,6 +210,9 @@ if (ENABLE_VIDEO AND USE_MEDIA_FOUNDATION)
+     )
+ 
+     list(APPEND WebCore_PRIVATE_LIBRARIES MediaFoundation)
++else ()
++    # The fonts code (FontCacheSkiaWin) uses DirectWrite too.
++    list(APPEND WebCore_PRIVATE_LIBRARIES dwrite)
+ endif ()
+ 
+ if (USE_CAIRO)
 diff --git a/Source/WebCore/platform/GStreamer.cmake b/Source/WebCore/platform/GStreamer.cmake
 index ce1c66972..505d97d3d 100644
 --- a/Source/WebCore/platform/GStreamer.cmake
@@ -475,7 +532,7 @@ index 000000000..5412f726d
 +SET_AND_EXPOSE_TO_BUILD(ENABLE_MEDIA_TELEMETRY OFF)
 +SET_AND_EXPOSE_TO_BUILD(USE_LIBWEBRTC OFF)
 diff --git a/Source/cmake/OptionsWin.cmake b/Source/cmake/OptionsWin.cmake
-index 77e170263..df22f5ace 100644
+index 77e170263..1e41b338f 100644
 --- a/Source/cmake/OptionsWin.cmake
 +++ b/Source/cmake/OptionsWin.cmake
 @@ -62,6 +62,14 @@ WEBKIT_OPTION_BEGIN()
@@ -493,7 +550,22 @@ index 77e170263..df22f5ace 100644
  # FIXME: Most of these options should not be public.
  # TODO: Audit the features list
  WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_API_TESTS PUBLIC ON)
-@@ -176,6 +184,10 @@ else ()
+@@ -129,7 +137,13 @@ SET_AND_EXPOSE_TO_BUILD(USE_HARFBUZZ ON)
+ SET_AND_EXPOSE_TO_BUILD(USE_OPENSSL ON)
+ SET_AND_EXPOSE_TO_BUILD(USE_TEXTURE_MAPPER ON)
+ SET_AND_EXPOSE_TO_BUILD(USE_THEME_ADWAITA ON)
+-SET_AND_EXPOSE_TO_BUILD(USE_MEDIA_FOUNDATION ${ENABLE_VIDEO})
++# GStreamer replaces the Media Foundation player (which has no Media Source
++# Extensions support, so it can't be built with ENABLE_MEDIA_SOURCE).
++if (USE_GSTREAMER)
++    SET_AND_EXPOSE_TO_BUILD(USE_MEDIA_FOUNDATION OFF)
++else ()
++    SET_AND_EXPOSE_TO_BUILD(USE_MEDIA_FOUNDATION ${ENABLE_VIDEO})
++endif ()
+ SET_AND_EXPOSE_TO_BUILD(USE_INSPECTOR_SOCKET_SERVER ${ENABLE_REMOTE_INSPECTOR})
+ SET_AND_EXPOSE_TO_BUILD(HAVE_GL_FENCE ON)
+ SET_AND_EXPOSE_TO_BUILD(ENABLE_DEVELOPER_MODE ${DEVELOPER_MODE})
+@@ -176,6 +190,10 @@ else ()
      SET_AND_EXPOSE_TO_BUILD(USE_CAIRO ON)
  endif ()
  

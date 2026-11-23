@@ -300,23 +300,45 @@ switch ($Step) {
     Get-Content "$log.err" -ErrorAction SilentlyContinue | Add-Content $log
 
     # Collect what failed, with the compiler's messages.
-    # ninja prints "FAILED: <output>", then the command and its messages,
-    # until the next "[n/total]" progress line.
+    # ninja prints "FAILED: <output>", then the command and the compiler's
+    # messages, until the next "[n/total]" progress line. Keep the errors
+    # (with the lines after each, which show the code and any notes) and
+    # leave out the warnings, which can be thousands of lines.
     $errors = New-Object System.Collections.Generic.List[string]
-    $capturing = 0
+    $messages = @{}
+    $inBlock = $false
+    $keep = 0
+    $blockLines = 0
     foreach ($line in [IO.File]::ReadLines($log)) {
         if ($line.StartsWith('FAILED: ')) {
             if ($errors.Count) { $errors.Add('') }
             $errors.Add($line)
-            $capturing = 40
-        } elseif ($capturing -gt 0) {
-            if ($line -match '^\[\d+/\d+\] ') { $capturing = 0; continue }
-            # The full compiler command line is long and the same each time.
-            if ($line.Length -gt 600) { $line = $line.Substring(0, 300) + ' [...]' }
-            $errors.Add($line)
-            $capturing--
+            $inBlock = $true
+            $keep = 0
+            $blockLines = 0
+            continue
         }
-        if ($errors.Count -ge 6000) { break }
+        if (-not $inBlock) { continue }
+        if ($line -match '^\[\d+/\d+\] ') { $inBlock = $false; continue }
+        $isError = $line -match '(: (fatal )?error|error LNK\d+|^error: |: undefined symbol|lld-link: error)'
+        if ($isError) {
+            $keep = 6
+            $message = ($line -replace '^.*?: (fatal )?error: ', '') -replace '\s+', ' '
+            if ($message.Length -gt 220) { $message = $message.Substring(0, 220) }
+            $messages[$message] = 1 + [int]$messages[$message]
+        } elseif ($line -match ': warning: ') {
+            $keep = 0
+        }
+        if ($keep -gt 0 -and $blockLines -lt 80) {
+            $errors.Add($line)
+            $blockLines++
+            $keep--
+        }
+        if ($errors.Count -ge 8000) { break }
+    }
+    if ($messages.Count) {
+        $distinct = $messages.GetEnumerator() | Sort-Object -Property Value -Descending | ForEach-Object { '{0,5}x  {1}' -f $_.Value, $_.Key }
+        $errors.InsertRange(0, [string[]](@('Distinct errors (count, message):') + $distinct + @('', '----', '')))
     }
     $hasErrors = $errors.Count -gt 0
     if ($hasErrors) {
