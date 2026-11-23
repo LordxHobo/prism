@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.20
+
+- `webkit/ci.ps1`: the saved build is archived with `7z -snl`, so symbolic links stay links. Restoring removes `Skia/Headers` before configuring: CMake creates `top/skia` and `mod/skia/modules/svg` there with `file(CREATE_LINK)` and failed ("existing path cannot be removed: Access is denied") when the previous archive had stored them as real folders. That happens whenever build-webkit reconfigures (it drops CMakeCache.txt when the patched CMake files change).
+- `webkit-stage.yml`: the vcpkg binary cache is saved under `vcpkg-<manifest hash>-<run id>` and restored by prefix, so a compiler update on GitHub's runners (new package ABIs) doesn't leave an unusable cache that can never be replaced.
+
 ## 0.9.19
 
 - `webkit/patches/0001` (first CI round): `USE_MEDIA_FOUNDATION` is off with `USE_GSTREAMER` (the Media Foundation player doesn't implement the MSE `load()` and is abstract with `ENABLE_MEDIA_SOURCE`); `dwrite` stays linked for FontCacheSkiaWin. `wtf/glib/GRefPtr.h` and `GSpanExtras.h` include `<gio/gio.h>`/`<glib.h>` on Windows instead of forward-declaring GLib functions (GLib declares them dllimport, and a plain declaration first makes that an error). SharedBuffer.h includes GStreamerCommon.h, so this reached nearly every WebCore file.

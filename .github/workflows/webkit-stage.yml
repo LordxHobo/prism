@@ -64,8 +64,12 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: C:\vcpkg-cache
-          key: vcpkg-${{ steps.key.outputs.vcpkg }}
-          restore-keys: vcpkg-
+          # Saved under a new key each run (a cache key can't be overwritten),
+          # so libraries rebuilt after a compiler update are kept too.
+          key: vcpkg-${{ steps.key.outputs.vcpkg }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-${{ steps.key.outputs.vcpkg }}-
+            vcpkg-
 
       - name: Restore the build progress
         shell: pwsh
@@ -80,7 +84,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: C:\vcpkg-cache
-          key: vcpkg-${{ steps.key.outputs.vcpkg }}
+          key: vcpkg-${{ steps.key.outputs.vcpkg }}-${{ github.run_id }}
         continue-on-error: true
 
       - name: Build WebKit

@@ -227,6 +227,13 @@ switch ($Step) {
     New-Item -ItemType Directory -Force -Path $BuildRoot | Out-Null
     Invoke-Checked 7z @('x', '-y', '-bso0', '-bsp0', "-o$BuildRoot", "$unpacked\build.7z")
 
+    # CMake makes Skia's header folders as symbolic links when it configures,
+    # and can't replace them if they came back as real folders (archives
+    # from before links were stored as links). Configuring makes them again.
+    if (Test-Path "$Build\Skia\Headers") {
+        & cmd.exe /c rmdir /s /q "$Build\Skia\Headers"
+    }
+
     # Files the patches change but that are the same as in the saved build
     # get the old time back, so they aren't compiled again.
     if (Test-Path "$unpacked\patched.txt") {
@@ -372,7 +379,9 @@ switch ($Step) {
     Write-Step 'Saving the build progress'
     New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
     # 7-Zip keeps the file times, which ninja relies on.
-    Invoke-Checked 7z @('a', '-t7z', '-mx=1', '-mmt=on', '-mtm=on', '-bso0', '-bsp0', "$StateDir\build.7z", $Build)
+    # -snl: store symbolic links (Skia's header folders) as links, not as
+    # copies of what they point to.
+    Invoke-Checked 7z @('a', '-t7z', '-mx=1', '-mmt=on', '-mtm=on', '-snl', '-bso0', '-bsp0', "$StateDir\build.7z", $Build)
     Copy-Item "$Meta\patched.txt" "$StateDir\patched.txt"
     $size = (Get-Item "$StateDir\build.7z").Length / 1GB
     Write-Host ("    {0:N1} GB" -f $size)
