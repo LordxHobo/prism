@@ -22,12 +22,24 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.16</span>
+      <span class="version">Version 0.9.17</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Extensions in their own space</h2>
+    <h2 style="margin-top:0">Reading views (ACI)</h2>
+    <ul>
+      <li><strong>Read any article your way:</strong> press <strong>Aa</strong> in the address bar (or F9) and Prism shows the article in a view made for how you read. The original page stays untouched underneath; "Original page" or Esc takes you back.</li>
+      <li><strong>Focus:</strong> one calm column without ads, sidebars, pop-ups or moving things, a reading progress bar, and an option to bold the start of each word.</li>
+      <li><strong>Dyslexia-friendly:</strong> Comic Sans by default (or OpenDyslexic, Lexend, Verdana, Arial, Century Gothic, Trebuchet, any font on your PC, or your own font file), wider letter and word spacing, a soft cream background, no italics.</li>
+      <li><strong>Dense:</strong> smaller text and tighter spacing for more on screen.</li>
+      <li>Adjust text size, spacing, line length and background with <strong>Aa</strong> inside the view, and have a site always open in its view. On pages that aren't articles (like YouTube), Focus stops motion and pauses videos, and Dyslexia-friendly changes the page's font and spacing.</li>
+      <li>Settings › Reading views: open every page in a view, the font, and the sites with their own view.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Extensions in their own space</h2>
     <ul>
       <li><strong>Isolated content scripts:</strong> the scripts extensions add to websites (Bitwarden's autofill, uBlock's page cleanup and so on) now run in a JavaScript space of their own, like in Chrome. They still see and change the page, but the website can't see, hook into or tamper with them. Scripts that extensions run on demand (executeScript) use the same space.</li>
       <li><strong>Passwords button:</strong> a lock button next to the Extensions button opens your saved passwords.</li>

@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "BrowserWindow.h"
+#include "Aci.h"
 
 #include "Dialogs.h"
 #include "Blocker.h"
@@ -876,6 +877,9 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
         ShellExecuteW(m_hwnd, L"open", settings::downloadDirectory().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     } else if (command == L"settings") {
         openInternalPage(L"settings");
+    } else if (command == L"aci") {
+        if (Tab* tab = activeTab(); tab && !tab->extensionPages)
+            aci::toggle(tab->page, tab->url, m_hwnd);
     } else if (command == L"passwords") {
         openInternalPage(L"passwords");
     } else if (command == L"extensions") {
@@ -1117,6 +1121,7 @@ void BrowserWindow::pushState()
         bool bookmarkable = !engine::isInternalURL(tab->url) && !tab->extensionPages
             && (schemeOf(tab->url) == L"http" || schemeOf(tab->url) == L"https" || schemeOf(tab->url) == L"file");
         json += ",\"bookmarkable\":" + std::string(bookmarkable ? "true" : "false");
+        json += ",\"readable\":" + std::string(!tab->extensionPages && aci::canRun(tab->url) ? "true" : "false");
         // Only the active tab shows the star.
         bool bookmarked = bookmarkable && tab->id == m_activeTabId && bookmarks::findURL(tab->url);
         json += ",\"bookmarked\":" + std::string(bookmarked ? "true" : "false");
@@ -1468,8 +1473,11 @@ void BrowserWindow::tabStateChanged(const void* clientInfo)
     bool wasLoading = tab->loading;
     tab->progress = WKPageGetEstimatedProgress(tab->page);
     tab->loading = tab->progress > 0 && tab->progress < 1;
-    if (wasLoading && !tab->loading)
+    if (wasLoading && !tab->loading) {
         tab->window->requestIcon(tab);
+        if (!tab->extensionPages)
+            aci::pageLoaded(tab->page, tab->url, tab->window->hwnd()); // a site's own reading view
+    }
     if (!tab->extensionPages)
         history::updateTitle(tab->url, tab->title);
     tab->window->tabChanged(tab);
@@ -2005,6 +2013,8 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
                 refreshToolbars();
             } else if (isSettings && command.rfind(L"privacy.", 0) == 0)
                 answer = privacy::handleCommand(command.substr(8), argument);
+            else if (isSettings && command.rfind(L"aci.", 0) == 0)
+                answer = aci::handleCommand(command.substr(4), argument, tab->window->hwnd());
             else if (isSettings && command == L"perf.log")
                 answer = perf::logJSON();
             else if (isSettings && command == L"perf.clear") {
@@ -2584,6 +2594,11 @@ bool BrowserWindow::handleBrowserShortcut(const MSG& msg)
         return true;
     case VK_F5:
         if (tab) WKPageReload(tab->page);
+        return true;
+    case VK_F9:
+        // Reading view (ACI), like Firefox's reader view shortcut.
+        if (tab && !tab->extensionPages)
+            aci::toggle(tab->page, tab->url, m_hwnd);
         return true;
     case VK_F6:
         focusAddressBar();

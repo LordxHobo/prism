@@ -7,6 +7,7 @@
 #include "Blocker.h"
 #include "Extensions.h"
 #include "Passwords.h"
+#include "Aci.h"
 #include "Tabs.h"
 #include "Icons.h"
 #include "RequestFilter.h"
@@ -214,6 +215,19 @@ bool initialize(std::wstring& error)
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { shields::handleScriptMessage(message, reply); }, nullptr);
     WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismExtensionPage").get(),
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { extensions::handlePageMessage(message, reply); }, nullptr);
+    // ACI reading views running in the page's world (no PrismBundle): only
+    // with the per-start key the view was given.
+    WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismAci").get(),
+        [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) {
+            WKTypeRef body = WKScriptMessageGetBody(message);
+            WKFrameInfoRef frame = WKScriptMessageGetFrameInfo(message);
+            std::string answer = "null";
+            if (body && WKGetTypeID(body) == WKStringGetTypeID() && frame && WKFrameInfoGetIsMainFrame(frame)) {
+                std::string text = util::toUTF8(toWide(static_cast<WKStringRef>(body)));
+                answer = aci::handleFallbackMessage(WKFrameInfoGetPage(frame), text);
+            }
+            WKCompletionListenerComplete(reply, stringUTF8(answer).get());
+        }, nullptr);
     // Site icons the page fetched itself (when Prism couldn't): only for the
     // tab's own site, from its main frame.
     WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismIcon").get(),

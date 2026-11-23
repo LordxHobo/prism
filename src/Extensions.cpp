@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Extensions.h"
+#include "Aci.h"
 #include "ExtensionsInternal.h"
 #include "ExtensionServer.h"
 
@@ -1680,6 +1681,11 @@ void handleBundleContentMessage(WKPageRef page, const std::string& body)
         if (WKPagePostMessageToInjectedBundle)
             WKPagePostMessageToInjectedBundle(heldPage.get(), wk::stringUTF8("prism:contentReply").get(), wk::stringUTF8(document + "\t" + callId + "\t" + answer).get());
     });
+    if (extensionId == "prism-aci") {
+        // Prism's own reading views (Aci.cpp), from their world.
+        listener.send("{\"ok\":true,\"result\":" + aci::handleMessage(page, text) + "}");
+        return;
+    }
     Extension* ext = findExtension(extensionId);
     json::Value parsed;
     if (!ext || !ext->enabled) {

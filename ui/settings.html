@@ -19,6 +19,7 @@
     <a href="#tabs">Tabs</a>
     <a href="#newtabpage">New tab page</a>
     <a href="#customcss">Custom CSS</a>
+    <a href="#reading">Reading views</a>
     <a href="#privacy">Privacy</a>
     <a href="#permissions">Site permissions</a>
     <a href="#shields">Shields</a>
@@ -224,6 +225,72 @@
           <button class="button" id="siteRulesSave">Save</button>
           <span class="dim" id="siteRulesStatus" role="status"></span>
         </div>
+      </div>
+    </section>
+
+    <section id="reading">
+      <h1>Reading views</h1>
+      <p class="dim">Prism can show any article in a view made for how you read, while the original page stays underneath. Open it with the <b>Aa</b> button in the address bar or F9.</p>
+
+      <div class="card protections">
+        <ul>
+          <li><b>Focus:</b> one calm column without ads, sidebars, pop-ups or moving things, with a reading progress bar. Optionally bolds the start of each word.</li>
+          <li><b>Dyslexia-friendly:</b> a readable font, wider letter and word spacing, a soft background and no italics.</li>
+          <li><b>Dense:</b> smaller text and tighter spacing, for more on screen at once.</li>
+        </ul>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Open pages in a reading view</span>
+          <p class="dim">Prism opens every page this way. Sites with their own choice (below) keep it.</p>
+        </div>
+        <div class="control"><select id="aciDefault">
+          <option value="off">Only when I ask</option>
+          <option value="focus">Focus</option>
+          <option value="dyslexia">Dyslexia-friendly</option>
+          <option value="dense">Dense</option>
+        </select></div>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Font</span>
+          <p class="dim">Used in the Dyslexia-friendly view.</p>
+        </div>
+        <div class="control"><select id="aciFont">
+          <option value="comic">Comic Sans (default)</option>
+          <option value="opendyslexic">OpenDyslexic</option>
+          <option value="lexend">Lexend</option>
+          <option value="verdana">Verdana</option>
+          <option value="arial">Arial</option>
+          <option value="century">Century Gothic</option>
+          <option value="trebuchet">Trebuchet</option>
+          <option value="system">A font on this PC…</option>
+          <option value="file">A font file…</option>
+        </select></div>
+      </div>
+      <div class="row sub" id="aciSystemRow" hidden>
+        <div class="label"><span class="title">Font name</span><p class="dim">Any font installed in Windows.</p></div>
+        <div class="control"><input id="aciSystemFont" type="text" list="aciFontList" spellcheck="false" placeholder="Like Calibri"><datalist id="aciFontList"></datalist></div>
+      </div>
+      <div class="row sub" id="aciFileRow" hidden>
+        <div class="label"><span class="title">Font file</span><p class="dim" id="aciFileName"></p></div>
+        <div class="control"><button class="button secondary" id="aciPickFile">Choose a font file…</button></div>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Bold the start of words</span>
+          <p class="dim">In the Focus view, so your eyes can skim along.</p>
+        </div>
+        <label class="switch"><input type="checkbox" id="aciBionic"><span></span></label>
+      </div>
+
+      <div class="card" id="aciSitesCard">
+        <h2>Sites with their own view</h2>
+        <p class="dim">Set from a reading view's <b>Aa</b> menu.</p>
+        <div id="aciSites"></div>
       </div>
     </section>
 

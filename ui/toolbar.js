@@ -24,6 +24,7 @@ const elements = {
   menu: $('menu'),
   progress: $('progress'),
   star: $('star'),
+  aci: $('aci'),
   bookmarksbar: $('bookmarksbar'),
   bookmarkItems: $('bookmarkItems'),
   bookmarksEmpty: $('bookmarksEmpty'),
@@ -599,6 +600,7 @@ function renderNavigation() {
 
 function renderStar() {
   const tab = activeTab();
+  elements.aci.hidden = !(tab && tab.readable);
   const show = !!(tab && tab.bookmarkable);
   elements.star.hidden = !show;
   elements.star.classList.toggle('on', !!(tab && tab.bookmarked));
@@ -871,6 +873,7 @@ elements.extensions.addEventListener('click', () => {
 });
 $('home').addEventListener('click', () => send('home'));
 $('passwords').addEventListener('click', () => send('passwords'));
+elements.aci.addEventListener('click', () => send('aci'));
 $('sidebarToggle').addEventListener('click', () => send('sidebarToggle'));
 $('sidebarNewTab').addEventListener('click', () => send('newtab'));
 

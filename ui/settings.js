@@ -618,3 +618,65 @@ $('perfCopy').addEventListener('click', () => {
   setTimeout(() => { $('perfCopy').textContent = 'Copy'; }, 1500);
 });
 showPerformance(ask('perf.log'));
+
+// ---- Reading views (ACI) --------------------------------------------------------------
+const ACI_VIEWS = { focus: 'Focus', dyslexia: 'Dyslexia-friendly', dense: 'Dense' };
+function showAci(data) {
+  if (!data) return;
+  $('aciDefault').value = data.default || 'off';
+  const font = (data.settings && data.settings.font) || 'comic';
+  $('aciFont').value = font.startsWith('system:') ? 'system' : font;
+  $('aciSystemRow').hidden = !font.startsWith('system:') && $('aciFont').value !== 'system';
+  $('aciSystemFont').value = font.startsWith('system:') ? font.slice(7) : $('aciSystemFont').value;
+  $('aciFileRow').hidden = font !== 'file';
+  $('aciFileName').textContent = data.settings && data.settings.fileName ? 'Using ' + data.settings.fileName + '.' : 'A .ttf, .otf, .woff or .woff2 file. Prism keeps its own copy.';
+  $('aciBionic').checked = !!(data.settings && data.settings.bionic);
+  const box = $('aciSites');
+  box.textContent = '';
+  for (const entry of data.sites || []) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const label = document.createElement('div');
+    label.className = 'label';
+    const title = document.createElement('span');
+    title.className = 'title';
+    title.textContent = entry.site;
+    const view = document.createElement('p');
+    view.className = 'dim';
+    view.textContent = ACI_VIEWS[entry.view] || entry.view;
+    label.append(title, view);
+    const remove = document.createElement('button');
+    remove.className = 'button secondary';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', () => showAci(ask('aci.removeSite', entry.site)));
+    row.append(label, remove);
+    box.appendChild(row);
+  }
+  if (!(data.sites || []).length) box.innerHTML = '<p class="dim">None yet.</p>';
+}
+$('aciDefault').addEventListener('change', () => showAci(ask('aci.set', 'default\n' + $('aciDefault').value)));
+$('aciFont').addEventListener('change', () => {
+  const value = $('aciFont').value;
+  if (value === 'system') {
+    $('aciSystemRow').hidden = false;
+    $('aciFileRow').hidden = true;
+    if (!$('aciFontList').children.length)
+      for (const name of ask('aci.systemFonts') || []) $('aciFontList').appendChild(new Option(name));
+    $('aciSystemFont').focus();
+    return;
+  }
+  if (value === 'file') {
+    $('aciSystemRow').hidden = true;
+    $('aciFileRow').hidden = false;
+    showAci(ask('aci.fontFile'));
+    return;
+  }
+  showAci(ask('aci.set', 'font\n' + JSON.stringify(value)));
+});
+$('aciSystemFont').addEventListener('change', () => {
+  const name = $('aciSystemFont').value.trim();
+  if (name) showAci(ask('aci.set', 'font\n' + JSON.stringify('system:' + name)));
+});
+$('aciPickFile').addEventListener('click', () => showAci(ask('aci.fontFile')));
+$('aciBionic').addEventListener('change', () => showAci(ask('aci.set', 'bionic\n' + ($('aciBionic').checked ? 'true' : 'false'))));
+showAci(ask('aci.get'));
