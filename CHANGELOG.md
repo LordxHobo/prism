@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.21
+
+- `webkit/ci.ps1`: WebKit's PrivateHeaders/Headers are symbolic links to the source headers (`WEBKIT_SYMLINK_FILES`, `cmake -E create_symlink`); the first run's archive (without `-snl`) had turned them into copies, so `#pragma once` saw each header twice (`redefinition of 'CodeBlock'` etc. in LLIntOffsetsExtractor). Archives are now extracted with `-snl` too, and carry `format.txt` (`links-1`); progress without it is ignored and the build starts from scratch.
+
 ## 0.9.20
 
 - `webkit/ci.ps1`: the saved build is archived with `7z -snl`, so symbolic links stay links. Restoring removes `Skia/Headers` before configuring: CMake creates `top/skia` and `mod/skia/modules/svg` there with `file(CREATE_LINK)` and failed ("existing path cannot be removed: Access is denied") when the previous archive had stored them as real folders. That happens whenever build-webkit reconfigures (it drops CMakeCache.txt when the patched CMake files change).

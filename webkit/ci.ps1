@@ -44,6 +44,8 @@ $GstVersion = '1.28.9'
 $VcpkgRoot = 'C:\vcpkg-wk'
 $VcpkgCache = 'C:\vcpkg-cache'
 $OldTime = '2001-01-01T00:00:00'
+# Changes when saved progress from older versions of this script can't be used.
+$StateFormat = 'links-1'
 
 $Base = (Get-Content (Join-Path $PSScriptRoot 'BASE') -Raw).Trim()
 $StatePrefix = 'webkit-state-' + $Base.Substring(0, 12)
@@ -224,8 +226,17 @@ switch ($Step) {
     $unpacked = "$env:RUNNER_TEMP\state"
     Invoke-Checked 7z @('x', '-y', '-bso0', '-bsp0', "-o$unpacked", $zip)
     Remove-Item $zip
+    # WebKit's PrivateHeaders are symbolic links to the source headers.
+    # Progress saved before links were kept as links has them as copies,
+    # and a header then gets included twice ("redefinition of ..."), so
+    # that progress can't be used.
+    if ((Get-Content "$unpacked\format.txt" -ErrorAction SilentlyContinue) -ne $StateFormat) {
+        Write-Step 'That progress was saved by an older version of this script: building from scratch'
+        Remove-Item -Recurse -Force $unpacked
+        return
+    }
     New-Item -ItemType Directory -Force -Path $BuildRoot | Out-Null
-    Invoke-Checked 7z @('x', '-y', '-bso0', '-bsp0', "-o$BuildRoot", "$unpacked\build.7z")
+    Invoke-Checked 7z @('x', '-y', '-snl', '-bso0', '-bsp0', "-o$BuildRoot", "$unpacked\build.7z")
 
     # CMake makes Skia's header folders as symbolic links when it configures,
     # and can't replace them if they came back as real folders (archives
@@ -383,6 +394,7 @@ switch ($Step) {
     # copies of what they point to.
     Invoke-Checked 7z @('a', '-t7z', '-mx=1', '-mmt=on', '-mtm=on', '-snl', '-bso0', '-bsp0', "$StateDir\build.7z", $Build)
     Copy-Item "$Meta\patched.txt" "$StateDir\patched.txt"
+    Set-Content -Path "$StateDir\format.txt" -Value $StateFormat -Encoding ascii
     $size = (Get-Item "$StateDir\build.7z").Length / 1GB
     Write-Host ("    {0:N1} GB" -f $size)
 }

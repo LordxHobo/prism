@@ -22,13 +22,14 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.20</span>
+      <span class="version">Version 0.9.21</span>
     </div>
   </header>
 
   <div class="card">
     <h2 style="margin-top:0">Prism's own WebKit: resuming builds</h2>
     <ul>
+      <li>Saved progress now keeps WebKit's header links as links. Progress saved before this had copies instead, which made every header appear twice ("redefinition" errors); the build ignores that older progress and starts fresh by itself.</li>
       <li>A WebKit build that carries on from saved progress no longer stops while setting up (Skia's header folders came back as copies instead of links).</li>
       <li>WebKit's libraries are kept between runs even after GitHub updates its compilers, so they aren't all rebuilt each time.</li>
     </ul>
