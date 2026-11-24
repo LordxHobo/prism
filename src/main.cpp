@@ -15,6 +15,7 @@
 #include "Aci.h"
 #include "Perf.h"
 #include "Privacy.h"
+#include "Recovery.h"
 #include "Settings.h"
 #include "Shields.h"
 #include "Tabs.h"
@@ -33,6 +34,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     OleInitialize(nullptr);
     util::initMainThread();
+    recovery::installCrashHandler();
 
     engine::deleteProfileIfRequested();
 
@@ -109,7 +111,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         util::writeSetting(L"LastVersion", PRISM_VERSION_WSTRING);
     }
 
-    bool opened = settings::restoreSession() && BrowserWindow::restoreSession(urls);
+    // Did the last run crash (or get killed)? Its tabs are kept aside before
+    // this run saves its own; they're offered on an info bar below unless
+    // last time's tabs reopen anyway.
+    recovery::start();
+    bool restoring = settings::restoreSession();
+    bool opened = restoring && BrowserWindow::restoreSession(urls);
+    if (restoring)
+        recovery::discard();
     if (!opened) {
         if (urls.empty() || urls.front() == L"prism://whatsnew")
             urls.insert(urls.begin(), L"prism://newtab");
@@ -117,9 +126,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     }
     if (!opened) {
         MessageBoxW(nullptr, L"Couldn't open a browser window.", L"Prism can't start", MB_OK | MB_ICONERROR);
+        recovery::finish();
         OleUninitialize();
         return 1;
     }
+    if (int tabs = recovery::recoverableTabs())
+        BrowserWindow::offerRecovery(tabs);
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
@@ -131,6 +143,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         DispatchMessageW(&msg);
     }
 
+    // Closed normally (from here on, a crash isn't one worth recovering from).
+    recovery::finish();
     extensions::flushStorage();
     permissions::shutdown();
 

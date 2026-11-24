@@ -19,6 +19,7 @@
 #include "Passwords.h"
 #include "Perf.h"
 #include "Privacy.h"
+#include "Recovery.h"
 #include "RequestFilter.h"
 #include "Shields.h"
 #include "ShieldsPanel.h"
@@ -656,8 +657,7 @@ int BrowserWindow::toolbarCSSHeight() const
     if (settings::showBookmarksBar())
         height += kBookmarksBarCSSHeight;
     if (Tab* tab = activeTab()) {
-        passwords::Offer offer;
-        if (!tab->prompts.empty() || passwords::offerFor(tab->id, offer))
+        if (hasInfobar(tab))
             height += kInfobarCSSHeight;
         if (tab->findOpen)
             height += kFindbarCSSHeight;
@@ -1135,6 +1135,8 @@ void BrowserWindow::pushState()
             // "Save password?" (never the password itself).
             json += ",\"prompt\":{\"kind\":\"password\",\"site\":" + util::jsonString(offer.site) + ",\"username\":" + util::jsonString(offer.username)
                 + ",\"update\":" + (offer.update ? "true" : "false") + "}";
+        } else if (m_recoveryTabs && tab->id == m_activeTabId) {
+            json += ",\"prompt\":{\"kind\":\"restore\",\"site\":\"\",\"tabs\":" + std::to_string(m_recoveryTabs) + "}";
         }
         json += "}";
     }
@@ -1336,6 +1338,11 @@ void BrowserWindow::selectTab(int id)
     WKViewSetIsInWindow(next->view.get(), true);
     layout();
     ShowWindow(next->hwnd, SW_SHOW);
+    if (!next->reloadWhenShown.empty()) {
+        std::wstring url = std::move(next->reloadWhenShown);
+        next->reloadWhenShown.clear();
+        navigate(next, url);
+    }
     if (previous && previous != next) {
         // The page that's going away shouldn't keep thinking the mouse is
         // over it (sites like YouTube play previews on hover).
@@ -1569,7 +1576,7 @@ void BrowserWindow::saveSession()
     util::writeFileAtomically(sessionFile(), contents);
 }
 
-bool BrowserWindow::restoreSession(const std::vector<std::wstring>& extraURLs)
+bool BrowserWindow::restoreSession(const std::vector<std::wstring>& extraURLs, const std::wstring& file)
 {
     struct SavedWindow {
         std::vector<std::wstring> urls;
@@ -1579,7 +1586,7 @@ bool BrowserWindow::restoreSession(const std::vector<std::wstring>& extraURLs)
     };
     std::vector<SavedWindow> windows;
 
-    std::string contents = util::readFile(sessionFile());
+    std::string contents = util::readFile(file.empty() ? sessionFile() : file);
     size_t position = 0;
     while (position < contents.size()) {
         size_t end = contents.find('\n', position);
@@ -1661,6 +1668,38 @@ bool BrowserWindow::restoreSession(const std::vector<std::wstring>& extraURLs)
     for (auto& window : windows)
         opened = BrowserWindow::open(window.urls, window.active, window.groups, window.tabGroups) || opened;
     return opened;
+}
+
+void BrowserWindow::offerRecovery(int tabs)
+{
+    if (s_windows.empty())
+        return;
+    BrowserWindow* window = s_windows.front();
+    window->m_recoveryTabs = tabs;
+    if (window->m_toolbarReady)
+        window->pushState();
+    window->layout();
+}
+
+// "Restore" reopens the tabs from before the crash in their own windows; a
+// window that only has the new tab Prism started with is closed. "Not now"
+// (or closing the bar) forgets them.
+void BrowserWindow::answerRecovery(const std::wstring& answer)
+{
+    m_recoveryTabs = 0;
+    bool restored = false;
+    if (answer == L"allow") {
+        bool onlyNewTab = m_tabs.size() == 1 && (m_tabs.front()->url.empty() || sessionURL(m_tabs.front().get()) == L"prism://newtab");
+        restored = restoreSession({ }, recovery::recoveryFile());
+        if (restored && onlyNewTab)
+            PostMessageW(m_hwnd, WM_CLOSE, 0, 0);
+    }
+    recovery::discard();
+    if (restored)
+        scheduleSessionSave();
+    pushState();
+    layout();
+    focusContent();
 }
 
 // ---------------------------------------------------------------------------
@@ -2296,6 +2335,10 @@ void BrowserWindow::webProcessDidTerminate(WKPageRef, uint32_t reason, const voi
     std::wstring query = L"kind=crash&url=" + util::urlEncode(lastURL) + L"&code=" + std::to_wstring(reason);
     tab->crashed = true;
     tab->loading = false;
+    // Like other browsers, a tab you weren't looking at simply reloads when
+    // you switch to it; the one in front shows what happened.
+    if (tab->id != tab->window->m_activeTabId)
+        tab->reloadWhenShown = lastURL;
     engine::loadInternalPage(tab->page, L"error", query);
     tab->window->tabChanged(tab);
 }
@@ -2794,8 +2837,19 @@ void BrowserWindow::queuePrompt(Tab* tab, const std::wstring& kind, const std::w
     }
 }
 
+bool BrowserWindow::hasInfobar(Tab* tab) const
+{
+    passwords::Offer offer;
+    return !tab->prompts.empty() || passwords::offerFor(tab->id, offer) || (m_recoveryTabs && tab->id == m_activeTabId);
+}
+
 void BrowserWindow::answerPrompt(Tab* tab, const std::wstring& answer)
 {
+    passwords::Offer offer;
+    if (tab->prompts.empty() && !passwords::offerFor(tab->id, offer) && m_recoveryTabs) {
+        answerRecovery(answer);
+        return;
+    }
     if (tab->prompts.empty()) {
         passwords::answerOffer(tab->id, answer, m_hwnd);
         if (tab->id == m_activeTabId)

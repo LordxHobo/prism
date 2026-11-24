@@ -40,6 +40,8 @@ struct Tab {
     bool loading { false };
     double progress { 0 };
     bool crashed { false };
+    // A background tab whose page crashed reloads this when it's shown.
+    std::wstring reloadWhenShown;
     bool extensionPages { false }; // made with engine::extensionPageConfiguration()
     std::wstring savedURL; // what the session file has for this tab
 
@@ -74,7 +76,11 @@ public:
 
     // Reopens the windows and tabs from last time. `extraURLs` are added to
     // the first window. Returns false if there was nothing to restore.
-    static bool restoreSession(const std::vector<std::wstring>& extraURLs);
+    // Reopens saved tabs (session.txt, or another session file such as the
+    // one crash recovery keeps).
+    static bool restoreSession(const std::vector<std::wstring>& extraURLs, const std::wstring& file = { });
+    // The last run crashed: offer to reopen its tabs (Recovery.h).
+    static void offerRecovery(int tabs);
 
     // Re-applies settings (theme, accent, tab size, ...) to every window.
     static void settingsChanged();
@@ -217,6 +223,10 @@ private:
     // Permission prompts
     void queuePrompt(Tab*, const std::wstring& kind, const std::wstring& origin, WKTypeRef request);
     void answerPrompt(Tab*, const std::wstring& answer);
+    void answerRecovery(const std::wstring& answer);
+    // Something to show on the info bar for this tab (a permission, a
+    // password to save, or crash recovery's offer).
+    bool hasInfobar(Tab*) const;
     void denyPrompts(Tab*);
 
     // Address-bar suggestions
@@ -248,6 +258,8 @@ private:
     std::vector<std::unique_ptr<Tab>> m_tabs;
     std::vector<std::wstring> m_closedURLs;
     int m_activeTabId { 0 };
+    // Tabs crash recovery offers to reopen, on this window's info bar.
+    int m_recoveryTabs { 0 };
     bool m_darkTheme { true };
     std::vector<std::wstring> m_pendingStartURLs;
     int m_pendingActiveIndex { -1 };

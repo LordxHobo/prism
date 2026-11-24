@@ -22,12 +22,21 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.28</span>
+      <span class="version">Version 0.9.29</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Prism's own WebKit: the picture</h2>
+    <h2 style="margin-top:0">Crash recovery</h2>
+    <ul>
+      <li><strong>Your tabs come back:</strong> if Prism crashes, is force-closed or the PC shuts down with it open, the next start offers to reopen the tabs you had, groups included. (With "Continue where you left off" on, they simply reopen.)</li>
+      <li><strong>Crashed background tabs reload</strong> when you switch to them, instead of showing the crash page.</li>
+      <li><strong>Crash reports:</strong> when Prism itself crashes, it saves a small report (where it crashed, no page contents) in <code>%LOCALAPPDATA%\Prism\crashes</code>. The newest five are kept; send one along if Prism keeps crashing.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Prism's own WebKit: the picture</h2>
     <ul>
       <li>The first Prism WebKit build streams YouTube in every quality, but only showed a dark frame. Video frames are now drawn into the page directly, the way WebKit on Windows can show them.</li>
       <li>Full screen video isn't there yet: WebKit's Windows version has never had it. It's on the list for a later WebKit build.</li>

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.29
+
+- **Crash recovery** (`src/Recovery.cpp/.h`): each run writes `running-<pid>.txt` (its process start time) in the data folder and removes it when the message loop ends. At startup, a note whose process is gone (or whose PID now belongs to another process) means that run didn't close normally; `session.txt` is then copied to `session-recovery.txt` before this run saves over it. Unless the session reopens anyway ("Continue where you left off"), the first window's info bar offers to reopen those tabs (`BrowserWindow::offerRecovery`, prompt kind `restore`): Restore opens them with `restoreSession({}, recoveryFile)` and closes the starting window if it only has the new tab; "Not now" discards them. An unanswered offer is made again at the next start.
+- Crashed background tabs: `webProcessDidTerminate` sets `reloadWhenShown` for tabs that aren't active; `selectTab` navigates to it. The active tab still shows the crash page.
+- Crash reports: `SetUnhandledExceptionFilter` writes a minidump (`MiniDumpNormal | WithThreadInfo | WithUnloadedModules`, through dbghelp.dll from System32) to `crashes\prism-<date>-<time>-<pid>.dmp`; the newest five are kept.
+- `BrowserWindow::hasInfobar()` decides the info bar row (permissions, password offers, recovery). `restoreSession` takes an optional session file.
+
 ## 0.9.28
 
 - First working Prism WebKit build: YouTube streams through MSE (all qualities offered), but no picture. `MediaPlayerPrivateGStreamer` reported `supportsAcceleratedRendering() == true` and took `m_canRenderingBeAccelerated` from accelerated compositing, so the video got a composited layer and `triggerRepaint()` skipped repainting; frames would have gone to `pushTextureToCompositor()`, which only exists with coordinated graphics. Without coordinated graphics (`webkit/patches/0001`), it reports no accelerated rendering and always repaints, so frames are painted through `paint()` (Skia).
