@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.25
+
+- `webkit/ci.ps1`: only symbolic links and junctions go in `links.txt` (PowerShell also reports hard links through `LinkType`, with no target, and `CreateSymbolicLink` refused the empty target on restore). Restoring skips such entries from earlier saves; those files weren't archived and ninja makes them again.
+
 ## 0.9.24
 
 - `webkit/patches/0001`: `MediaPlayerPrivateGStreamer::IsDuplicateSample` is declared outside `USE(COORDINATED_GRAPHICS)`; `triggerRepaint()` uses it on every port. This was the only file in WebCore that still failed to compile.

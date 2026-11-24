@@ -265,9 +265,12 @@ switch ($Step) {
 
     Write-Step 'Making the symbolic links again'
     $count = 0
+    $skipped = 0
     foreach ($line in [IO.File]::ReadLines("$unpacked\links.txt")) {
         $parts = $line -split "`t"
-        if ($parts.Count -ne 4) { continue }
+        # Earlier saves also listed hard links (no target); those files were
+        # left out of the archive, and ninja makes them again.
+        if ($parts.Count -ne 4 -or -not $parts[1]) { $skipped++; continue }
         $path = Join-Path $Build $parts[0]
         $parent = Split-Path -Parent $path
         if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
@@ -283,6 +286,7 @@ switch ($Step) {
         $count++
     }
     Write-Host "    $count links"
+    if ($skipped) { Write-Host "    $skipped entries without a target skipped" }
 
     # Files the patches change but that are the same as in the saved build
     # get the old time back, so they aren't compiled again.
@@ -435,7 +439,9 @@ switch ($Step) {
     $exclude = New-Object System.Collections.Generic.List[string]
     $prefix = $Build.Length + 1
     foreach ($item in Get-ChildItem -LiteralPath $Build -Recurse -Force -ErrorAction SilentlyContinue) {
-        if (-not $item.LinkType) { continue }
+        # Symbolic links and junctions only: a hard link is an ordinary file
+        # to the archive.
+        if ($item.LinkType -notin @('SymbolicLink', 'Junction') -or -not $item.LinkTarget) { continue }
         $relative = $item.FullName.Substring($prefix)
         $kind = if ($item.PSIsContainer) { 'dir' } else { 'file' }
         $links.Add("$relative`t$($item.LinkTarget)`t$kind`t$($item.LastWriteTimeUtc.ToFileTimeUtc())")
