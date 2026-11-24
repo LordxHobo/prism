@@ -29,6 +29,8 @@ binaries:
   (MediaSource), atomic_flag default-initialized (AppendPipeline).
 - GLib-only bits stay GLib-only: application name, RunLoop timer
   priorities, coordinated-graphics and media-stream includes.
+- MediaPlayerPrivateGStreamer's IsDuplicateSample is declared on ports
+  without coordinated graphics too (triggerRepaint uses it).
 ---
  Source/WTF/wtf/Platform.h                     |  5 +-
  Source/WTF/wtf/PlatformWin.cmake              | 29 ++++++
@@ -50,10 +52,11 @@ binaries:
  .../GStreamerVideoFrameConverter.cpp          |  2 +
  .../gstreamer/ImageDecoderGStreamer.cpp       |  5 +
  .../gstreamer/MediaPlayerPrivateGStreamer.cpp |  2 +
+ .../gstreamer/MediaPlayerPrivateGStreamer.h   |  3 +-
  .../graphics/gstreamer/mse/AppendPipeline.cpp |  1 -
  Source/cmake/GStreamerWin.cmake               | 95 +++++++++++++++++++
  Source/cmake/OptionsWin.cmake                 | 20 +++-
- 23 files changed, 252 insertions(+), 23 deletions(-)
+ 24 files changed, 254 insertions(+), 24 deletions(-)
  create mode 100644 Source/cmake/GStreamerWin.cmake
 
 diff --git a/Source/WTF/wtf/Platform.h b/Source/WTF/wtf/Platform.h
@@ -554,6 +557,21 @@ index 3b62489b8..2390deefd 100644
  #include "GStreamerCommon.h"
  #include "GStreamerQuirks.h"
  #include "GStreamerRegistryScanner.h"
+diff --git a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.h b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.h
+index 289315c6c..2d3e142cf 100644
+--- a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.h
++++ b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.h
+@@ -345,8 +345,9 @@ protected:
+     GstElement* createVideoSinkGL();
+ #endif
+ 
+-#if USE(COORDINATED_GRAPHICS)
++    // Also used by triggerRepaint() on ports without coordinated graphics.
+     enum class IsDuplicateSample : bool { No, Yes };
++#if USE(COORDINATED_GRAPHICS)
+     void pushTextureToCompositor(IsDuplicateSample, IsInitialBuffer = IsInitialBuffer::No);
+ #endif
+ 
 diff --git a/Source/WebCore/platform/graphics/gstreamer/mse/AppendPipeline.cpp b/Source/WebCore/platform/graphics/gstreamer/mse/AppendPipeline.cpp
 index 28a55a44d..75ef58f51 100644
 --- a/Source/WebCore/platform/graphics/gstreamer/mse/AppendPipeline.cpp

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.24
+
+- `webkit/patches/0001`: `MediaPlayerPrivateGStreamer::IsDuplicateSample` is declared outside `USE(COORDINATED_GRAPHICS)`; `triggerRepaint()` uses it on every port. This was the only file in WebCore that still failed to compile.
+
 ## 0.9.23
 
 - `webkit/ci.ps1`: symbolic links in the build folder (WebKit's Headers/PrivateHeaders, Skia's header folders) are no longer archived; `links.txt` lists each one (path, target, file or folder, its own last-write time), 7-Zip leaves them out (`-x@`), and restoring recreates them with `CreateSymbolicLink` and sets the link's own time (`CreateFileW` with `FILE_FLAG_OPEN_REPARSE_POINT` + `SetFileTime`), so ninja doesn't recompile against them. 7-Zip's `-snl` round trip had left `JavaScriptCore/AbstractSlotVisitor.h` unresolvable for WebCore's precompiled header. Restoring no longer deletes `Skia/Headers`, which was only made again when CMake reconfigured. State format `links-2`: earlier saved progress is ignored.

@@ -22,12 +22,19 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.23</span>
+      <span class="version">Version 0.9.24</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Prism's own WebKit: saving progress properly</h2>
+    <h2 style="margin-top:0">Prism's own WebKit: last compile error</h2>
+    <ul>
+      <li>Fixes the only compile error left in WebKit's video player on Windows: a setting it uses was only declared for Linux's way of drawing video.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Prism's own WebKit: saving progress properly</h2>
     <ul>
       <li>The build now saves WebKit's header links in a list and makes them again exactly as they were, instead of relying on the archiver, which broke them ("file not found"). Older saved progress is ignored, so the next build starts fresh.</li>
     </ul>
