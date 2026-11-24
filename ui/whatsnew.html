@@ -22,12 +22,20 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.27</span>
+      <span class="version">Version 0.9.28</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Prism's own WebKit: WebCore compiles</h2>
+    <h2 style="margin-top:0">Prism's own WebKit: the picture</h2>
+    <ul>
+      <li>The first Prism WebKit build streams YouTube in every quality, but only showed a dark frame. Video frames are now drawn into the page directly, the way WebKit on Windows can show them.</li>
+      <li>Full screen video isn't there yet: WebKit's Windows version has never had it. It's on the list for a later WebKit build.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Prism's own WebKit: WebCore compiles</h2>
     <ul>
       <li>All of WebCore, WebKit's biggest part, now compiles with streaming video on Windows. WebKit's processes on top of it now find GStreamer too.</li>
     </ul>

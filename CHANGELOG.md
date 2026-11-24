@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.28
+
+- First working Prism WebKit build: YouTube streams through MSE (all qualities offered), but no picture. `MediaPlayerPrivateGStreamer` reported `supportsAcceleratedRendering() == true` and took `m_canRenderingBeAccelerated` from accelerated compositing, so the video got a composited layer and `triggerRepaint()` skipped repainting; frames would have gone to `pushTextureToCompositor()`, which only exists with coordinated graphics. Without coordinated graphics (`webkit/patches/0001`), it reports no accelerated rendering and always repaints, so frames are painted through `paint()` (Skia).
+- Known: full screen. WebKit's Windows `PageClientImpl` doesn't implement `WebFullScreenManagerProxyClient` (every method is `notImplemented()`), so sites see no Fullscreen API. Needs a WebKit patch plus Prism handling the window.
+
 ## 0.9.27
 
 - `webkit/patches/0001`: `Source/WebKit/PlatformWin.cmake` adds GStreamer's (and GLib's) include folders to `WebKit_SYSTEM_INCLUDE_DIRECTORIES`, which WebProcess, NetworkProcess and GPUProcess inherit, and its libraries to `WebKit_PRIVATE_LIBRARIES`. WebCore's `SharedBuffer.h` includes `GStreamerCommon.h`, so every WebKit file sees `<gst/gst.h>`. WebCore itself now compiles completely.
