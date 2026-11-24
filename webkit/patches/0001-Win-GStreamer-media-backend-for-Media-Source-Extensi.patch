@@ -31,6 +31,8 @@ binaries:
   priorities, coordinated-graphics and media-stream includes.
 - MediaPlayerPrivateGStreamer's IsDuplicateSample is declared on ports
   without coordinated graphics too (triggerRepaint uses it).
+- WebKit and its processes get GStreamer's include folders and libraries
+  (WebCore's SharedBuffer.h includes GStreamer headers).
 ---
  Source/WTF/wtf/Platform.h                     |  5 +-
  Source/WTF/wtf/PlatformWin.cmake              | 29 ++++++
@@ -54,9 +56,10 @@ binaries:
  .../gstreamer/MediaPlayerPrivateGStreamer.cpp |  2 +
  .../gstreamer/MediaPlayerPrivateGStreamer.h   |  3 +-
  .../graphics/gstreamer/mse/AppendPipeline.cpp |  1 -
+ Source/WebKit/PlatformWin.cmake               | 22 +++++
  Source/cmake/GStreamerWin.cmake               | 95 +++++++++++++++++++
  Source/cmake/OptionsWin.cmake                 | 20 +++-
- 24 files changed, 254 insertions(+), 24 deletions(-)
+ 25 files changed, 276 insertions(+), 24 deletions(-)
  create mode 100644 Source/cmake/GStreamerWin.cmake
 
 diff --git a/Source/WTF/wtf/Platform.h b/Source/WTF/wtf/Platform.h
@@ -584,6 +587,36 @@ index 28a55a44d..75ef58f51 100644
  {
      ASSERT(isMainThread());
      std::call_once(s_staticInitializationFlag, AppendPipeline::staticInitialization);
+diff --git a/Source/WebKit/PlatformWin.cmake b/Source/WebKit/PlatformWin.cmake
+index 9135f7b80..6c2f03960 100644
+--- a/Source/WebKit/PlatformWin.cmake
++++ b/Source/WebKit/PlatformWin.cmake
+@@ -190,3 +190,25 @@ if (SWIFT_REQUIRED)
+         list(APPEND WebKit_PLATFORM_SWIFT_CLANG_FLAG_PAIRS "-Xcc -ivfsoverlay -Xcc ${_win_vfs_overlay}")
+     endif ()
+ endif ()
++
++# WebCore's headers include GStreamer's (GRefPtrGStreamer.h through
++# SharedBuffer.h), so WebKit and its processes need them on the path too.
++if (USE_GSTREAMER)
++    list(APPEND WebKit_SYSTEM_INCLUDE_DIRECTORIES
++        ${GSTREAMER_INCLUDE_DIRS}
++        ${GSTREAMER_AUDIO_INCLUDE_DIRS}
++        ${GSTREAMER_PBUTILS_INCLUDE_DIRS}
++        ${GSTREAMER_VIDEO_INCLUDE_DIRS}
++    )
++    list(APPEND WebKit_PRIVATE_LIBRARIES
++        ${GSTREAMER_LIBRARIES}
++        ${GSTREAMER_BASE_LIBRARIES}
++        ${GSTREAMER_ALLOCATORS_LIBRARIES}
++        ${GSTREAMER_APP_LIBRARIES}
++        ${GSTREAMER_AUDIO_LIBRARIES}
++        ${GSTREAMER_PBUTILS_LIBRARIES}
++        ${GSTREAMER_TAG_LIBRARIES}
++        ${GSTREAMER_VIDEO_LIBRARIES}
++        GLib::Gio
++    )
++endif ()
 diff --git a/Source/cmake/GStreamerWin.cmake b/Source/cmake/GStreamerWin.cmake
 new file mode 100644
 index 000000000..5412f726d

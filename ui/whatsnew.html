@@ -22,12 +22,19 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.26</span>
+      <span class="version">Version 0.9.27</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Prism's own WebKit: last compile error</h2>
+    <h2 style="margin-top:0">Prism's own WebKit: WebCore compiles</h2>
+    <ul>
+      <li>All of WebCore, WebKit's biggest part, now compiles with streaming video on Windows. WebKit's processes on top of it now find GStreamer too.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Prism's own WebKit: last compile error</h2>
     <ul>
       <li>Restoring saved build progress no longer stops on files that are hard links (they were listed with the shortcuts by mistake). Progress saved while that bug was there is missing those files, so it's ignored and the next build starts fresh.</li>
       <li>Fixes the only compile error left in WebKit's video player on Windows: a setting it uses was only declared for Linux's way of drawing video.</li>

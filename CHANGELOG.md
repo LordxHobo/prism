@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.27
+
+- `webkit/patches/0001`: `Source/WebKit/PlatformWin.cmake` adds GStreamer's (and GLib's) include folders to `WebKit_SYSTEM_INCLUDE_DIRECTORIES`, which WebProcess, NetworkProcess and GPUProcess inherit, and its libraries to `WebKit_PRIVATE_LIBRARIES`. WebCore's `SharedBuffer.h` includes `GStreamerCommon.h`, so every WebKit file sees `<gst/gst.h>`. WebCore itself now compiles completely.
+
 ## 0.9.26
 
 - `webkit/ci.ps1`: state format `links-3`. Progress saved in format `links-2` left every hard-linked file out of the archive, including vcpkg's installed libraries (`vcpkg_installed/.../icu-i18n.pc` missing on restore, so `vcpkg install` failed); it's ignored now, and the next build starts from scratch.
