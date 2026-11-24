@@ -45,7 +45,9 @@ $VcpkgRoot = 'C:\vcpkg-wk'
 $VcpkgCache = 'C:\vcpkg-cache'
 $OldTime = '2001-01-01T00:00:00'
 # Changes when saved progress from older versions of this script can't be used.
-$StateFormat = 'links-2'
+# links-3: links-2 saves left hard-linked files (vcpkg's installed
+# libraries among them) out of the archive.
+$StateFormat = 'links-3'
 
 $Base = (Get-Content (Join-Path $PSScriptRoot 'BASE') -Raw).Trim()
 $StatePrefix = 'webkit-state-' + $Base.Substring(0, 12)

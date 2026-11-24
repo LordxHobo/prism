@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.26
+
+- `webkit/ci.ps1`: state format `links-3`. Progress saved in format `links-2` left every hard-linked file out of the archive, including vcpkg's installed libraries (`vcpkg_installed/.../icu-i18n.pc` missing on restore, so `vcpkg install` failed); it's ignored now, and the next build starts from scratch.
+
 ## 0.9.25
 
 - `webkit/ci.ps1`: only symbolic links and junctions go in `links.txt` (PowerShell also reports hard links through `LinkType`, with no target, and `CreateSymbolicLink` refused the empty target on restore). Restoring skips such entries from earlier saves; those files weren't archived and ninja makes them again.
