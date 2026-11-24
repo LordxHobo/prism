@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.23
+
+- `webkit/ci.ps1`: symbolic links in the build folder (WebKit's Headers/PrivateHeaders, Skia's header folders) are no longer archived; `links.txt` lists each one (path, target, file or folder, its own last-write time), 7-Zip leaves them out (`-x@`), and restoring recreates them with `CreateSymbolicLink` and sets the link's own time (`CreateFileW` with `FILE_FLAG_OPEN_REPARSE_POINT` + `SetFileTime`), so ninja doesn't recompile against them. 7-Zip's `-snl` round trip had left `JavaScriptCore/AbstractSlotVisitor.h` unresolvable for WebCore's precompiled header. Restoring no longer deletes `Skia/Headers`, which was only made again when CMake reconfigured. State format `links-2`: earlier saved progress is ignored.
+
 ## 0.9.22
 
 - `webkit/patches/0001`, fixes from the first compile round: `MediaSourcePrivate::computeBufferedRanges` loses its own `WEBCORE_EXPORT` (the class is exported; clang-cl rejects both); `MediaSource.cpp` uses `intptr_t` for its reverse track loops (no `ssize_t` on Windows); `AppendPipeline` default-initializes its `std::atomic_flag` (MSVC's has no `bool` constructor); `GStreamerCommon.cpp` only uses `ApplicationGLib.h`/`getApplicationName()` with GLib (else client-name "WebKit"); `GStreamerVideoFrameConverter` only sets timer priority with the GLib event loop; `MediaPlayer.cpp` includes `CoordinatedPlatformLayerBufferProxy.h` only with coordinated graphics and `MediaPlayerPrivateGStreamer.cpp` includes `GStreamerCaptureDeviceManager.h` only with media streams; `platform/audio/gstreamer` is on the Windows include path (`AudioDecoder.cpp` includes `AudioDecoderGStreamer.h`).

@@ -45,7 +45,7 @@ $VcpkgRoot = 'C:\vcpkg-wk'
 $VcpkgCache = 'C:\vcpkg-cache'
 $OldTime = '2001-01-01T00:00:00'
 # Changes when saved progress from older versions of this script can't be used.
-$StateFormat = 'links-1'
+$StateFormat = 'links-2'
 
 $Base = (Get-Content (Join-Path $PSScriptRoot 'BASE') -Raw).Trim()
 $StatePrefix = 'webkit-state-' + $Base.Substring(0, 12)
@@ -115,6 +115,31 @@ function Get-SavedStates {
     }
     return $all | Sort-Object -Property created_at -Descending
 }
+
+# The build folder has thousands of symbolic links (WebKit's Headers and
+# PrivateHeaders point at the source headers; Skia's header folders too).
+# 7-Zip doesn't restore those reliably, so the links are saved in a list
+# and made again on restore, with their own times (ninja compares those
+# against the objects).
+Add-Type -TypeDefinition @"
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class PrismLinkTime {
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool SetFileTime(SafeFileHandle file, IntPtr creation, IntPtr access, ref long write);
+    // Sets the link's own last-write time (not its target's).
+    public static void Set(string path, long fileTimeUtc) {
+        using (var handle = CreateFileW(path, 0x100, 7, IntPtr.Zero, 3, 0x00200000 | 0x02000000, IntPtr.Zero)) {
+            if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), path);
+            if (!SetFileTime(handle, IntPtr.Zero, IntPtr.Zero, ref fileTimeUtc)) throw new Win32Exception(Marshal.GetLastWin32Error(), path);
+        }
+    }
+}
+"@
 
 function Get-FileHashes([string[]]$Paths) {
     $map = @{}
@@ -236,14 +261,28 @@ switch ($Step) {
         return
     }
     New-Item -ItemType Directory -Force -Path $BuildRoot | Out-Null
-    Invoke-Checked 7z @('x', '-y', '-snl', '-bso0', '-bsp0', "-o$BuildRoot", "$unpacked\build.7z")
+    Invoke-Checked 7z @('x', '-y', '-bso0', '-bsp0', "-o$BuildRoot", "$unpacked\build.7z")
 
-    # CMake makes Skia's header folders as symbolic links when it configures,
-    # and can't replace them if they came back as real folders (archives
-    # from before links were stored as links). Configuring makes them again.
-    if (Test-Path "$Build\Skia\Headers") {
-        & cmd.exe /c rmdir /s /q "$Build\Skia\Headers"
+    Write-Step 'Making the symbolic links again'
+    $count = 0
+    foreach ($line in [IO.File]::ReadLines("$unpacked\links.txt")) {
+        $parts = $line -split "`t"
+        if ($parts.Count -ne 4) { continue }
+        $path = Join-Path $Build $parts[0]
+        $parent = Split-Path -Parent $path
+        if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+        if (Test-Path -LiteralPath $path) {
+            if ((Get-Item -LiteralPath $path -Force).PSIsContainer) { & cmd.exe /c rmdir /s /q "$path" } else { Remove-Item -LiteralPath $path -Force }
+        }
+        if ($parts[2] -eq 'dir') {
+            [IO.Directory]::CreateSymbolicLink($path, $parts[1]) | Out-Null
+        } else {
+            [IO.File]::CreateSymbolicLink($path, $parts[1]) | Out-Null
+        }
+        [PrismLinkTime]::Set($path, [long]$parts[3])
+        $count++
     }
+    Write-Host "    $count links"
 
     # Files the patches change but that are the same as in the saved build
     # get the old time back, so they aren't compiled again.
@@ -390,9 +429,22 @@ switch ($Step) {
     Write-Step 'Saving the build progress'
     New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
     # 7-Zip keeps the file times, which ninja relies on.
-    # -snl: store symbolic links (Skia's header folders) as links, not as
-    # copies of what they point to.
-    Invoke-Checked 7z @('a', '-t7z', '-mx=1', '-mmt=on', '-mtm=on', '-snl', '-bso0', '-bsp0', "$StateDir\build.7z", $Build)
+    # Symbolic links go in a list (see PrismLinkTime) and are left out of
+    # the archive.
+    $links = New-Object System.Collections.Generic.List[string]
+    $exclude = New-Object System.Collections.Generic.List[string]
+    $prefix = $Build.Length + 1
+    foreach ($item in Get-ChildItem -LiteralPath $Build -Recurse -Force -ErrorAction SilentlyContinue) {
+        if (-not $item.LinkType) { continue }
+        $relative = $item.FullName.Substring($prefix)
+        $kind = if ($item.PSIsContainer) { 'dir' } else { 'file' }
+        $links.Add("$relative`t$($item.LinkTarget)`t$kind`t$($item.LastWriteTimeUtc.ToFileTimeUtc())")
+        $exclude.Add("Release\$relative")
+    }
+    [IO.File]::WriteAllLines("$StateDir\links.txt", $links)
+    [IO.File]::WriteAllLines("$env:RUNNER_TEMP\exclude.txt", $exclude)
+    Write-Host "    $($links.Count) symbolic links listed"
+    Invoke-Checked 7z @('a', '-t7z', '-mx=1', '-mmt=on', '-mtm=on', '-bso0', '-bsp0', "-x@$env:RUNNER_TEMP\exclude.txt", "$StateDir\build.7z", $Build)
     Copy-Item "$Meta\patched.txt" "$StateDir\patched.txt"
     Set-Content -Path "$StateDir\format.txt" -Value $StateFormat -Encoding ascii
     $size = (Get-Item "$StateDir\build.7z").Length / 1GB

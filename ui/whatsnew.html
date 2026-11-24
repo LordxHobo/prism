@@ -22,12 +22,19 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.22</span>
+      <span class="version">Version 0.9.23</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Prism's own WebKit: compile fixes</h2>
+    <h2 style="margin-top:0">Prism's own WebKit: saving progress properly</h2>
+    <ul>
+      <li>The build now saves WebKit's header links in a list and makes them again exactly as they were, instead of relying on the archiver, which broke them ("file not found"). Older saved progress is ignored, so the next build starts fresh.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Prism's own WebKit: compile fixes</h2>
     <ul>
       <li>Fixes the first real compile errors in WebKit's streaming-video code on Windows: places where Windows' compiler is stricter than Linux's, and Linux-only parts that Windows doesn't have.</li>
     </ul>
