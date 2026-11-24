@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.22
+
+- `webkit/patches/0001`, fixes from the first compile round: `MediaSourcePrivate::computeBufferedRanges` loses its own `WEBCORE_EXPORT` (the class is exported; clang-cl rejects both); `MediaSource.cpp` uses `intptr_t` for its reverse track loops (no `ssize_t` on Windows); `AppendPipeline` default-initializes its `std::atomic_flag` (MSVC's has no `bool` constructor); `GStreamerCommon.cpp` only uses `ApplicationGLib.h`/`getApplicationName()` with GLib (else client-name "WebKit"); `GStreamerVideoFrameConverter` only sets timer priority with the GLib event loop; `MediaPlayer.cpp` includes `CoordinatedPlatformLayerBufferProxy.h` only with coordinated graphics and `MediaPlayerPrivateGStreamer.cpp` includes `GStreamerCaptureDeviceManager.h` only with media streams; `platform/audio/gstreamer` is on the Windows include path (`AudioDecoder.cpp` includes `AudioDecoderGStreamer.h`).
+
 ## 0.9.21
 
 - `webkit/ci.ps1`: WebKit's PrivateHeaders/Headers are symbolic links to the source headers (`WEBKIT_SYMLINK_FILES`, `cmake -E create_symlink`); the first run's archive (without `-snl`) had turned them into copies, so `#pragma once` saw each header twice (`redefinition of 'CodeBlock'` etc. in LLIntOffsetsExtractor). Archives are now extracted with `-snl` too, and carry `format.txt` (`links-1`); progress without it is ignored and the build starts from scratch.

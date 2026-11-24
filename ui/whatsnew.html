@@ -22,12 +22,19 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.21</span>
+      <span class="version">Version 0.9.22</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Prism's own WebKit: resuming builds</h2>
+    <h2 style="margin-top:0">Prism's own WebKit: compile fixes</h2>
+    <ul>
+      <li>Fixes the first real compile errors in WebKit's streaming-video code on Windows: places where Windows' compiler is stricter than Linux's, and Linux-only parts that Windows doesn't have.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Prism's own WebKit: resuming builds</h2>
     <ul>
       <li>Saved progress now keeps WebKit's header links as links. Progress saved before this had copies instead, which made every header appear twice ("redefinition" errors); the build ignores that older progress and starts fresh by itself.</li>
       <li>A WebKit build that carries on from saved progress no longer stops while setting up (Skia's header folders came back as copies instead of links).</li>

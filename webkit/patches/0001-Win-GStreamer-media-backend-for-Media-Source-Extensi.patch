@@ -24,6 +24,11 @@ binaries:
   (DirectWrite stays linked for fonts).
 - GRefPtr.h and GSpanExtras.h include GLib's headers on Windows instead of
   forward-declaring its functions, whose real declarations are dllimport.
+- MSVC/clang-cl fixes in shared code: no WEBCORE_EXPORT on a member of an
+  exported class (MediaSourcePrivate), intptr_t instead of ssize_t
+  (MediaSource), atomic_flag default-initialized (AppendPipeline).
+- GLib-only bits stay GLib-only: application name, RunLoop timer
+  priorities, coordinated-graphics and media-stream includes.
 ---
  Source/WTF/wtf/Platform.h                     |  5 +-
  Source/WTF/wtf/PlatformWin.cmake              | 29 ++++++
@@ -34,15 +39,21 @@ binaries:
  Source/WTF/wtf/glib/GUniquePtr.h              |  4 +-
  Source/WTF/wtf/glib/GWeakPtr.h                |  4 +-
  Source/WTF/wtf/glib/RunLoopSourcePriority.h   |  4 +-
- Source/WebCore/PlatformWin.cmake              |  7 ++
+ .../Modules/mediasource/MediaSource.cpp       |  6 +-
+ Source/WebCore/PlatformWin.cmake              | 11 +++
  Source/WebCore/platform/GStreamer.cmake       | 12 ++-
- .../graphics/gstreamer/GStreamerCommon.cpp    | 30 ++++++
+ .../WebCore/platform/graphics/MediaPlayer.cpp |  2 +
+ .../platform/graphics/MediaSourcePrivate.h    |  2 +-
+ .../graphics/gstreamer/GStreamerCommon.cpp    | 36 +++++++
  .../graphics/gstreamer/GStreamerCommon.h      |  9 ++
  .../gstreamer/GStreamerRegistryScanner.cpp    |  2 +
+ .../GStreamerVideoFrameConverter.cpp          |  2 +
  .../gstreamer/ImageDecoderGStreamer.cpp       |  5 +
+ .../gstreamer/MediaPlayerPrivateGStreamer.cpp |  2 +
+ .../graphics/gstreamer/mse/AppendPipeline.cpp |  1 -
  Source/cmake/GStreamerWin.cmake               | 95 +++++++++++++++++++
  Source/cmake/OptionsWin.cmake                 | 20 +++-
- 17 files changed, 232 insertions(+), 18 deletions(-)
+ 23 files changed, 252 insertions(+), 23 deletions(-)
  create mode 100644 Source/cmake/GStreamerWin.cmake
 
 diff --git a/Source/WTF/wtf/Platform.h b/Source/WTF/wtf/Platform.h
@@ -261,22 +272,57 @@ index 768b21d34..798e131c1 100644
  
 -#endif // USE(GLIB)
 +#endif // USE(GLIB) || USE(GSTREAMER)
+diff --git a/Source/WebCore/Modules/mediasource/MediaSource.cpp b/Source/WebCore/Modules/mediasource/MediaSource.cpp
+index 4965dc2e4..0334da267 100644
+--- a/Source/WebCore/Modules/mediasource/MediaSource.cpp
++++ b/Source/WebCore/Modules/mediasource/MediaSource.cpp
+@@ -803,7 +803,7 @@ void MediaSource::removeSourceBufferWithOptionalDestruction(SourceBuffer& buffer
+             bool removedEnabledAudioTrack = false;
+ 
+             // 5.3 For each AudioTrack object in the SourceBuffer audioTracks list, run the following steps:
+-            for (ssize_t index = audioTracks->length() - 1; index >= 0; index--) {
++            for (intptr_t index = audioTracks->length() - 1; index >= 0; index--) {
+                 Ref track = audioTracks->item(index);
+ 
+                 if (withDestruction) {
+@@ -858,7 +858,7 @@ void MediaSource::removeSourceBufferWithOptionalDestruction(SourceBuffer& buffer
+             bool removedSelectedVideoTrack = false;
+ 
+             // 7.3 For each VideoTrack object in the SourceBuffer videoTracks list, run the following steps:
+-            for (ssize_t index = videoTracks->length() - 1; index >= 0; index--) {
++            for (intptr_t index = videoTracks->length() - 1; index >= 0; index--) {
+                 Ref track = videoTracks->item(index);
+ 
+                 if (withDestruction) {
+@@ -913,7 +913,7 @@ void MediaSource::removeSourceBufferWithOptionalDestruction(SourceBuffer& buffer
+             bool removedEnabledTextTrack = false;
+ 
+             // 9.3 For each TextTrack object in the SourceBuffer textTracks list, run the following steps:
+-            for (ssize_t index = textTracks->length() - 1; index >= 0; index--) {
++            for (intptr_t index = textTracks->length() - 1; index >= 0; index--) {
+                 Ref track = *textTracks->item(index);
+ 
+                 if (withDestruction) {
 diff --git a/Source/WebCore/PlatformWin.cmake b/Source/WebCore/PlatformWin.cmake
-index 3207b155f..530c9491c 100644
+index 3207b155f..0fb93d886 100644
 --- a/Source/WebCore/PlatformWin.cmake
 +++ b/Source/WebCore/PlatformWin.cmake
-@@ -16,6 +16,10 @@ if (USE_DAWN)
+@@ -16,6 +16,14 @@ if (USE_DAWN)
      include(platform/Dawn.cmake)
  endif ()
  
 +if (USE_GSTREAMER)
 +    include(platform/GStreamer.cmake)
++    # GTK and WPE have these on their include path for every port file.
++    list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
++        "${WEBCORE_DIR}/platform/audio/gstreamer"
++    )
 +endif ()
 +
  list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
      "${WEBCORE_DIR}/accessibility/win"
      "${WEBCORE_DIR}/page/win"
-@@ -206,6 +210,9 @@ if (ENABLE_VIDEO AND USE_MEDIA_FOUNDATION)
+@@ -206,6 +214,9 @@ if (ENABLE_VIDEO AND USE_MEDIA_FOUNDATION)
      )
  
      list(APPEND WebCore_PRIVATE_LIBRARIES MediaFoundation)
@@ -309,11 +355,48 @@ index ce1c66972..505d97d3d 100644
  
      list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
          "${WEBCORE_DIR}/Modules/mediastream/gstreamer"
+diff --git a/Source/WebCore/platform/graphics/MediaPlayer.cpp b/Source/WebCore/platform/graphics/MediaPlayer.cpp
+index 0a719779e..cc00a9d5e 100644
+--- a/Source/WebCore/platform/graphics/MediaPlayer.cpp
++++ b/Source/WebCore/platform/graphics/MediaPlayer.cpp
+@@ -76,7 +76,9 @@
+ #endif
+ 
+ #if USE(GSTREAMER)
++#if USE(COORDINATED_GRAPHICS)
+ #include "CoordinatedPlatformLayerBufferProxy.h"
++#endif
+ #include "MediaPlayerPrivateGStreamer.h"
+ #if ENABLE(MEDIA_SOURCE)
+ #include "MediaPlayerPrivateGStreamerMSE.h"
+diff --git a/Source/WebCore/platform/graphics/MediaSourcePrivate.h b/Source/WebCore/platform/graphics/MediaSourcePrivate.h
+index 5cf0c345e..a15328355 100644
+--- a/Source/WebCore/platform/graphics/MediaSourcePrivate.h
++++ b/Source/WebCore/platform/graphics/MediaSourcePrivate.h
+@@ -108,7 +108,7 @@ public:
+     // MediaSource readyState is "ended". Used by both MediaSource (main) on
+     // readyState/dirty triggers and MediaSourcePrivate (dispatcher) when track
+     // ranges change so a single algorithm produces the value.
+-    WEBCORE_EXPORT static PlatformTimeRanges computeBufferedRanges(const Vector<PlatformTimeRanges>& activeRanges, bool ended);
++    static PlatformTimeRanges computeBufferedRanges(const Vector<PlatformTimeRanges>& activeRanges, bool ended);
+ 
+     NODELETE MediaPlayer::ReadyState mediaPlayerReadyState() const;
+     void setMediaPlayerReadyState(MediaPlayer::ReadyState);
 diff --git a/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.cpp b/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.cpp
-index 43946e778..ef83da2a8 100644
+index 43946e778..defccd035 100644
 --- a/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.cpp
 +++ b/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.cpp
-@@ -38,15 +38,19 @@
+@@ -23,7 +23,9 @@
+ 
+ #if USE(GSTREAMER)
+ 
++#if USE(GLIB)
+ #include "ApplicationGLib.h"
++#endif
+ #include "FloatSize.h"
+ #include "GLVideoSinkGStreamer.h"
+ #include "GStreamerAudioMixer.h"
+@@ -38,15 +40,19 @@
  #include "SharedBuffer.h"
  #include "VideoSinkGStreamer.h"
  #include "WebKitAudioSinkGStreamer.h"
@@ -333,7 +416,7 @@ index 43946e778..ef83da2a8 100644
  #include <wtf/RuntimeApplicationChecks.h>
  #include <wtf/Scope.h>
  #include <wtf/TZoneMallocInlines.h>
-@@ -489,7 +493,11 @@ bool ensureGStreamerInitialized()
+@@ -489,7 +495,11 @@ bool ensureGStreamerInitialized()
          int argc = parameters.size() + 1;
          char** argv = g_new0(char*, argc + 1);
          auto argvSpan = unsafeMakeSpan(argv, argc);
@@ -345,7 +428,7 @@ index 43946e778..ef83da2a8 100644
          for (auto [arg, parameter] : zippedRange(argvSpan.subspan(1), parameters))
              arg = gStrdup(parameter.utf8());
  
-@@ -1151,10 +1159,32 @@ static void dumpPipeline(const GRefPtr<GstElement>& pipeline, String&& dotFileNa
+@@ -1151,10 +1161,32 @@ static void dumpPipeline(const GRefPtr<GstElement>& pipeline, String&& dotFileNa
      }), data, reinterpret_cast<GDestroyNotify>(destroyAsyncPipelineDumpData));
  }
  
@@ -378,6 +461,19 @@ index 43946e778..ef83da2a8 100644
  
      auto data = createMessageBusData();
      data->pipeline.reset(pipeline);
+@@ -1248,8 +1280,12 @@ IGNORE_WARNINGS_BEGIN("cast-align")
+ IGNORE_WARNINGS_END
+         }
+         if (g_object_class_find_property(objectClass, "client-name")) {
++#if USE(GLIB)
+             auto& clientName = getApplicationName();
+             g_object_set(object, "client-name", clientName.ascii().data(), nullptr);
++#else
++            g_object_set(object, "client-name", "WebKit", nullptr);
++#endif
+         }
+     }), role.isolatedCopy().releaseImpl().leakRef(), static_cast<GClosureNotify>([](gpointer userData, GClosure*) {
+         if (auto* roleImpl = reinterpret_cast<StringImpl*>(userData))
 diff --git a/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.h b/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.h
 index 5eff4ddbf..915d4edd7 100644
 --- a/Source/WebCore/platform/graphics/gstreamer/GStreamerCommon.h
@@ -412,6 +508,20 @@ index f235c97de..0248d852c 100644
  #include <gst/pbutils/codec-utils.h>
  #include <wtf/NeverDestroyed.h>
  #include <wtf/PrintStream.h>
+diff --git a/Source/WebCore/platform/graphics/gstreamer/GStreamerVideoFrameConverter.cpp b/Source/WebCore/platform/graphics/gstreamer/GStreamerVideoFrameConverter.cpp
+index 65c52787a..e7feb343e 100644
+--- a/Source/WebCore/platform/graphics/gstreamer/GStreamerVideoFrameConverter.cpp
++++ b/Source/WebCore/platform/graphics/gstreamer/GStreamerVideoFrameConverter.cpp
+@@ -193,7 +193,9 @@ void GStreamerVideoFrameConverter::scheduleReleaseUnusedPipelinesTimer()
+     RunLoop::mainSingleton().dispatch([this] {
+         if (!m_releaseUnusedPipelinesTimer) {
+             m_releaseUnusedPipelinesTimer = makeUnique<RunLoop::Timer>(RunLoop::mainSingleton(), "GStreamerVideoFrameConverter::ReleaseUnusedPipelinesTimer"_s, this, &GStreamerVideoFrameConverter::releaseUnusedPipelinesTimerFired);
++#if USE(GLIB_EVENT_LOOP)
+             m_releaseUnusedPipelinesTimer->setPriority(RunLoopSourcePriority::ReleaseUnusedResourcesTimer);
++#endif
+         }
+         m_releaseUnusedPipelinesTimer->startRepeating(s_releaseUnusedPipelinesTimerInterval);
+     });
 diff --git a/Source/WebCore/platform/graphics/gstreamer/ImageDecoderGStreamer.cpp b/Source/WebCore/platform/graphics/gstreamer/ImageDecoderGStreamer.cpp
 index 75f95d0c1..e1ba1cf43 100644
 --- a/Source/WebCore/platform/graphics/gstreamer/ImageDecoderGStreamer.cpp
@@ -430,6 +540,32 @@ index 75f95d0c1..e1ba1cf43 100644
      m_eos = false;
      m_error = false;
  
+diff --git a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
+index 3b62489b8..2390deefd 100644
+--- a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
++++ b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
+@@ -32,7 +32,9 @@
+ 
+ #include "AudioTrackPrivateGStreamer.h"
+ #include "GStreamerAudioMixer.h"
++#if ENABLE(MEDIA_STREAM)
+ #include "GStreamerCaptureDeviceManager.h"
++#endif
+ #include "GStreamerCommon.h"
+ #include "GStreamerQuirks.h"
+ #include "GStreamerRegistryScanner.h"
+diff --git a/Source/WebCore/platform/graphics/gstreamer/mse/AppendPipeline.cpp b/Source/WebCore/platform/graphics/gstreamer/mse/AppendPipeline.cpp
+index 28a55a44d..75ef58f51 100644
+--- a/Source/WebCore/platform/graphics/gstreamer/mse/AppendPipeline.cpp
++++ b/Source/WebCore/platform/graphics/gstreamer/mse/AppendPipeline.cpp
+@@ -258,7 +258,6 @@ void AppendPipeline::configureOptionalDemuxerFromAnyThread()
+ AppendPipeline::AppendPipeline(SourceBufferPrivateGStreamer& sourceBufferPrivate, MediaPlayerPrivateGStreamerMSE& playerPrivate)
+     : m_sourceBufferPrivate(sourceBufferPrivate)
+     , m_playerPrivate(&playerPrivate)
+-    , m_wasBusAlreadyNotifiedOfAvailableSamples(false)
+ {
+     ASSERT(isMainThread());
+     std::call_once(s_staticInitializationFlag, AppendPipeline::staticInitialization);
 diff --git a/Source/cmake/GStreamerWin.cmake b/Source/cmake/GStreamerWin.cmake
 new file mode 100644
 index 000000000..5412f726d
