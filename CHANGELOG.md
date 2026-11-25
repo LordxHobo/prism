@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.32
+
+- **Private windows** (`BrowserWindow::openPrivate`, menu, Ctrl+Shift+N, bookmark menu "Open in private window").
+  - `engine::privatePageConfiguration()`: a `WKWebsiteDataStoreCreateNonPersistentDataStore()` store (ITP on, cookie policy and blocking proxy applied like the main store), shared by all private windows until the last one closes (`engine::releasePrivateData()`, from `onDestroy`). Its own `WKContext` (with PrismBundle), so private pages run in separate web processes; `RequestFilter` keeps a list of contexts, answers `prism:contentScripts?` with no scripts for the private one, and never passes its requests to extensions' webRequest. Its own user content controller: Prism's script message handlers without the extension ones, and every user-script group except "extensions".
+  - Not written from private windows: history (visits, titles), the session file (private windows are skipped; with only private windows open, the saved session is kept), site icons (`requestIcon`), permission decisions (location and notifications are denied).
+  - Hidden from extensions: no window/tab events, no context menu items, no keyboard shortcuts, no action buttons; `tabs::` skips private windows (except `findByPageAnyWindow`, `activate`, `focusWindow` and `windowHandle`, used by Prism itself).
+  - Closing the last normal window while a private one is open saves the normal tabs, as if it were the last window.
+  - Toolbar: `private` in the state; purple frame and a "Private" label; the extensions button is hidden. New tab page: no most visited sites, and a note on what private windows keep.
+- Toolbar: `.icon[hidden]` is really hidden (`.icon` set `display: grid`, which beat the `hidden` attribute).
+
 ## 0.9.31
 
 - No picture in video, real cause: with 0.9.30 `paint()` ran for every frame (about 6 times per frame, once per tile), so frames reached the page's tiles. But `DrawingAreaWC` paints tiles into GPU-process image buffers, through `RemoteGraphicsContextProxy`, whose `drawVideoFrame()` only does anything on Cocoa (shared video frames). Elsewhere it dropped the frame. Plain MP4 files were black too; canvas copies (YouTube's ambient mode) worked because they're drawn in the web process.

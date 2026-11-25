@@ -76,7 +76,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     permissions::initialize(engine::context(), [](WKPageRef page) {
         // A notification was clicked: show the tab it came from.
         tabs::Info info;
-        if (tabs::findByPage(page, info)) {
+        if (tabs::findByPageAnyWindow(page, info)) {
             tabs::activate(info.id);
             tabs::focusWindow(info.windowId);
         }

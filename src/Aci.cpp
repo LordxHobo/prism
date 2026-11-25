@@ -247,7 +247,7 @@ std::string pickFontFile(HWND owner)
 HWND ownerOf(WKPageRef page)
 {
     tabs::Info tab;
-    return tabs::findByPage(page, tab) ? tabs::windowHandle(tab.windowId) : nullptr;
+    return tabs::findByPageAnyWindow(page, tab) ? tabs::windowHandle(tab.windowId) : nullptr;
 }
 
 const std::map<std::string, const wchar_t*> kSettingKeys = {
@@ -323,7 +323,7 @@ std::string handleMessage(WKPageRef page, const std::string& text)
         return "null";
     std::string op = message["op"].asString();
     tabs::Info tab;
-    bool known = tabs::findByPage(page, tab);
+    bool known = tabs::findByPageAnyWindow(page, tab);
     if (op == "view") {
         if (isView(message["view"].asString()))
             util::writeSetting(L"AciLastView", util::fromUTF8(message["view"].asString()));

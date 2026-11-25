@@ -139,6 +139,37 @@
     background: var(--surface);
     color: var(--text);
   }
+  body.private .logo { display: none; }
+  .private-mark {
+    display: none;
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    place-items: center;
+    background: var(--accent-soft);
+  }
+  .private-mark svg {
+    width: 32px;
+    height: 32px;
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  body.private .private-mark { display: grid; }
+  .private-info {
+    display: none;
+    max-width: 520px;
+    margin: 26px 0 0;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-dim);
+    text-align: left;
+  }
+  .private-info p { margin: 0 0 8px; }
+  body.private .private-info { display: block; }
+  body.private .privacy { display: none; }
   .privacy svg {
     width: 16px;
     height: 16px;
@@ -154,7 +185,10 @@
 <body>
 <main>
   <img class="logo" src="prism.svg" alt="">
-  <h1>Prism</h1>
+  <div class="private-mark" aria-hidden="true">
+    <svg viewBox="0 0 24 24"><path d="M3 10.5c2.5-.9 5.5-1.4 9-1.4s6.5.5 9 1.4"/><path d="M6 9.6L7.4 4.5h9.2L18 9.6"/><circle cx="7.5" cy="15.5" r="3"/><circle cx="16.5" cy="15.5" r="3"/><path d="M10.5 15.5c1-.7 2-.7 3 0"/></svg>
+  </div>
+  <h1 id="heading">Prism</h1>
   <form id="search" autocomplete="off">
     <input id="query" type="search" placeholder="Search privately or enter an address" aria-label="Search or enter an address">
   </form>
@@ -163,6 +197,11 @@
     <svg viewBox="0 0 16 16"><path d="M8 1.5l5 2v4c0 3.2-2.1 5.6-5 7-2.9-1.4-5-3.8-5-7v-4z"/><path d="M5.8 8l1.6 1.6L10.4 6.4"/></svg>
     Trackers limited and third-party cookies blocked. Prism never collects your data.
   </p>
+  <div class="private-info">
+    <p><strong>You're in a private window.</strong> Prism doesn't keep your history, the tabs you had open or site icons from here. Cookies and site data stay in memory and are deleted when you close the last private window.</p>
+    <p>Extensions don't run here, and sites can't ask for your location or to send notifications.</p>
+    <p>Bookmarks you make, passwords you choose to save and files you download are kept. Sites, your network and your internet provider can still see what you visit.</p>
+  </div>
 </main>
 <script>
 'use strict';
@@ -187,6 +226,11 @@ function renderShortcuts(data) {
   const container = document.getElementById('shortcuts');
   container.textContent = '';
   if (!data) return;
+  if (data.private) {
+    document.body.classList.add('private');
+    document.getElementById('heading').textContent = 'Private window';
+    document.title = 'New private tab';
+  }
   if (data.background) {
     document.body.classList.add('has-background');
     document.body.style.backgroundImage = 'url("' + data.background.replace(/"/g, '%22') + '")';

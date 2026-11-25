@@ -763,6 +763,10 @@ window.prism = {
     root.dataset.theme = state.theme;
     root.dataset.palette = state.palette || 'default';
     root.classList.toggle('compact', !!state.compact);
+    root.classList.toggle('private', !!state.private);
+    $('privateBadge').hidden = !state.private;
+    // Extensions don't run in private windows.
+    $('extensions').hidden = !!state.private;
     $('home').hidden = !state.homeButton;
     if (/^#[0-9a-f]{6}$/i.test(state.accent || '')) {
       root.style.setProperty('--accent', state.accent);

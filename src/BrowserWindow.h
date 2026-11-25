@@ -72,7 +72,11 @@ public:
     // The same, with tab groups: `tabGroups[i]` is the index into `groups`
     // (plus one; 0 = no group) of tab i.
     static BrowserWindow* open(const std::vector<std::wstring>& startURLs, int activeIndex,
-        const std::vector<TabGroup>& groups, const std::vector<int>& tabGroups);
+        const std::vector<TabGroup>& groups, const std::vector<int>& tabGroups, bool isPrivate = false);
+    // A private window: its cookies, storage and cache live in memory until
+    // the last private window closes; no history, no saved session, no site
+    // icons; extensions don't run in it or see it.
+    static BrowserWindow* openPrivate(const std::vector<std::wstring>& startURLs = { });
 
     // Reopens the windows and tabs from last time. `extraURLs` are added to
     // the first window. Returns false if there was nothing to restore.
@@ -99,6 +103,7 @@ public:
     static size_t windowCount();
 
     HWND hwnd() const { return m_hwnd; }
+    bool isPrivate() const { return m_private; }
     int id() const { return m_id; }
 
     // Keyboard shortcuts work no matter which part of the window has focus.
@@ -244,6 +249,7 @@ private:
 
     HWND m_hwnd { };
     int m_id { 0 };
+    bool m_private { false };
     wk::Ref<WKViewRef> m_toolbarView;
     WKPageRef m_toolbarPage { };
     HWND m_toolbarHwnd { };

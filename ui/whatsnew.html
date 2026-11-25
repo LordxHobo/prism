@@ -22,12 +22,24 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.31</span>
+      <span class="version">Version 0.9.32</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Video picture, take two</h2>
+    <h2 style="margin-top:0">Private windows</h2>
+    <p>Open one from the menu, with <strong>Ctrl+Shift+N</strong>, or by right-clicking a bookmark. Private windows have a purple frame and a "Private" label.</p>
+    <ul class="notes">
+      <li>No history, no saved tabs and no site icons are kept from private windows.</li>
+      <li>Cookies and site data stay in memory and are deleted when you close the last private window. Each new private session starts signed out of everything.</li>
+      <li>Extensions don't run in private windows and can't see them. Prism Shields still blocks ads and trackers.</li>
+      <li>Sites can't ask for your location or to send notifications there.</li>
+      <li>Bookmarks, saved passwords and downloads are kept, like everywhere else.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Video picture, take two</h2>
     <p>Video frames were drawn, but never reached the screen: pages are drawn by Prism's GPU process, and the instruction for drawing a video frame there only existed on macOS, so it did nothing. Frames are now sent as images, once per frame.</p>
     <p class="dim">Needs a new Prism WebKit build. Full screen video still isn't supported.</p>
   </div>

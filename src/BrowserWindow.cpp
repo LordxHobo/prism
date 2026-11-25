@@ -192,7 +192,7 @@ bool isAudioAddress(const std::string& url)
 void getContextMenuAsync(WKPageRef page, WKArrayRef proposed, WKContextMenuListenerRef listener, WKHitTestResultRef hit, WKTypeRef, const void* clientInfo)
 {
     Tab* tab = tabFromClientInfo(clientInfo);
-    if (!tab || tab->extensionPages || !extensions::hasMenuItems()) {
+    if (!tab || tab->extensionPages || tab->window->isPrivate() || !extensions::hasMenuItems()) {
         WKContextMenuListenerUseContextMenuItems(listener, proposed);
         return;
     }
@@ -353,10 +353,20 @@ BrowserWindow* BrowserWindow::open(const std::vector<std::wstring>& startURLs, i
     return open(startURLs, activeIndex, { }, { });
 }
 
+BrowserWindow* BrowserWindow::openPrivate(const std::vector<std::wstring>& startURLs)
+{
+    if (!engine::privatePageConfiguration()) {
+        MessageBoxW(nullptr, L"This WebKit build can't make private windows.", L"Prism", MB_OK | MB_ICONINFORMATION);
+        return nullptr;
+    }
+    return open(startURLs, -1, { }, { }, true);
+}
+
 BrowserWindow* BrowserWindow::open(const std::vector<std::wstring>& startURLs, int activeIndex,
-    const std::vector<TabGroup>& groups, const std::vector<int>& tabGroups)
+    const std::vector<TabGroup>& groups, const std::vector<int>& tabGroups, bool isPrivate)
 {
     auto* window = new BrowserWindow();
+    window->m_private = isPrivate;
     window->m_pendingStartURLs = startURLs;
     window->m_pendingActiveIndex = activeIndex;
     window->m_pendingGroups = groups;
@@ -450,7 +460,8 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         m_id = ++s_nextWindowId;
         s_lastFocusedWindowId = m_id;
         s_windows.push_back(this);
-        extensions::windowCreated(m_id);
+        if (!m_private)
+            extensions::windowCreated(m_id);
         updateTheme();
         updateIcon();
         createToolbar();
@@ -527,7 +538,8 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             focusContent();
             if (s_lastFocusedWindowId != m_id) {
                 s_lastFocusedWindowId = m_id;
-                extensions::windowFocused(m_id);
+                if (!m_private)
+                    extensions::windowFocused(m_id);
             }
         }
         return 0;
@@ -615,19 +627,26 @@ void BrowserWindow::onDestroy()
     m_toolbarReady = false;
     KillTimer(m_hwnd, kSessionTimer);
     KillTimer(m_hwnd, kStatsTimer);
-    for (auto& tab : m_tabs)
-        extensions::tabRemoved(tab->id, m_id, true);
-    extensions::windowRemoved(m_id);
+    if (!m_private) {
+        for (auto& tab : m_tabs)
+            extensions::tabRemoved(tab->id, m_id, true);
+        extensions::windowRemoved(m_id);
+    }
 
     // Closing the last window quits Prism: remember its tabs for next time.
-    // Closing one of several windows forgets that window's tabs.
+    // Closing one of several windows forgets that window's tabs, unless it's
+    // the last normal one (private windows are never saved).
     bool last = s_windows.size() == 1;
-    if (last)
+    bool lastNormal = !m_private && std::none_of(s_windows.begin(), s_windows.end(),
+        [this](BrowserWindow* other) { return other != this && !other->m_private; });
+    if (last || lastNormal)
         saveSession();
     s_windows.erase(std::remove(s_windows.begin(), s_windows.end(), this), s_windows.end());
+    if (m_private && std::none_of(s_windows.begin(), s_windows.end(), [](BrowserWindow* other) { return other->m_private; }))
+        engine::releasePrivateData();
     if (last)
         PostQuitMessage(0);
-    else
+    else if (!lastNormal)
         saveSession();
 }
 
@@ -1078,7 +1097,8 @@ void BrowserWindow::pushState()
     if (Tab* active = activeTab())
         json += ",\"blockedHere\":" + std::to_string(requestfilter::blockedOnPage(active->page));
     json += ",\"active\":" + std::to_string(m_activeTabId);
-    json += ",\"actions\":" + extensions::actionsJSON(m_activeTabId);
+    json += ",\"actions\":" + (m_private ? std::string("[]") : extensions::actionsJSON(m_activeTabId));
+    json += ",\"private\":" + std::string(m_private ? "true" : "false");
     json += ",\"palette\":" + util::jsonString(settings::palette());
     json += ",\"vertical\":" + std::string(settings::verticalTabs() ? "true" : "false");
     json += ",\"sidebarCollapsed\":" + std::string(settings::verticalTabsCollapsed() ? "true" : "false");
@@ -1173,7 +1193,8 @@ void BrowserWindow::focusContent()
 void BrowserWindow::updateTitle()
 {
     Tab* tab = activeTab();
-    std::wstring title = tab && !tab->title.empty() ? tab->title + L" - Prism" : L"Prism";
+    std::wstring app = m_private ? L"Prism (private)" : L"Prism";
+    std::wstring title = tab && !tab->title.empty() ? tab->title + L" - " + app : app;
     SetWindowTextW(m_hwnd, title.c_str());
 }
 
@@ -1226,7 +1247,10 @@ Tab* BrowserWindow::newTab(const std::wstring& url, bool select, WKPageConfigura
     } else if (configuration == engine::extensionPageConfiguration())
         tab->extensionPages = true;
     RECT rect = { };
-    tab->view = Ref<WKViewRef>::adopt(WKViewCreate(rect, configuration ? configuration : engine::pageConfiguration(), m_hwnd));
+    WKPageConfigurationRef pageConfiguration = configuration;
+    if (!pageConfiguration)
+        pageConfiguration = m_private && engine::privatePageConfiguration() ? engine::privatePageConfiguration() : engine::pageConfiguration();
+    tab->view = Ref<WKViewRef>::adopt(WKViewCreate(rect, pageConfiguration, m_hwnd));
     // Only the selected tab counts as "in the window" (see selectTab).
     WKViewSetIsInWindow(tab->view.get(), false);
     tab->hwnd = WKViewGetWindow(tab->view.get());
@@ -1246,7 +1270,8 @@ Tab* BrowserWindow::newTab(const std::wstring& url, bool select, WKPageConfigura
     } else
         m_tabs.push_back(std::move(tab));
 
-    extensions::tabCreated(raw->id);
+    if (!m_private)
+        extensions::tabCreated(raw->id);
     if (!url.empty())
         navigate(raw, url);
     if (select)
@@ -1359,7 +1384,7 @@ void BrowserWindow::selectTab(int id)
     updateTitle();
     pushState();
     scheduleSessionSave();
-    if (!previous || previous != next)
+    if ((!previous || previous != next) && !m_private)
         extensions::tabActivated(id, m_id);
 }
 
@@ -1388,7 +1413,8 @@ void BrowserWindow::closeTab(int id)
 
     bool wasActive = tab->id == m_activeTabId;
     denyPrompts(tab);
-    extensions::tabRemoved(tab->id, m_id, m_tabs.size() == 1);
+    if (!m_private)
+        extensions::tabRemoved(tab->id, m_id, m_tabs.size() == 1);
     detachClients(tab->page);
     scheduleSessionSave();
     // Destroying the view's window makes WebKit close the page and its process.
@@ -1485,14 +1511,15 @@ void BrowserWindow::tabStateChanged(const void* clientInfo)
         if (!tab->extensionPages)
             aci::pageLoaded(tab->page, tab->url, tab->window->hwnd()); // a site's own reading view
     }
-    if (!tab->extensionPages)
+    if (!tab->extensionPages && !tab->window->m_private)
         history::updateTitle(tab->url, tab->title);
     tab->window->tabChanged(tab);
 }
 
 void BrowserWindow::tabChanged(Tab* tab)
 {
-    extensions::tabUpdated(tab->id);
+    if (!m_private)
+        extensions::tabUpdated(tab->id);
     if (tab->id == m_activeTabId)
         updateTitle();
     pushState();
@@ -1548,8 +1575,13 @@ void BrowserWindow::scheduleSessionSave()
 void BrowserWindow::saveSession()
 {
     s_sessionDirty = false;
+    // With only private windows open, keep what was saved for the normal ones.
+    if (std::none_of(s_windows.begin(), s_windows.end(), [](BrowserWindow* window) { return !window->m_private; }))
+        return;
     std::string contents;
     for (auto* window : s_windows) {
+        if (window->m_private)
+            continue;
         std::string tabs;
         // G <number> <color> <collapsed 1|0> <name>; tabs refer to the number.
         std::string groups;
@@ -1818,9 +1850,12 @@ static std::wstring newTabBackgroundPath()
     return path;
 }
 
-static std::string newTabData()
+static std::string newTabData(bool isPrivate)
 {
+    // Private windows don't show your most visited sites.
     std::wstring mode = settings::newTabShortcuts();
+    if (isPrivate && mode == L"top")
+        mode = L"off";
     std::string json = "{\"mode\":" + util::jsonString(mode) + ",\"shortcuts\":[";
     bool first = true;
     auto add = [&](const std::wstring& url, const std::wstring& title) {
@@ -1859,7 +1894,8 @@ static std::string newTabData()
         GetFileAttributesExW(background.c_str(), GetFileExInfoStandard, &info);
         backgroundURL = util::fileURLFromPath(background) + L"?" + std::to_wstring(info.ftLastWriteTime.dwLowDateTime);
     }
-    json += ",\"background\":" + util::jsonString(backgroundURL) + "}";
+    json += ",\"background\":" + util::jsonString(backgroundURL);
+    json += ",\"private\":" + std::string(isPrivate ? "true" : "false") + "}";
     return json;
 }
 
@@ -2063,13 +2099,13 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
             else if (isSettings && command.rfind(L"usercss.", 0) == 0)
                 answer = usercss::handleCommand(command.substr(8), argument);
             else if (isNewTab && command == L"data")
-                answer = newTabData();
+                answer = newTabData(tab->window->m_private);
             else if (isNewTab && command == L"hide") {
                 // A site removed from the shortcuts.
                 std::wstring hidden = util::readSetting(L"NewTabHidden", L"");
                 if (argument.find(L',') == std::wstring::npos && !argument.empty())
                     util::writeSetting(L"NewTabHidden", hidden.empty() ? argument : hidden + L"," + argument);
-                answer = newTabData();
+                answer = newTabData(tab->window->m_private);
             } else if (isNewTab && command == L"open") {
                 size_t split = argument.find(L'\n');
                 std::wstring url = argument.substr(0, split);
@@ -2184,7 +2220,8 @@ void BrowserWindow::decidePolicyForNavigationAction(WKPageRef, WKNavigationActio
                 // No target frame means a new window: that's a top-level page too.
                 if (!frame || WKFrameInfoGetIsMainFrame(frame.get())) {
                     blocker::noteTopLevelSite(util::toUTF8(hostOf(target)));
-                    extensions::webRequestMainFrame(tab->id, util::toUTF8(target));
+                    if (!tab->window->m_private)
+                        extensions::webRequestMainFrame(tab->id, util::toUTF8(target));
                 }
                 // Right after Prism starts (tabs from last time), wait for
                 // Shields' blocker (5 s at most), so pages like YouTube get
@@ -2376,11 +2413,12 @@ void BrowserWindow::startDownload(WKDownloadRef download)
 void BrowserWindow::showMenu(int x, int y)
 {
     enum { NewTab = 1, NewWindow, ReopenTab, ZoomIn, ZoomOut, ZoomReset, DevTools, Downloads, Extensions, Settings, WhatsNew, About,
-        History, Bookmarks, BookmarksBar, Find, Print, Passwords };
+        History, Bookmarks, BookmarksBar, Find, Print, Passwords, NewPrivateWindow };
 
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, NewTab, L"New tab\tCtrl+T");
     AppendMenuW(menu, MF_STRING, NewWindow, L"New window\tCtrl+N");
+    AppendMenuW(menu, MF_STRING, NewPrivateWindow, L"New private window\tCtrl+Shift+N");
     AppendMenuW(menu, MF_STRING | (m_closedURLs.empty() ? MF_GRAYED : 0), ReopenTab, L"Reopen closed tab\tCtrl+Shift+T");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, History, L"History\tCtrl+H");
@@ -2413,6 +2451,7 @@ void BrowserWindow::showMenu(int x, int y)
     switch (choice) {
     case NewTab: newTab(L"prism://newtab", true); break;
     case NewWindow: BrowserWindow::open({ }); break;
+    case NewPrivateWindow: BrowserWindow::openPrivate(); break;
     case ReopenTab: reopenClosedTab(); break;
     case ZoomIn: zoom(1.1); break;
     case ZoomOut: zoom(1 / 1.1); break;
@@ -2476,6 +2515,8 @@ bool BrowserWindow::handleShortcut(const MSG& msg)
     UINT key = static_cast<UINT>(msg.wParam);
     if (key == VK_CONTROL || key == VK_SHIFT || key == VK_MENU)
         return false;
+    if (m_private)
+        return false; // extensions don't run in private windows
     Tab* tab = activeTab();
     return extensions::runShortcut(m_hwnd, tab ? tab->id : -1, key, GetKeyState(VK_CONTROL) < 0, GetKeyState(VK_MENU) < 0, GetKeyState(VK_SHIFT) < 0);
 }
@@ -2508,8 +2549,10 @@ bool BrowserWindow::handleBrowserShortcut(const MSG& msg)
             else newTab(L"prism://newtab", true);
             return true;
         case 'N':
-            if (shift) return false;
-            BrowserWindow::open({ });
+            if (shift)
+                BrowserWindow::openPrivate();
+            else
+                BrowserWindow::open({ });
             return true;
         case 'W':
         case VK_F4:
@@ -2675,7 +2718,7 @@ void BrowserWindow::didCommitNavigation(WKPageRef page, WKNavigationRef, WKTypeR
     }
     std::wstring committed = toWide(Ref<WKURLRef>::adopt(WKPageCopyActiveURL(page)).get());
     passwords::tabNavigated(tab->id, committed);
-    if (!tab->extensionPages)
+    if (!tab->extensionPages && !tab->window->m_private)
         history::recordVisit(committed, L"");
 }
 
@@ -2684,7 +2727,7 @@ void BrowserWindow::didSameDocumentNavigation(WKPageRef page, WKNavigationRef, W
     // Sites that change pages without loading a new one (history.pushState)
     // get a history entry for each page, like a normal link.
     Tab* tab = tabFromClientInfo(clientInfo);
-    if (type == kWKSameDocumentNavigationSessionStatePush && !tab->extensionPages)
+    if (type == kWKSameDocumentNavigationSessionStatePush && !tab->extensionPages && !tab->window->m_private)
         history::recordVisit(toWide(Ref<WKURLRef>::adopt(WKPageCopyActiveURL(page)).get()), L"");
 }
 
@@ -2790,10 +2833,11 @@ void BrowserWindow::decidePolicyForGeolocation(WKPageRef, WKFrameRef, WKSecurity
 {
     Tab* tab = tabFromClientInfo(clientInfo);
     std::wstring site = permissions::originString(origin);
-    std::wstring decision = permissions::decision(site, L"location");
+    // Private windows: no location or notifications (nothing to remember them in).
+    std::wstring decision = tab->window->m_private ? std::wstring(L"block") : permissions::decision(site, L"location");
     if (decision == L"allow")
         WKGeolocationPermissionRequestAllow(request);
-    else if (decision == L"block" || tab->extensionPages || site.empty() || site == L"null")
+    else if (decision == L"block" || tab->extensionPages || tab->window->m_private || site.empty() || site == L"null")
         WKGeolocationPermissionRequestDeny(request);
     else
         tab->window->queuePrompt(tab, L"location", site, request);
@@ -2803,10 +2847,10 @@ void BrowserWindow::decidePolicyForNotifications(WKPageRef, WKSecurityOriginRef 
 {
     Tab* tab = tabFromClientInfo(clientInfo);
     std::wstring site = permissions::originString(origin);
-    std::wstring decision = permissions::decision(site, L"notifications");
+    std::wstring decision = tab->window->m_private ? std::wstring(L"block") : permissions::decision(site, L"notifications");
     if (decision == L"allow")
         WKNotificationPermissionRequestAllow(request);
-    else if (decision == L"block" || tab->extensionPages || site.empty() || site == L"null")
+    else if (decision == L"block" || tab->extensionPages || tab->window->m_private || site.empty() || site == L"null")
         WKNotificationPermissionRequestDeny(request);
     else
         tab->window->queuePrompt(tab, L"notifications", site, request);
@@ -3126,12 +3170,14 @@ void BrowserWindow::showBookmarkMenu(long long id, POINT screen)
     bool folder = node->folder;
     std::wstring url = node->url;
     std::wstring title = node->title;
-    enum { Open = 1, OpenNewTab, OpenBackground, Rename, Remove, Manage, HideBar };
+    enum { Open = 1, OpenNewTab, OpenBackground, Rename, Remove, Manage, HideBar, OpenPrivate };
     HMENU menu = CreatePopupMenu();
     if (!folder) {
         AppendMenuW(menu, MF_STRING, Open, L"Open");
         AppendMenuW(menu, MF_STRING, OpenNewTab, L"Open in new tab");
         AppendMenuW(menu, MF_STRING, OpenBackground, L"Open in background tab");
+        if (!m_private)
+            AppendMenuW(menu, MF_STRING, OpenPrivate, L"Open in private window");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     }
     AppendMenuW(menu, MF_STRING, Rename, L"Rename…");
@@ -3145,6 +3191,7 @@ void BrowserWindow::showBookmarkMenu(long long id, POINT screen)
     case Open: openBookmarkURL(url, L"current"); break;
     case OpenNewTab: openBookmarkURL(url, L"foreground"); break;
     case OpenBackground: openBookmarkURL(url, L"background"); break;
+    case OpenPrivate: BrowserWindow::openPrivate({ url }); break;
     case Rename:
         if (auto name = dialogs::prompt(m_hwnd, folder ? L"Rename folder" : L"Rename bookmark", L"Name:", title); name && !name->empty())
             bookmarks::rename(id, *name);
@@ -3175,7 +3222,8 @@ struct IconRequest {
 
 void BrowserWindow::requestIcon(Tab* tab)
 {
-    if (tab->extensionPages || engine::isInternalURL(tab->url))
+    // Private windows don't save site icons (or fetch them separately).
+    if (m_private || tab->extensionPages || engine::isInternalURL(tab->url))
         return;
     std::wstring scheme = schemeOf(tab->url);
     if (scheme != L"http" && scheme != L"https")
@@ -3918,23 +3966,38 @@ static Info infoFor(const BrowserWindow* window, const Tab* tab, int index)
     info.url = tab->url;
     info.title = tab->title;
     info.page = tab->page;
+    info.isPrivate = window->isPrivate();
     return info;
 }
 
-static BrowserWindow* windowById(int windowId)
+// Extensions never see private windows: everything here skips them unless
+// it says otherwise.
+static std::vector<BrowserWindow*> normalWindows()
+{
+    std::vector<BrowserWindow*> out;
+    for (auto* window : BrowserWindow::all()) {
+        if (!window->isPrivate())
+            out.push_back(window);
+    }
+    return out;
+}
+
+static BrowserWindow* windowById(int windowId, bool includePrivate = false)
 {
     if (windowId < 0)
         windowId = lastFocusedWindow();
     for (auto* window : BrowserWindow::all()) {
-        if (window->id() == windowId)
+        if (window->id() == windowId && (includePrivate || !window->isPrivate()))
             return window;
     }
     return nullptr;
 }
 
-static Tab* tabById(int tabId)
+static Tab* tabById(int tabId, bool includePrivate = false)
 {
     for (auto* window : BrowserWindow::all()) {
+        if (window->isPrivate() && !includePrivate)
+            continue;
         for (auto& tab : window->tabList()) {
             if (tab->id == tabId)
                 return tab.get();
@@ -3946,7 +4009,7 @@ static Tab* tabById(int tabId)
 std::vector<WindowInfo> windows()
 {
     std::vector<WindowInfo> out;
-    for (auto* window : BrowserWindow::all()) {
+    for (auto* window : normalWindows()) {
         WindowInfo info;
         info.id = window->id();
         info.focused = window->id() == s_lastFocusedWindowId;
@@ -3962,7 +4025,7 @@ std::vector<WindowInfo> windows()
 
 bool find(int tabId, Info& out)
 {
-    for (auto* window : BrowserWindow::all()) {
+    for (auto* window : normalWindows()) {
         int index = 0;
         for (auto& tab : window->tabList()) {
             if (tab->id == tabId) {
@@ -3975,9 +4038,9 @@ bool find(int tabId, Info& out)
     return false;
 }
 
-bool findByPage(WKPageRef page, Info& out)
+static bool findByPageIn(const std::vector<BrowserWindow*>& list, WKPageRef page, Info& out)
 {
-    for (auto* window : BrowserWindow::all()) {
+    for (auto* window : list) {
         int index = 0;
         for (auto& tab : window->tabList()) {
             if (tab->page == page) {
@@ -3990,13 +4053,24 @@ bool findByPage(WKPageRef page, Info& out)
     return false;
 }
 
+bool findByPage(WKPageRef page, Info& out)
+{
+    return findByPageIn(normalWindows(), page, out);
+}
+
+bool findByPageAnyWindow(WKPageRef page, Info& out)
+{
+    return findByPageIn(BrowserWindow::all(), page, out);
+}
+
 int lastFocusedWindow()
 {
-    for (auto* window : BrowserWindow::all()) {
+    auto list = normalWindows();
+    for (auto* window : list) {
         if (window->id() == s_lastFocusedWindowId)
             return window->id();
     }
-    return BrowserWindow::all().empty() ? -1 : BrowserWindow::all().back()->id();
+    return list.empty() ? -1 : list.back()->id();
 }
 
 int create(int windowId, const std::wstring& url, bool active, int index)
@@ -4032,7 +4106,7 @@ bool navigate(int tabId, const std::wstring& url)
 
 bool activate(int tabId)
 {
-    Tab* tab = tabById(tabId);
+    Tab* tab = tabById(tabId, true);
     if (!tab)
         return false;
     tab->window->selectTab(tabId);
@@ -4081,7 +4155,7 @@ bool goForward(int tabId)
 
 bool focusWindow(int windowId)
 {
-    BrowserWindow* window = windowById(windowId);
+    BrowserWindow* window = windowById(windowId, true);
     if (!window)
         return false;
     if (IsIconic(window->hwnd()))
@@ -4101,7 +4175,7 @@ bool closeWindow(int windowId)
 
 HWND windowHandle(int windowId)
 {
-    BrowserWindow* window = windowById(windowId);
+    BrowserWindow* window = windowById(windowId, true);
     return window ? window->hwnd() : nullptr;
 }
 

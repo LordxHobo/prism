@@ -54,6 +54,16 @@ void clearBrowsingData(bool cookiesAndSiteData, bool cache, std::function<void()
 WKPageConfigurationRef extensionPageConfiguration();
 WKPageConfigurationRef pageConfiguration();
 
+// Private windows: pages whose cookies, storage and cache live only in
+// memory, in a browsing context of their own (its web processes never get
+// extension content scripts). Every private window shares one such store
+// until the last one closes (releasePrivateData()). Returns null if this
+// WebKit can't make one.
+WKPageConfigurationRef privatePageConfiguration();
+bool isPrivateContext(WKContextRef);
+// The last private window closed: forget everything its pages stored.
+void releasePrivateData();
+
 // Applies per-page privacy settings (user agent, scale). Call on every new page.
 void configurePage(WKPageRef, double scaleFactor);
 

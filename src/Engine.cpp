@@ -31,6 +31,11 @@ static Ref<WKWebsiteDataStoreRef> s_dataStore;
 static Ref<WKPageConfigurationRef> s_pageConfiguration;
 static Ref<WKPreferencesRef> s_backgroundPreferences;
 static Ref<WKPageConfigurationRef> s_backgroundConfiguration;
+static Ref<WKContextRef> s_privateContext;
+static Ref<WKWebsiteDataStoreRef> s_privateStore;
+static Ref<WKPageConfigurationRef> s_privateConfiguration;
+static Ref<WKUserContentControllerRef> s_privateUserContent;
+static bool s_privateProxyEnabled = false;
 
 static Ref<WKPreferencesRef> createPreferences()
 {
@@ -84,8 +89,12 @@ void applyCookiePolicy()
     if (!s_dataStore || !WKWebsiteDataStoreGetHTTPCookieStore || !WKHTTPCookieStoreSetHTTPCookieAcceptPolicy)
         return;
     auto policy = settings::strictCookies() ? kWKHTTPCookieAcceptPolicyExclusivelyFromMainDocumentDomain : kWKHTTPCookieAcceptPolicyOnlyFromMainDocumentDomain;
-    if (auto cookieStore = WKWebsiteDataStoreGetHTTPCookieStore(s_dataStore.get()))
-        WKHTTPCookieStoreSetHTTPCookieAcceptPolicy(cookieStore, policy, nullptr, [](void*) { });
+    for (WKWebsiteDataStoreRef store : { s_dataStore.get(), s_privateStore.get() }) {
+        if (!store)
+            continue;
+        if (auto cookieStore = WKWebsiteDataStoreGetHTTPCookieStore(store))
+            WKHTTPCookieStoreSetHTTPCookieAcceptPolicy(cookieStore, policy, nullptr, [](void*) { });
+    }
 }
 
 namespace {
@@ -134,6 +143,8 @@ void clearBrowsingData(bool cookiesAndSiteData, bool cache, std::function<void()
     // Drop the initial count; reports immediately if nothing was started.
     clearStepFinished(operation);
 }
+
+static Ref<WKUserContentControllerRef> createUserContent(bool forExtensions);
 
 bool initialize(std::wstring& error)
 {
@@ -208,16 +219,34 @@ bool initialize(std::wstring& error)
     WKPageConfigurationSetWebsiteDataStore(s_pageConfiguration.get(), s_dataStore.get());
 
     // Extension content scripts and their messages to Prism.
-    s_userContent = Ref<WKUserContentControllerRef>::adopt(WKUserContentControllerCreate());
-    WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismExtension").get(),
-        [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { extensions::handleScriptMessage(message, reply); }, nullptr);
-    WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismShields").get(),
+    s_userContent = createUserContent(true);
+    WKPageConfigurationSetUserContentController(s_pageConfiguration.get(), s_userContent.get());
+
+    s_backgroundConfiguration = Ref<WKPageConfigurationRef>::adopt(WKPageConfigurationCreate());
+    WKPageConfigurationSetContext(s_backgroundConfiguration.get(), s_context.get());
+    WKPageConfigurationSetPreferences(s_backgroundConfiguration.get(), s_backgroundPreferences.get());
+    WKPageConfigurationSetWebsiteDataStore(s_backgroundConfiguration.get(), s_dataStore.get());
+    WKPageConfigurationSetUserContentController(s_backgroundConfiguration.get(), s_userContent.get());
+    return true;
+}
+
+// Script message handlers for pages. Private pages (extensions = false) get
+// Prism's own (Shields, reading view, passwords) but none for extensions.
+static Ref<WKUserContentControllerRef> createUserContent(bool forExtensions)
+{
+    auto controller = Ref<WKUserContentControllerRef>::adopt(WKUserContentControllerCreate());
+    WKUserContentControllerRef raw = controller.get();
+    if (forExtensions) {
+        WKUserContentControllerAddScriptMessageHandler(raw, stringUTF8("prismExtension").get(),
+            [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { extensions::handleScriptMessage(message, reply); }, nullptr);
+        WKUserContentControllerAddScriptMessageHandler(raw, stringUTF8("prismExtensionPage").get(),
+            [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { extensions::handlePageMessage(message, reply); }, nullptr);
+    }
+    WKUserContentControllerAddScriptMessageHandler(raw, stringUTF8("prismShields").get(),
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { shields::handleScriptMessage(message, reply); }, nullptr);
-    WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismExtensionPage").get(),
-        [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { extensions::handlePageMessage(message, reply); }, nullptr);
     // ACI reading views running in the page's world (no PrismBundle): only
     // with the per-start key the view was given.
-    WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismAci").get(),
+    WKUserContentControllerAddScriptMessageHandler(raw, stringUTF8("prismAci").get(),
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) {
             WKTypeRef body = WKScriptMessageGetBody(message);
             WKFrameInfoRef frame = WKScriptMessageGetFrameInfo(message);
@@ -230,7 +259,7 @@ bool initialize(std::wstring& error)
         }, nullptr);
     // Site icons the page fetched itself (when Prism couldn't): only for the
     // tab's own site, from its main frame.
-    WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismIcon").get(),
+    WKUserContentControllerAddScriptMessageHandler(raw, stringUTF8("prismIcon").get(),
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) {
             WKCompletionListenerComplete(reply, stringUTF8("null").get());
             WKTypeRef body = WKScriptMessageGetBody(message);
@@ -242,16 +271,9 @@ bool initialize(std::wstring& error)
                 return;
             icons::storeFromPage(tab.url, util::toUTF8(toWide(static_cast<WKStringRef>(body))));
         }, nullptr);
-    WKUserContentControllerAddScriptMessageHandler(s_userContent.get(), stringUTF8("prismPasswords").get(),
+    WKUserContentControllerAddScriptMessageHandler(raw, stringUTF8("prismPasswords").get(),
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { passwords::handleScriptMessage(message, reply); }, nullptr);
-    WKPageConfigurationSetUserContentController(s_pageConfiguration.get(), s_userContent.get());
-
-    s_backgroundConfiguration = Ref<WKPageConfigurationRef>::adopt(WKPageConfigurationCreate());
-    WKPageConfigurationSetContext(s_backgroundConfiguration.get(), s_context.get());
-    WKPageConfigurationSetPreferences(s_backgroundConfiguration.get(), s_backgroundPreferences.get());
-    WKPageConfigurationSetWebsiteDataStore(s_backgroundConfiguration.get(), s_dataStore.get());
-    WKPageConfigurationSetUserContentController(s_backgroundConfiguration.get(), s_userContent.get());
-    return true;
+    return controller;
 }
 
 WKPageConfigurationRef extensionPageConfiguration()
@@ -264,23 +286,31 @@ WKUserContentControllerRef userContentController()
     return s_userContent.get();
 }
 
+static void applyProxy(WKWebsiteDataStoreRef store, bool& enabled, bool wanted)
+{
+    if (!store)
+        return;
+    if (wanted && !enabled) {
+        uint16_t port = blocker::startProxy();
+        if (!port)
+            return;
+        // Local addresses (your router, local dev servers) skip the proxy.
+        WKWebsiteDataStoreEnableCustomNetworkProxySettings(store,
+            url(L"http://127.0.0.1:" + std::to_wstring(port)).get(), stringUTF8("localhost,.localhost,127.0.0.1,::1").get());
+        enabled = true;
+    } else if (!wanted && enabled) {
+        WKWebsiteDataStoreDisableNetworkProxySettings(store);
+        enabled = false;
+    }
+}
+
 void updateBlockingProxy()
 {
     if (!s_dataStore || !WKWebsiteDataStoreEnableCustomNetworkProxySettings || !WKWebsiteDataStoreDisableNetworkProxySettings)
         return;
     bool wanted = blocker::hasAnyLists();
-    if (wanted && !s_proxyEnabled) {
-        uint16_t port = blocker::startProxy();
-        if (!port)
-            return;
-        // Local addresses (your router, local dev servers) skip the proxy.
-        WKWebsiteDataStoreEnableCustomNetworkProxySettings(s_dataStore.get(),
-            url(L"http://127.0.0.1:" + std::to_wstring(port)).get(), stringUTF8("localhost,.localhost,127.0.0.1,::1").get());
-        s_proxyEnabled = true;
-    } else if (!wanted && s_proxyEnabled) {
-        WKWebsiteDataStoreDisableNetworkProxySettings(s_dataStore.get());
-        s_proxyEnabled = false;
-    }
+    applyProxy(s_dataStore.get(), s_proxyEnabled, wanted);
+    applyProxy(s_privateStore.get(), s_privateProxyEnabled, wanted);
 }
 
 bool blockingProxyActive()
@@ -292,10 +322,29 @@ bool blockingProxyActive()
 
 static std::map<std::string, std::vector<std::string>> s_userScripts;
 
-static void registerUserScript(const std::string& source)
+static void registerUserScript(WKUserContentControllerRef controller, const std::string& source)
 {
     auto script = Ref<WKUserScriptRef>::adopt(WKUserScriptCreateWithSource(stringUTF8(source).get(), kWKInjectAtDocumentStart, false));
-    WKUserContentControllerAddUserScript(s_userContent.get(), script.get());
+    WKUserContentControllerAddUserScript(controller, script.get());
+}
+
+// Private pages get every group except extensions'.
+static void registerAllUserScripts(WKUserContentControllerRef controller, bool withExtensions)
+{
+    WKUserContentControllerRemoveAllUserScripts(controller);
+    // Shields first, so its scriptlets run before extensions' scripts.
+    for (const char* name : { "shields", "extensions" }) {
+        if (!withExtensions && std::string(name) == "extensions")
+            continue;
+        for (auto& source : s_userScripts[name])
+            registerUserScript(controller, source);
+    }
+    for (auto& [name, sources] : s_userScripts) {
+        if (name == "shields" || name == "extensions")
+            continue;
+        for (auto& source : sources)
+            registerUserScript(controller, source);
+    }
 }
 
 void setUserScripts(const std::string& group, std::vector<std::string> sources)
@@ -303,18 +352,9 @@ void setUserScripts(const std::string& group, std::vector<std::string> sources)
     if (!s_userContent)
         return;
     s_userScripts[group] = std::move(sources);
-    WKUserContentControllerRemoveAllUserScripts(s_userContent.get());
-    // Shields first, so its scriptlets run before extensions' scripts.
-    for (const char* name : { "shields", "extensions" }) {
-        for (auto& source : s_userScripts[name])
-            registerUserScript(source);
-    }
-    for (auto& [name, sources] : s_userScripts) {
-        if (name == "shields" || name == "extensions")
-            continue;
-        for (auto& source : sources)
-            registerUserScript(source);
-    }
+    registerAllUserScripts(s_userContent.get(), true);
+    if (s_privateUserContent)
+        registerAllUserScripts(s_privateUserContent.get(), false);
 }
 
 void addUserScript(const std::string& group, const std::string& source)
@@ -322,7 +362,9 @@ void addUserScript(const std::string& group, const std::string& source)
     if (!s_userContent)
         return;
     s_userScripts[group].push_back(source);
-    registerUserScript(source);
+    registerUserScript(s_userContent.get(), source);
+    if (s_privateUserContent && group != "extensions")
+        registerUserScript(s_privateUserContent.get(), source);
 }
 
 void restartNetworkProcess()
@@ -339,6 +381,67 @@ WKContextRef context()
 WKPageConfigurationRef pageConfiguration()
 {
     return s_pageConfiguration.get();
+}
+
+WKPageConfigurationRef privatePageConfiguration()
+{
+    if (s_privateConfiguration)
+        return s_privateConfiguration.get();
+    if (!WKWebsiteDataStoreCreateNonPersistentDataStore || !s_context)
+        return nullptr;
+
+    // Its own browsing context: separate web processes, which PrismBundle
+    // starts without extension content scripts (RequestFilter.h). Shields
+    // still filters every request.
+    if (!s_privateContext) {
+        std::wstring bundle = requestfilter::bundlePath();
+        if (!bundle.empty() && WKContextConfigurationCreate && WKContextConfigurationSetInjectedBundlePath) {
+            Ref<WKContextConfigurationRef> configuration = Ref<WKContextConfigurationRef>::adopt(WKContextConfigurationCreate());
+            WKContextConfigurationSetInjectedBundlePath(configuration.get(), string(bundle).get());
+            s_privateContext = Ref<WKContextRef>::adopt(WKContextCreateWithConfiguration(configuration.get()));
+            requestfilter::initialize(s_privateContext.get());
+        } else {
+            s_privateContext = Ref<WKContextRef>::adopt(WKContextCreateWithConfiguration(nullptr));
+        }
+    }
+    if (!s_privateUserContent) {
+        s_privateUserContent = createUserContent(false);
+        registerAllUserScripts(s_privateUserContent.get(), false);
+    }
+
+    // Cookies, storage and cache only in memory.
+    s_privateStore = Ref<WKWebsiteDataStoreRef>::adopt(WKWebsiteDataStoreCreateNonPersistentDataStore());
+    if (!s_privateStore)
+        return nullptr;
+    if (WKWebsiteDataStoreSetResourceLoadStatisticsEnabled)
+        WKWebsiteDataStoreSetResourceLoadStatisticsEnabled(s_privateStore.get(), true);
+    s_privateProxyEnabled = false;
+    applyCookiePolicy();
+    updateBlockingProxy();
+
+    s_privateConfiguration = Ref<WKPageConfigurationRef>::adopt(WKPageConfigurationCreate());
+    WKPageConfigurationSetContext(s_privateConfiguration.get(), s_privateContext.get());
+    WKPageConfigurationSetPreferences(s_privateConfiguration.get(), s_preferences.get());
+    WKPageConfigurationSetWebsiteDataStore(s_privateConfiguration.get(), s_privateStore.get());
+    WKPageConfigurationSetUserContentController(s_privateConfiguration.get(), s_privateUserContent.get());
+    return s_privateConfiguration.get();
+}
+
+bool isPrivateContext(WKContextRef context)
+{
+    return context && context == s_privateContext.get();
+}
+
+void releasePrivateData()
+{
+    // Pages hold their own references to the store until they're gone; once
+    // the last one goes, so does everything it kept in memory. The next
+    // private window starts with an empty store.
+    if (s_privateStore && s_privateProxyEnabled && WKWebsiteDataStoreDisableNetworkProxySettings)
+        WKWebsiteDataStoreDisableNetworkProxySettings(s_privateStore.get());
+    s_privateProxyEnabled = false;
+    s_privateConfiguration.reset();
+    s_privateStore.reset();
 }
 
 void configurePage(WKPageRef page, double scaleFactor)

@@ -10,7 +10,8 @@
 #include <vector>
 
 // A read/write view of Prism's windows and tabs, for the extension APIs
-// (chrome.tabs, chrome.windows). Implemented in BrowserWindow.cpp.
+// (chrome.tabs, chrome.windows). Private windows aren't in it (except where
+// noted). Implemented in BrowserWindow.cpp.
 namespace tabs {
 
 struct Info {
@@ -22,6 +23,7 @@ struct Info {
     std::wstring url;
     std::wstring title;
     WKPageRef page { };
+    bool isPrivate { false };
 };
 
 struct WindowInfo {
@@ -35,6 +37,8 @@ struct WindowInfo {
 std::vector<WindowInfo> windows();
 bool find(int tabId, Info&);
 bool findByPage(WKPageRef, Info&);
+// The same, private windows included (for Prism's own features).
+bool findByPageAnyWindow(WKPageRef, Info&);
 int lastFocusedWindow(); // -1 if there's no window
 
 // Creates a tab (in `windowId`, or the last focused window if -1) and
@@ -47,6 +51,7 @@ bool close(int tabId);
 bool reload(int tabId, bool bypassCache);
 bool goBack(int tabId);
 bool goForward(int tabId);
+// activate, focusWindow and windowHandle also take private windows.
 bool focusWindow(int windowId);
 bool closeWindow(int windowId);
 // The browser window (HWND) a tab lives in, for dialogs and popups.

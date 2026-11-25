@@ -573,6 +573,7 @@ typedef struct WKPageContextMenuClientV4 {
     X(WKWebsiteDataStoreConfigurationSetServiceWorkerRegistrationDirectory, void, (WKWebsiteDataStoreConfigurationRef, WKStringRef)) \
     X(WKWebsiteDataStoreConfigurationSetCookieStorageFile, void, (WKWebsiteDataStoreConfigurationRef, WKStringRef)) \
     X(WKWebsiteDataStoreSetResourceLoadStatisticsEnabled, void, (WKWebsiteDataStoreRef, bool)) \
+    X(WKWebsiteDataStoreCreateNonPersistentDataStore, WKWebsiteDataStoreRef, ()) \
     X(WKWebsiteDataStoreGetHTTPCookieStore, WKHTTPCookieStoreRef, (WKWebsiteDataStoreRef)) \
     X(WKHTTPCookieStoreSetHTTPCookieAcceptPolicy, void, (WKHTTPCookieStoreRef, WKHTTPCookieAcceptPolicy, void*, WKHTTPCookieStoreSetHTTPCookieAcceptPolicyFunction)) \
     X(WKHTTPCookieStoreDeleteAllCookies, void, (WKHTTPCookieStoreRef, void*, WKCompletionFunction)) \

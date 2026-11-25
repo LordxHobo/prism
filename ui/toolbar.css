@@ -87,6 +87,10 @@ button {
   place-items: center;
 }
 
+.icon[hidden] {
+  display: none;
+}
+
 .icon.small {
   width: 26px;
   height: 24px;
@@ -1069,4 +1073,49 @@ button {
   border-radius: 999px;
   background: color-mix(in srgb, #e5484d 14%, transparent);
   margin-right: 2px;
+}
+
+/* ---- Private windows -------------------------------------------------------- */
+
+#privateBadge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px 0 8px;
+  margin: 0 2px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b9a5ff;
+  background: color-mix(in srgb, #8a6cff 20%, transparent);
+  cursor: default;
+}
+
+#privateBadge[hidden] {
+  display: none;
+}
+
+#privateBadge svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* After the palettes, so a private window always looks different. */
+:root.private[data-theme="dark"] {
+  --frame: #221b30;
+}
+
+:root.private[data-theme="light"] {
+  --frame: #e4ddf3;
+}
+
+:root.private[data-theme="light"] #privateBadge {
+  color: #5b3fd1;
 }

@@ -6,6 +6,7 @@
 #include "Perf.h"
 
 #include "Blocker.h"
+#include "Engine.h"
 #include "Extensions.h"
 #include "Shields.h"
 #include "Tabs.h"
@@ -21,7 +22,8 @@ namespace requestfilter {
 
 namespace {
 
-WKContextRef g_context = nullptr;
+// The main browsing context and, once a private window opened, the private one.
+std::vector<WKContextRef> g_contexts;
 bool g_active = false;
 unsigned long g_generation = 1;
 std::vector<std::shared_ptr<ExtensionRules>> g_extensionRules;
@@ -72,13 +74,15 @@ std::string configText()
 
 void sendConfig()
 {
-    if (!g_context)
+    if (g_contexts.empty())
         return;
     auto text = stringUTF8(configText());
-    if (WKContextSetInitializationUserDataForInjectedBundle)
-        WKContextSetInitializationUserDataForInjectedBundle(g_context, text.get());
-    if (WKContextPostMessageToInjectedBundle)
-        WKContextPostMessageToInjectedBundle(g_context, stringUTF8("prism:filter").get(), text.get());
+    for (WKContextRef context : g_contexts) {
+        if (WKContextSetInitializationUserDataForInjectedBundle)
+            WKContextSetInitializationUserDataForInjectedBundle(context, text.get());
+        if (WKContextPostMessageToInjectedBundle)
+            WKContextPostMessageToInjectedBundle(context, stringUTF8("prism:filter").get(), text.get());
+    }
 }
 
 void record(uint64_t pageId, const std::string& host)
@@ -135,7 +139,7 @@ std::vector<std::string> splitTabs(const std::string& text)
 // The bundle's question:
 // "<page id>\t<kind>\t<page URL>\t<request URL>\t<resource id>\t<frame id>\t<parent frame id>\t<method>\t<frame URL>"
 // The answer: "<0|1|r>\t<flags: n = don't cache>\t<request id to report the end of>\t<redirect URL>".
-void answer(const std::string& text, std::function<void(const std::string&)> reply)
+void answer(const std::string& text, bool privatePage, std::function<void(const std::string&)> reply)
 {
     std::vector<std::string> parts = splitTabs(text);
     if (parts.size() < 4) {
@@ -166,7 +170,8 @@ void answer(const std::string& text, std::function<void(const std::string&)> rep
         reply("r\tn\t\t" + verdict.url); // tracking parameters removed
         return;
     }
-    if (!extensions::webRequestListening()) {
+    // Extensions never see private windows' requests.
+    if (privatePage || !extensions::webRequestListening()) {
         reply("0");
         return;
     }
@@ -203,7 +208,7 @@ void answer(const std::string& text, std::function<void(const std::string&)> rep
     });
 }
 
-void didReceiveSynchronousMessageWithListener(WKContextRef, WKStringRef name, WKTypeRef body, WKMessageListenerRef listener, const void*)
+void didReceiveSynchronousMessageWithListener(WKContextRef context, WKStringRef name, WKTypeRef body, WKMessageListenerRef listener, const void*)
 {
     auto held = Ref<WKMessageListenerRef>::retain(listener);
     auto reply = [held](const std::string& text) {
@@ -211,9 +216,11 @@ void didReceiveSynchronousMessageWithListener(WKContextRef, WKStringRef name, WK
         WKMessageListenerSendReply(held.get(), value.get());
     };
     std::string message = toUTF8(name);
+    bool privateContext = engine::isPrivateContext(context);
     if (message == "prism:contentScripts?") {
-        // A new web process: the extension content scripts it should run.
-        reply(extensions::contentScriptsPayload());
+        // A new web process: the extension content scripts it should run
+        // (none in private windows).
+        reply(privateContext ? std::string("0\n") : extensions::contentScriptsPayload());
         return;
     }
     if (message != "prism:check") {
@@ -222,7 +229,7 @@ void didReceiveSynchronousMessageWithListener(WKContextRef, WKStringRef name, WK
     }
     g_active = true;
     perf::Scope busy("checking a page's request");
-    answer(bodyText(body), reply);
+    answer(bodyText(body), privateContext, reply);
 }
 
 // "prism:done": "<request id>\t<1 = finished | 0 = failed>\t<error>".
@@ -286,7 +293,9 @@ void initialize(WKContextRef context)
 {
     if (!WKContextSetInjectedBundleClient || !WKMessageListenerSendReply)
         return;
-    g_context = context;
+    if (std::find(g_contexts.begin(), g_contexts.end(), context) != g_contexts.end())
+        return;
+    g_contexts.push_back(context);
     static WKContextInjectedBundleClientV2 client = { };
     // Version 2: questions are answered through a listener, so Prism can
     // wait for extensions (webRequest) without blocking its own window.
