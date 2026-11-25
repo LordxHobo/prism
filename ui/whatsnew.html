@@ -22,12 +22,18 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.29</span>
+      <span class="version">Version 0.9.30</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Crash recovery</h2>
+    <h2 style="margin-top:0">Video picture</h2>
+    <p>Videos should now show their picture. The video player skipped drawing frames while it believed the page was hidden, and that flag never caught up on Windows. It now draws whenever the page asks.</p>
+    <p class="dim">Needs a new Prism WebKit build. Full screen video still isn't supported.</p>
+  </div>
+
+  <div class="card">
+    <h2>Crash recovery</h2>
     <ul>
       <li><strong>Your tabs come back:</strong> if Prism crashes, is force-closed or the PC shuts down with it open, the next start offers to reopen the tabs you had, groups included. (With "Continue where you left off" on, they simply reopen.)</li>
       <li><strong>Crashed background tabs reload</strong> when you switch to them, instead of showing the crash page.</li>

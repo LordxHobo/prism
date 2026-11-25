@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.30
+
+- No picture in video, cause: `MediaPlayerPrivateGStreamer::paint()` returned early while `m_pageIsVisible` was false. It defaults to false, and `MediaPlayer` only forwards the flag to a new engine when it's true, so the MSE player could keep it false even on a visible page. YouTube's ambient mode still worked because canvas copies go through `videoFrameForCurrentTime()`, not `paint()`. Without coordinated graphics (`webkit/patches/0001`), `paint()` no longer skips on that flag (the media element only asks for paint while on screen); it still skips while suspended.
+- Logging for the next round if it's still black: `paint()` logs why it didn't paint (suspended, no frame yet) at `webkit*:5`, each painted frame at `:6`, and failed frame conversions in `VideoFrameGStreamer` as `GST_PERFORMANCE` warnings.
+
 ## 0.9.29
 
 - **Crash recovery** (`src/Recovery.cpp/.h`): each run writes `running-<pid>.txt` (its process start time) in the data folder and removes it when the message loop ends. At startup, a note whose process is gone (or whose PID now belongs to another process) means that run didn't close normally; `session.txt` is then copied to `session-recovery.txt` before this run saves over it. Unless the session reopens anyway ("Continue where you left off"), the first window's info bar offers to reopen those tabs (`BrowserWindow::offerRecovery`, prompt kind `restore`): Restore opens them with `restoreSession({}, recoveryFile)` and closes the starting window if it only has the new tab; "Not now" discards them. An unanswered offer is made again at the next start.

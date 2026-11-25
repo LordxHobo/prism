@@ -7,6 +7,6 @@
 // Bump all of these together (the resource compiler can't join strings).
 #define PRISM_VERSION_MAJOR 0
 #define PRISM_VERSION_MINOR 9
-#define PRISM_VERSION_PATCH 29
-#define PRISM_VERSION_STRING "0.9.29"
-#define PRISM_VERSION_WSTRING L"0.9.29"
+#define PRISM_VERSION_PATCH 30
+#define PRISM_VERSION_STRING "0.9.30"
+#define PRISM_VERSION_WSTRING L"0.9.30"
