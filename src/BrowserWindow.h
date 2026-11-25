@@ -104,6 +104,9 @@ public:
 
     HWND hwnd() const { return m_hwnd; }
     bool isPrivate() const { return m_private; }
+    // Extensions run in (and see) this window: a normal one, or a private one
+    // with "Extensions in private windows" on.
+    bool extensionsHere() const;
     int id() const { return m_id; }
 
     // Keyboard shortcuts work no matter which part of the window has focus.

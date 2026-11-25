@@ -60,6 +60,8 @@ std::wstring groupStyle();
 // "forest", "rose" or "sepia".
 std::wstring palette();
 bool showHomeButton();
+// Extensions also run in (and see) private windows. Off by default.
+bool extensionsInPrivate();
 // Extensions whose buttons are hidden from the toolbar (still in the
 // Extensions menu).
 bool isActionHidden(const std::string& extensionId);

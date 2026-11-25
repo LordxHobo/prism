@@ -92,6 +92,7 @@ function render(settings) {
   }[settings.httpsMode] || '';
   $('stripTrackingParams').checked = !!settings.stripTrackingParams;
   $('fingerprinting').checked = !!settings.fingerprinting;
+  $('extensionsInPrivate').checked = !!settings.extensionsInPrivate;
   renderSegmented('tabLayout', settings.tabLayout);
   renderSegmented('groupStyle', settings.groupStyle);
   renderSegmented('newTabShortcuts', settings.newTabShortcuts);
@@ -298,6 +299,9 @@ $('stripTrackingParams').addEventListener('change', () => {
 });
 $('fingerprinting').addEventListener('change', () => {
   setSetting('fingerprinting', $('fingerprinting').checked ? '1' : '0');
+});
+$('extensionsInPrivate').addEventListener('change', () => {
+  setSetting('extensionsInPrivate', $('extensionsInPrivate').checked ? '1' : '0');
 });
 
 const PRIVACY_NAMES = { https: 'HTTPS', params: 'Remove tracking', fingerprinting: 'Fingerprinting protection' };

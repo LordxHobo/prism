@@ -10,8 +10,9 @@
 #include <vector>
 
 // A read/write view of Prism's windows and tabs, for the extension APIs
-// (chrome.tabs, chrome.windows). Private windows aren't in it (except where
-// noted). Implemented in BrowserWindow.cpp.
+// (chrome.tabs, chrome.windows). Private windows aren't in it unless
+// "Extensions in private windows" is on (except where noted). Implemented in
+// BrowserWindow.cpp.
 namespace tabs {
 
 struct Info {

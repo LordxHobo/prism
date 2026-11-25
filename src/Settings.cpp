@@ -201,6 +201,11 @@ bool showHomeButton()
     return util::readSetting(L"HomeButton", L"0") == L"1";
 }
 
+bool extensionsInPrivate()
+{
+    return util::readSetting(L"ExtensionsInPrivate", L"0") == L"1";
+}
+
 namespace {
 
 std::vector<std::string> hiddenActions()
@@ -289,6 +294,7 @@ std::string toJSON()
     json += ",\"httpsMode\":" + util::jsonString([] { std::wstring m = util::readSetting(L"HttpsMode", L"first"); return m == L"off" || m == L"only" ? m : std::wstring(L"first"); }());
     json += ",\"stripTrackingParams\":" + jsonBool(util::readSetting(L"StripTrackingParams", L"1") != L"0");
     json += ",\"fingerprinting\":" + jsonBool(util::readSetting(L"Fingerprinting", L"1") != L"0");
+    json += ",\"extensionsInPrivate\":" + jsonBool(extensionsInPrivate());
     json += ",\"tabLayout\":" + util::jsonString(verticalTabs() ? L"vertical" : L"horizontal");
     json += ",\"groupStyle\":" + util::jsonString(groupStyle());
     json += ",\"palette\":" + util::jsonString(palette());
@@ -374,6 +380,10 @@ bool set(const std::wstring& key, const std::wstring& value)
         if (!isOneOf(value, { L"default", L"midnight", L"nord", L"forest", L"rose", L"sepia" }))
             return false;
         util::writeSetting(L"Palette", value);
+    } else if (key == L"extensionsInPrivate") {
+        if (!isOneOf(value, { L"0", L"1" }))
+            return false;
+        util::writeSetting(L"ExtensionsInPrivate", value);
     } else if (key == L"homeButton") {
         if (!isOneOf(value, { L"0", L"1" }))
             return false;

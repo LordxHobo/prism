@@ -199,7 +199,7 @@
   </p>
   <div class="private-info">
     <p><strong>You're in a private window.</strong> Prism doesn't keep your history, the tabs you had open or site icons from here. Cookies and site data stay in memory and are deleted when you close the last private window.</p>
-    <p>Extensions don't run here, and sites can't ask for your location or to send notifications.</p>
+    <p id="privateExtensions">Extensions don't run here (Settings › Privacy can allow them), and sites can't ask for your location or to send notifications.</p>
     <p>Bookmarks you make, passwords you choose to save and files you download are kept. Sites, your network and your internet provider can still see what you visit.</p>
   </div>
 </main>
@@ -230,6 +230,8 @@ function renderShortcuts(data) {
     document.body.classList.add('private');
     document.getElementById('heading').textContent = 'Private window';
     document.title = 'New private tab';
+    if (data.extensions)
+      document.getElementById('privateExtensions').textContent = 'Your extensions run here too (you allowed them in Settings › Privacy), and they can see what you do. Sites can\'t ask for your location or to send notifications.';
   }
   if (data.background) {
     document.body.classList.add('has-background');

@@ -8,6 +8,7 @@
 #include "Blocker.h"
 #include "Engine.h"
 #include "Extensions.h"
+#include "Settings.h"
 #include "Shields.h"
 #include "Tabs.h"
 #include "Util.h"
@@ -170,8 +171,8 @@ void answer(const std::string& text, bool privatePage, std::function<void(const 
         reply("r\tn\t\t" + verdict.url); // tracking parameters removed
         return;
     }
-    // Extensions never see private windows' requests.
-    if (privatePage || !extensions::webRequestListening()) {
+    // Extensions don't see private windows' requests (unless allowed).
+    if ((privatePage && !settings::extensionsInPrivate()) || !extensions::webRequestListening()) {
         reply("0");
         return;
     }
@@ -219,8 +220,8 @@ void didReceiveSynchronousMessageWithListener(WKContextRef context, WKStringRef 
     bool privateContext = engine::isPrivateContext(context);
     if (message == "prism:contentScripts?") {
         // A new web process: the extension content scripts it should run
-        // (none in private windows).
-        reply(privateContext ? std::string("0\n") : extensions::contentScriptsPayload());
+        // (none in private windows, unless extensions are allowed there).
+        reply(privateContext && !settings::extensionsInPrivate() ? std::string("0\n") : extensions::contentScriptsPayload());
         return;
     }
     if (message != "prism:check") {

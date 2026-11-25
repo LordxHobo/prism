@@ -192,7 +192,7 @@ bool isAudioAddress(const std::string& url)
 void getContextMenuAsync(WKPageRef page, WKArrayRef proposed, WKContextMenuListenerRef listener, WKHitTestResultRef hit, WKTypeRef, const void* clientInfo)
 {
     Tab* tab = tabFromClientInfo(clientInfo);
-    if (!tab || tab->extensionPages || tab->window->isPrivate() || !extensions::hasMenuItems()) {
+    if (!tab || tab->extensionPages || !tab->window->extensionsHere() || !extensions::hasMenuItems()) {
         WKContextMenuListenerUseContextMenuItems(listener, proposed);
         return;
     }
@@ -353,6 +353,11 @@ BrowserWindow* BrowserWindow::open(const std::vector<std::wstring>& startURLs, i
     return open(startURLs, activeIndex, { }, { });
 }
 
+bool BrowserWindow::extensionsHere() const
+{
+    return !m_private || settings::extensionsInPrivate();
+}
+
 BrowserWindow* BrowserWindow::openPrivate(const std::vector<std::wstring>& startURLs)
 {
     if (!engine::privatePageConfiguration()) {
@@ -460,7 +465,7 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         m_id = ++s_nextWindowId;
         s_lastFocusedWindowId = m_id;
         s_windows.push_back(this);
-        if (!m_private)
+        if (extensionsHere())
             extensions::windowCreated(m_id);
         updateTheme();
         updateIcon();
@@ -538,7 +543,7 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             focusContent();
             if (s_lastFocusedWindowId != m_id) {
                 s_lastFocusedWindowId = m_id;
-                if (!m_private)
+                if (extensionsHere())
                     extensions::windowFocused(m_id);
             }
         }
@@ -627,7 +632,7 @@ void BrowserWindow::onDestroy()
     m_toolbarReady = false;
     KillTimer(m_hwnd, kSessionTimer);
     KillTimer(m_hwnd, kStatsTimer);
-    if (!m_private) {
+    if (extensionsHere()) {
         for (auto& tab : m_tabs)
             extensions::tabRemoved(tab->id, m_id, true);
         extensions::windowRemoved(m_id);
@@ -869,6 +874,8 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
         pushState();
         if (GetForegroundWindow() == m_hwnd)
             focusContent();
+    } else if (command == L"toolbarError") {
+        perf::note("Toolbar: " + util::toUTF8(argument.substr(0, 400)));
     } else if (command == L"navigate") {
         if (tab && !argument.empty()) {
             navigate(tab, argument);
@@ -1077,10 +1084,24 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
 
 void BrowserWindow::runToolbarScript(const std::string& script)
 {
+    // A script that fails (a syntax error in the state, an exception) is
+    // noted in Settings > About > Performance, so a toolbar that stops
+    // updating can be explained.
+    auto reportFailure = [](WKTypeRef, WKErrorRef error, void*) {
+        if (!error)
+            return;
+        std::string text = "The toolbar couldn't run an update";
+        if (auto description = Ref<WKStringRef>::adopt(WKErrorCopyLocalizedDescription(error)); description)
+            text += ": " + util::toUTF8(toWide(description.get()));
+        perf::note(text);
+    };
+    // Ends with undefined, so only real failures come back as errors (not
+    // results WebKit can't pass back).
+    auto source = stringUTF8(script + "\n;undefined;");
     if (m_toolbarPage && m_toolbarReady)
-        WKPageEvaluateJavaScriptInMainFrame(m_toolbarPage, stringUTF8(script).get(), nullptr, nullptr);
+        WKPageEvaluateJavaScriptInMainFrame(m_toolbarPage, source.get(), nullptr, reportFailure);
     if (m_sidebarPage && m_sidebarReady)
-        WKPageEvaluateJavaScriptInMainFrame(m_sidebarPage, stringUTF8(script).get(), nullptr, nullptr);
+        WKPageEvaluateJavaScriptInMainFrame(m_sidebarPage, source.get(), nullptr, reportFailure);
 }
 
 void BrowserWindow::pushState()
@@ -1097,8 +1118,9 @@ void BrowserWindow::pushState()
     if (Tab* active = activeTab())
         json += ",\"blockedHere\":" + std::to_string(requestfilter::blockedOnPage(active->page));
     json += ",\"active\":" + std::to_string(m_activeTabId);
-    json += ",\"actions\":" + (m_private ? std::string("[]") : extensions::actionsJSON(m_activeTabId));
+    json += ",\"actions\":" + (extensionsHere() ? extensions::actionsJSON(m_activeTabId) : std::string("[]"));
     json += ",\"private\":" + std::string(m_private ? "true" : "false");
+    json += ",\"extensionsHere\":" + std::string(extensionsHere() ? "true" : "false");
     json += ",\"palette\":" + util::jsonString(settings::palette());
     json += ",\"vertical\":" + std::string(settings::verticalTabs() ? "true" : "false");
     json += ",\"sidebarCollapsed\":" + std::string(settings::verticalTabsCollapsed() ? "true" : "false");
@@ -1270,7 +1292,7 @@ Tab* BrowserWindow::newTab(const std::wstring& url, bool select, WKPageConfigura
     } else
         m_tabs.push_back(std::move(tab));
 
-    if (!m_private)
+    if (extensionsHere())
         extensions::tabCreated(raw->id);
     if (!url.empty())
         navigate(raw, url);
@@ -1384,7 +1406,7 @@ void BrowserWindow::selectTab(int id)
     updateTitle();
     pushState();
     scheduleSessionSave();
-    if ((!previous || previous != next) && !m_private)
+    if ((!previous || previous != next) && extensionsHere())
         extensions::tabActivated(id, m_id);
 }
 
@@ -1413,7 +1435,7 @@ void BrowserWindow::closeTab(int id)
 
     bool wasActive = tab->id == m_activeTabId;
     denyPrompts(tab);
-    if (!m_private)
+    if (extensionsHere())
         extensions::tabRemoved(tab->id, m_id, m_tabs.size() == 1);
     detachClients(tab->page);
     scheduleSessionSave();
@@ -1518,7 +1540,7 @@ void BrowserWindow::tabStateChanged(const void* clientInfo)
 
 void BrowserWindow::tabChanged(Tab* tab)
 {
-    if (!m_private)
+    if (extensionsHere())
         extensions::tabUpdated(tab->id);
     if (tab->id == m_activeTabId)
         updateTitle();
@@ -1740,6 +1762,7 @@ void BrowserWindow::answerRecovery(const std::wstring& answer)
 void BrowserWindow::settingsChanged()
 {
     engine::applyCookiePolicy();
+    engine::privateExtensionsChanged();
     privacy::settingsChanged();
     for (auto* window : s_windows) {
         window->updateTheme();
@@ -1850,7 +1873,7 @@ static std::wstring newTabBackgroundPath()
     return path;
 }
 
-static std::string newTabData(bool isPrivate)
+static std::string newTabData(bool isPrivate, bool extensionsHere)
 {
     // Private windows don't show your most visited sites.
     std::wstring mode = settings::newTabShortcuts();
@@ -1895,7 +1918,8 @@ static std::string newTabData(bool isPrivate)
         backgroundURL = util::fileURLFromPath(background) + L"?" + std::to_wstring(info.ftLastWriteTime.dwLowDateTime);
     }
     json += ",\"background\":" + util::jsonString(backgroundURL);
-    json += ",\"private\":" + std::string(isPrivate ? "true" : "false") + "}";
+    json += ",\"private\":" + std::string(isPrivate ? "true" : "false");
+    json += ",\"extensions\":" + std::string(extensionsHere ? "true" : "false") + "}";
     return json;
 }
 
@@ -2099,13 +2123,13 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
             else if (isSettings && command.rfind(L"usercss.", 0) == 0)
                 answer = usercss::handleCommand(command.substr(8), argument);
             else if (isNewTab && command == L"data")
-                answer = newTabData(tab->window->m_private);
+                answer = newTabData(tab->window->m_private, tab->window->extensionsHere());
             else if (isNewTab && command == L"hide") {
                 // A site removed from the shortcuts.
                 std::wstring hidden = util::readSetting(L"NewTabHidden", L"");
                 if (argument.find(L',') == std::wstring::npos && !argument.empty())
                     util::writeSetting(L"NewTabHidden", hidden.empty() ? argument : hidden + L"," + argument);
-                answer = newTabData(tab->window->m_private);
+                answer = newTabData(tab->window->m_private, tab->window->extensionsHere());
             } else if (isNewTab && command == L"open") {
                 size_t split = argument.find(L'\n');
                 std::wstring url = argument.substr(0, split);
@@ -2220,7 +2244,7 @@ void BrowserWindow::decidePolicyForNavigationAction(WKPageRef, WKNavigationActio
                 // No target frame means a new window: that's a top-level page too.
                 if (!frame || WKFrameInfoGetIsMainFrame(frame.get())) {
                     blocker::noteTopLevelSite(util::toUTF8(hostOf(target)));
-                    if (!tab->window->m_private)
+                    if (tab->window->extensionsHere())
                         extensions::webRequestMainFrame(tab->id, util::toUTF8(target));
                 }
                 // Right after Prism starts (tabs from last time), wait for
@@ -2515,7 +2539,7 @@ bool BrowserWindow::handleShortcut(const MSG& msg)
     UINT key = static_cast<UINT>(msg.wParam);
     if (key == VK_CONTROL || key == VK_SHIFT || key == VK_MENU)
         return false;
-    if (m_private)
+    if (!extensionsHere())
         return false; // extensions don't run in private windows
     Tab* tab = activeTab();
     return extensions::runShortcut(m_hwnd, tab ? tab->id : -1, key, GetKeyState(VK_CONTROL) < 0, GetKeyState(VK_MENU) < 0, GetKeyState(VK_SHIFT) < 0);
@@ -3970,13 +3994,13 @@ static Info infoFor(const BrowserWindow* window, const Tab* tab, int index)
     return info;
 }
 
-// Extensions never see private windows: everything here skips them unless
-// it says otherwise.
+// Extensions don't see private windows (unless "Extensions in private
+// windows" is on): everything here skips them unless it says otherwise.
 static std::vector<BrowserWindow*> normalWindows()
 {
     std::vector<BrowserWindow*> out;
     for (auto* window : BrowserWindow::all()) {
-        if (!window->isPrivate())
+        if (window->extensionsHere())
             out.push_back(window);
     }
     return out;
@@ -3987,7 +4011,7 @@ static BrowserWindow* windowById(int windowId, bool includePrivate = false)
     if (windowId < 0)
         windowId = lastFocusedWindow();
     for (auto* window : BrowserWindow::all()) {
-        if (window->id() == windowId && (includePrivate || !window->isPrivate()))
+        if (window->id() == windowId && (includePrivate || window->extensionsHere()))
             return window;
     }
     return nullptr;
@@ -3996,7 +4020,7 @@ static BrowserWindow* windowById(int windowId, bool includePrivate = false)
 static Tab* tabById(int tabId, bool includePrivate = false)
 {
     for (auto* window : BrowserWindow::all()) {
-        if (window->isPrivate() && !includePrivate)
+        if (!window->extensionsHere() && !includePrivate)
             continue;
         for (auto& tab : window->tabList()) {
             if (tab->id == tabId)

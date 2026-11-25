@@ -63,6 +63,11 @@ WKPageConfigurationRef privatePageConfiguration();
 bool isPrivateContext(WKContextRef);
 // The last private window closed: forget everything its pages stored.
 void releasePrivateData();
+// The private browsing context, if a private window was ever opened.
+WKContextRef privateContextIfCreated();
+// "Extensions in private windows" may have changed: gives private pages
+// opened from now on extension content scripts, or takes them away.
+void privateExtensionsChanged();
 
 // Applies per-page privacy settings (user agent, scale). Call on every new page.
 void configurePage(WKPageRef, double scaleFactor);

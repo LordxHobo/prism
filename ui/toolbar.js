@@ -541,6 +541,12 @@ function renderActions() {
       const img = document.createElement('img');
       img.alt = '';
       img.draggable = false;
+      img.addEventListener('error', () => {
+        img.dataset.failed = img.getAttribute('src') || '';
+        img.hidden = true;
+        button.classList.add('letter');
+      });
+      img.addEventListener('load', () => { delete img.dataset.failed; });
       const badge = document.createElement('span');
       badge.className = 'badge';
       button.append(img, badge);
@@ -557,7 +563,11 @@ function renderActions() {
     if (container.children[index] !== button) container.insertBefore(button, container.children[index] || null);
     const img = button.firstChild;
     if (action.icon && img.getAttribute('src') !== action.icon) img.src = action.icon;
-    img.hidden = !action.icon;
+    // No icon (or one that doesn't load): the extension's first letter.
+    const showLetter = !action.icon || img.dataset.failed === action.icon;
+    img.hidden = showLetter;
+    button.classList.toggle('letter', showLetter);
+    button.dataset.letter = ((action.name || action.title || '?').trim()[0] || '?').toUpperCase();
     button.title = action.title || action.name;
     button.setAttribute('aria-label', action.title || action.name);
     button.disabled = false;
@@ -755,6 +765,26 @@ function renderFindbar() {
 
 // ---- Called by Prism -----------------------------------------------------------
 
+function reportError(where, error) {
+  const message = (error && (error.stack || error.message)) || String(error);
+  try {
+    send('toolbarError', (isSidebar ? 'sidebar, ' : '') + where + ': ' + String(message).slice(0, 380));
+  } catch (e) {
+    // nothing more to do
+  }
+}
+
+function safely(where, render) {
+  try {
+    render();
+  } catch (error) {
+    reportError(where, error);
+  }
+}
+
+window.addEventListener('error', (event) => reportError('script', event.error || event.message));
+window.addEventListener('unhandledrejection', (event) => reportError('promise', event.reason));
+
 window.prism = {
   update(newState) {
     const previousActive = state && state.active;
@@ -764,9 +794,12 @@ window.prism = {
     root.dataset.palette = state.palette || 'default';
     root.classList.toggle('compact', !!state.compact);
     root.classList.toggle('private', !!state.private);
+    const extensionsHere = state.extensionsHere !== false;
     $('privateBadge').hidden = !state.private;
-    // Extensions don't run in private windows.
-    $('extensions').hidden = !!state.private;
+    $('privateBadge').title = 'Private window: no history, and cookies and site data are deleted when you close the last private window.'
+      + (extensionsHere ? ' Your extensions run here too (Settings > Privacy).' : ' Extensions don\'t run here (Settings > Privacy can allow them).');
+    // Extensions don't run in private windows unless that's allowed.
+    $('extensions').hidden = !extensionsHere;
     $('home').hidden = !state.homeButton;
     if (/^#[0-9a-f]{6}$/i.test(state.accent || '')) {
       root.style.setProperty('--accent', state.accent);
@@ -775,14 +808,16 @@ window.prism = {
     // Switching tabs throws away anything half-typed in the address bar.
     if (previousActive !== state.active)
       editing = false;
-    renderTabs();
-    renderNavigation();
-    renderActions();
-    renderStar();
-    renderBookmarksBar();
-    renderInfobar();
-    renderFindbar();
-    prism.stats(state.blocked || 0, state.blockedHere || 0);
+    // Each part on its own: one that fails mustn't leave the others stale
+    // (it's reported to Prism, in Settings > About > Performance).
+    safely('tabs', renderTabs);
+    safely('navigation', renderNavigation);
+    safely('extension buttons', renderActions);
+    safely('star', renderStar);
+    safely('bookmarks bar', renderBookmarksBar);
+    safely('info bar', renderInfobar);
+    safely('find bar', renderFindbar);
+    safely('stats', () => prism.stats(state.blocked || 0, state.blockedHere || 0));
   },
 
   // How many ads and trackers were blocked (Prism Shields and extensions).
@@ -1024,3 +1059,8 @@ $('findNext').addEventListener('click', () => send('findNext'));
 $('findClose').addEventListener('click', () => send('findClose'));
 
 send(isSidebar ? 'sidebarReady' : 'ready');
+// If no state arrived (or the first one failed), ask again.
+setTimeout(() => {
+  if (!state || !document.querySelector('#tabs .tab, #tabs .group-chip, #subtabs .tab'))
+    send(isSidebar ? 'sidebarReady' : 'ready');
+}, 1500);

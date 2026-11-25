@@ -230,17 +230,40 @@ bool initialize(std::wstring& error)
     return true;
 }
 
-// Script message handlers for pages. Private pages (extensions = false) get
-// Prism's own (Shields, reading view, passwords) but none for extensions.
+// Messages from extension scripts in private windows only count with
+// "Extensions in private windows" on.
+static bool extensionMessageAllowed(WKScriptMessageRef message)
+{
+    if (settings::extensionsInPrivate())
+        return true;
+    WKFrameInfoRef frame = WKScriptMessageGetFrameInfo(message);
+    tabs::Info tab;
+    return !(frame && tabs::findByPageAnyWindow(WKFrameInfoGetPage(frame), tab) && tab.isPrivate);
+}
+
+// Script message handlers for pages: extensions' and Prism's own (Shields,
+// reading view, passwords).
 static Ref<WKUserContentControllerRef> createUserContent(bool forExtensions)
 {
     auto controller = Ref<WKUserContentControllerRef>::adopt(WKUserContentControllerCreate());
     WKUserContentControllerRef raw = controller.get();
     if (forExtensions) {
         WKUserContentControllerAddScriptMessageHandler(raw, stringUTF8("prismExtension").get(),
-            [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { extensions::handleScriptMessage(message, reply); }, nullptr);
+            [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) {
+                if (!extensionMessageAllowed(message)) {
+                    WKCompletionListenerComplete(reply, stringUTF8("null").get());
+                    return;
+                }
+                extensions::handleScriptMessage(message, reply);
+            }, nullptr);
         WKUserContentControllerAddScriptMessageHandler(raw, stringUTF8("prismExtensionPage").get(),
-            [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { extensions::handlePageMessage(message, reply); }, nullptr);
+            [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) {
+                if (!extensionMessageAllowed(message)) {
+                    WKCompletionListenerComplete(reply, stringUTF8("null").get());
+                    return;
+                }
+                extensions::handlePageMessage(message, reply);
+            }, nullptr);
     }
     WKUserContentControllerAddScriptMessageHandler(raw, stringUTF8("prismShields").get(),
         [](WKScriptMessageRef message, WKCompletionListenerRef reply, const void*) { shields::handleScriptMessage(message, reply); }, nullptr);
@@ -354,7 +377,7 @@ void setUserScripts(const std::string& group, std::vector<std::string> sources)
     s_userScripts[group] = std::move(sources);
     registerAllUserScripts(s_userContent.get(), true);
     if (s_privateUserContent)
-        registerAllUserScripts(s_privateUserContent.get(), false);
+        registerAllUserScripts(s_privateUserContent.get(), settings::extensionsInPrivate());
 }
 
 void addUserScript(const std::string& group, const std::string& source)
@@ -363,7 +386,7 @@ void addUserScript(const std::string& group, const std::string& source)
         return;
     s_userScripts[group].push_back(source);
     registerUserScript(s_userContent.get(), source);
-    if (s_privateUserContent && group != "extensions")
+    if (s_privateUserContent && (group != "extensions" || settings::extensionsInPrivate()))
         registerUserScript(s_privateUserContent.get(), source);
 }
 
@@ -405,8 +428,8 @@ WKPageConfigurationRef privatePageConfiguration()
         }
     }
     if (!s_privateUserContent) {
-        s_privateUserContent = createUserContent(false);
-        registerAllUserScripts(s_privateUserContent.get(), false);
+        s_privateUserContent = createUserContent(true);
+        registerAllUserScripts(s_privateUserContent.get(), settings::extensionsInPrivate());
     }
 
     // Cookies, storage and cache only in memory.
@@ -425,6 +448,29 @@ WKPageConfigurationRef privatePageConfiguration()
     WKPageConfigurationSetWebsiteDataStore(s_privateConfiguration.get(), s_privateStore.get());
     WKPageConfigurationSetUserContentController(s_privateConfiguration.get(), s_privateUserContent.get());
     return s_privateConfiguration.get();
+}
+
+WKContextRef privateContextIfCreated()
+{
+    return s_privateContext.get();
+}
+
+void privateExtensionsChanged()
+{
+    static int s_last = -1;
+    int now = settings::extensionsInPrivate() ? 1 : 0;
+    if (now == s_last)
+        return;
+    s_last = now;
+    if (s_privateUserContent)
+        registerAllUserScripts(s_privateUserContent.get(), now == 1);
+    // PrismBundle in private web processes: the scripts for documents loaded
+    // from now on (none when off).
+    if (s_privateContext && WKContextPostMessageToInjectedBundle) {
+        std::string payload = now ? extensions::contentScriptsPayload() : std::string("0\n");
+        if (!payload.empty())
+            WKContextPostMessageToInjectedBundle(s_privateContext.get(), stringUTF8("prism:contentScripts").get(), stringUTF8(payload).get());
+    }
 }
 
 bool isPrivateContext(WKContextRef context)

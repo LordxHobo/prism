@@ -132,6 +132,20 @@ void noteWebRequest(const std::string& extensionName, unsigned long long waitedM
     stats.sinceLine = 0;
 }
 
+void note(const std::string& text)
+{
+    static std::map<std::string, ULONGLONG> s_last;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    ULONGLONG now = GetTickCount64();
+    auto found = s_last.find(text);
+    if (found != s_last.end() && now - found->second < 60000)
+        return;
+    if (s_last.size() > 64)
+        s_last.clear();
+    s_last[text] = now;
+    addLine(text.size() > 400 ? text.substr(0, 400) + "..." : text);
+}
+
 std::string logJSON()
 {
     std::lock_guard<std::mutex> lock(g_mutex);

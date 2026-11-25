@@ -30,6 +30,10 @@ private:
 // An extension's webRequest listener made a page's request wait.
 void noteWebRequest(const std::string& extensionName, unsigned long long waitedMs, bool timedOut, const std::string& url);
 
+// A problem worth seeing in the log (e.g. the toolbar's script failed).
+// The same text is noted once a minute at most.
+void note(const std::string& text);
+
 // {"lines": [...], "stalls": n, "longest": ms}
 std::string logJSON();
 void clear();

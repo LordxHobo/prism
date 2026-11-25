@@ -151,6 +151,24 @@ button {
   pointer-events: none;
 }
 
+.icon.action img[hidden],
+.icon.action .badge[hidden] {
+  display: none;
+}
+
+.icon.action.letter::before {
+  content: attr(data-letter);
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--button-active);
+}
+
 .icon.action.dimmed img {
   filter: grayscale(1);
   opacity: 0.45;

@@ -13,6 +13,7 @@
 #include "Shields.h"
 #include "BrowserWindow.h"
 #include "Engine.h"
+#include "Settings.h"
 #include "Http.h"
 #include "Json.h"
 #include "Perf.h"
@@ -834,6 +835,9 @@ void rebuildUserScripts()
         // Every web process gets them (they ask at start, see RequestFilter).
         g_contentPayload = std::to_string(count) + "\n" + payload;
         if (WKContextRef context = engine::context())
+            WKContextPostMessageToInjectedBundle(context, wk::stringUTF8("prism:contentScripts").get(), wk::stringUTF8(g_contentPayload).get());
+        // Private windows' processes too, when extensions may run there.
+        if (WKContextRef context = engine::privateContextIfCreated(); context && settings::extensionsInPrivate())
             WKContextPostMessageToInjectedBundle(context, wk::stringUTF8("prism:contentScripts").get(), wk::stringUTF8(g_contentPayload).get());
     }
 }

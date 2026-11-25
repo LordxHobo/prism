@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.33
+
+- **"Extensions in private windows"** (Settings › Privacy, `ExtensionsInPrivate`, off by default). `BrowserWindow::extensionsHere()` (normal window, or private with the setting on) gates extension events, action buttons, context menu items, shortcuts and webRequest main-frame notes; `tabs::` includes private windows with it. The private user content controller now has the extension message handlers too, refusing messages from private pages while the setting is off (`extensionMessageAllowed`), and registers the "extensions" user-script group when it's on. PrismBundle in private processes gets the content scripts at start (`prism:contentScripts?`) and on changes (`Extensions.cpp`), and `engine::privateExtensionsChanged()` (from `settingsChanged`) sends the scripts or none when the setting flips; it applies to documents loaded afterwards. RequestFilter passes private requests to webRequest listeners only with the setting on. Toolbar (`extensionsHere` in the state) and the private new tab page say which applies.
+- Toolbar: every part of `prism.update` runs on its own (`safely`), so one that throws doesn't leave the others (the tabs) stale; errors, uncaught exceptions and rejected promises go to Prism (`toolbarError`) and into the performance log (`perf::note`, once a minute per message). `runToolbarScript` notes scripts WebKit couldn't run (syntax errors, exceptions). If the toolbar has no tabs 1.5 s after loading, it sends `ready` again.
+- Extension buttons whose icon is missing or doesn't load show the extension's first letter.
+
 ## 0.9.32
 
 - **Private windows** (`BrowserWindow::openPrivate`, menu, Ctrl+Shift+N, bookmark menu "Open in private window").
