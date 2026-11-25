@@ -157,8 +157,8 @@ switch ($Step) {
 'Tools' {
     git config --global core.longpaths true
 
-    Write-Step 'gperf and ninja'
-    Invoke-Checked choco @('install', 'gperf', 'ninja', '-y', '--no-progress')
+    Write-Step 'ninja'
+    Invoke-Checked choco @('install', 'ninja', '-y', '--no-progress')
 
     Write-Step 'LLVM (clang-cl)'
     Invoke-Checked choco @('upgrade', 'llvm', '-y', '--no-progress')
@@ -174,6 +174,29 @@ switch ($Step) {
     Add-Env 'VCPKG_ROOT' $VcpkgRoot
     Add-Env 'VCPKG_DEFAULT_BINARY_CACHE' $VcpkgCache
     Add-Env 'VCPKG_DISABLE_METRICS' '1'
+
+    # gperf: Chocolatey's package first. It has failed on newer runner
+    # images (no gperf on the PATH afterwards), so look for gperf.exe in the
+    # package, and build it with vcpkg if it still isn't there.
+    Write-Step 'gperf'
+    & choco install gperf -y --no-progress
+    if ($LASTEXITCODE -ne 0) { Write-Host "    Chocolatey's gperf failed (exit code $LASTEXITCODE)" }
+    $gperf = Get-Command gperf.exe -ErrorAction SilentlyContinue
+    if (-not $gperf) {
+        $found = Get-ChildItem 'C:\ProgramData\chocolatey\lib\gperf' -Recurse -Filter gperf.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) {
+            Add-Path $found.DirectoryName
+        } else {
+            Write-Host '    No gperf from Chocolatey; building it with vcpkg'
+            Invoke-Checked "$VcpkgRoot\vcpkg.exe" @('install', 'gperf:x64-windows', '--classic')
+            $found = Get-ChildItem "$VcpkgRoot\installed\x64-windows\tools" -Recurse -Filter gperf.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { Add-Path $found.DirectoryName }
+        }
+        $gperf = Get-Command gperf.exe -ErrorAction SilentlyContinue
+        if (-not $gperf) { throw 'gperf is missing: neither Chocolatey nor vcpkg provided gperf.exe' }
+    }
+    Write-Host "    $($gperf.Source)"
+    & $gperf.Source --version | Select-Object -First 1
 
     Write-Step "GStreamer $GstVersion (MSVC x86_64, runtime and development files)"
     $installer = "$env:RUNNER_TEMP\gstreamer-$GstVersion.exe"
