@@ -1,7 +1,7 @@
 {
-    "revision":  "webkit-858a9be9a1f1-r11",
-    "url":  "https://github.com/LordxHobo/prism/releases/download/webkit-858a9be9a1f1-r11/webkit-win64.zip",
+    "revision":  "webkit-858a9be9a1f1-r12",
+    "url":  "https://github.com/LordxHobo/prism/releases/download/webkit-858a9be9a1f1-r12/webkit-win64.zip",
     "builder":  "prism",
     "source":  "prism",
-    "updated":  "2026-11-24"
+    "updated":  "2026-11-25"
 }
