@@ -109,6 +109,41 @@ function Get-NeededClang {
     return 0
 }
 
+# Installs the newest LLVM release (at least `$Minimum`) from GitHub and
+# returns the folder with its clang-cl.exe. LLVM's Windows downloads changed
+# over time (an .exe installer, then an MSI); the plain archives have been
+# there throughout, so those come first.
+function Install-LLVMFromGitHub([int]$Minimum) {
+    $releases = gh api 'repos/llvm/llvm-project/releases?per_page=15' | ConvertFrom-Json
+    foreach ($release in $releases) {
+        if ($release.prerelease -or $release.draft -or $release.tag_name -notmatch '^llvmorg-(\d+)\.') { continue }
+        if ([int]$Matches[1] -lt $Minimum) { continue }
+        $archive = $release.assets | Where-Object { $_.name -match '^(LLVM-[\d.]+-Windows-X64|clang\+llvm-[\d.]+-x86_64-pc-windows-msvc)\.tar\.xz$' } | Select-Object -First 1
+        if ($archive) {
+            Write-Host "    Unpacking $($archive.name)"
+            $file = "$env:RUNNER_TEMP\$($archive.name)"
+            Get-File $archive.browser_download_url $file
+            New-Item -ItemType Directory -Force -Path 'C:\llvm' | Out-Null
+            & tar -xf $file -C 'C:\llvm'
+            if ($LASTEXITCODE -ne 0) { throw "Unpacking $($archive.name) failed (exit code $LASTEXITCODE)" }
+            $clang = Get-ChildItem 'C:\llvm' -Recurse -Filter clang-cl.exe | Select-Object -First 1
+            if (-not $clang) { throw "$($archive.name) has no clang-cl.exe" }
+            return $clang.DirectoryName
+        }
+        $installer = $release.assets | Where-Object { $_.name -match '^LLVM-[\d.]+-win64\.exe$' } | Select-Object -First 1
+        if ($installer) {
+            Write-Host "    Installing $($installer.name)"
+            $file = "$env:RUNNER_TEMP\$($installer.name)"
+            Get-File $installer.browser_download_url $file
+            $process = Start-Process -FilePath $file -Wait -PassThru -ArgumentList @('/S', '/D=C:\llvm')
+            if ($process.ExitCode -ne 0) { throw "The LLVM installer failed (exit code $($process.ExitCode))" }
+            return 'C:\llvm\bin'
+        }
+        Write-Host "    $($release.tag_name): no Windows x64 archive or installer; trying an older release"
+    }
+    throw "no LLVM $Minimum or newer for Windows on GitHub"
+}
+
 function Get-ClangMajor([string]$Command) {
     $text = (& $Command --version 2>$null) -join ' '
     if ($text -match 'clang version (\d+)') { return [int]$Matches[1] }
@@ -182,25 +217,29 @@ switch ($Step) {
     Invoke-Checked choco @('install', 'ninja', '-y', '--no-progress')
 
     Write-Step 'LLVM (clang-cl)'
-    Invoke-Checked choco @('upgrade', 'llvm', '-y', '--no-progress')
+    # Not fatal: the version check below decides whether what we have works.
+    & choco upgrade llvm -y --no-progress
     Add-Path 'C:\Program Files\LLVM\bin'
     # Visual Studio's C++ library only accepts Clang from a certain version
     # (STL1000), and runner images update it before Chocolatey's LLVM
-    # catches up. Then take LLVM's newest release from GitHub.
+    # catches up (or Chocolatey's feed times out). Then try once more, and
+    # then take LLVM from its GitHub releases.
     $needed = Get-NeededClang
     $have = Get-ClangMajor 'clang-cl'
     Write-Host "    Clang $have; Visual Studio's C++ library wants Clang $needed or newer"
     if ($needed -and $have -lt $needed) {
-        $release = gh api repos/llvm/llvm-project/releases/latest | ConvertFrom-Json
-        $asset = $release.assets | Where-Object { $_.name -match '^LLVM-[\d.]+-win64\.exe$' } | Select-Object -First 1
-        if (-not $asset) { throw "LLVM $($release.tag_name) has no Windows installer" }
-        Write-Host "    Installing $($asset.name)"
-        $installer = "$env:RUNNER_TEMP\$($asset.name)"
-        Get-File $asset.browser_download_url $installer
-        $process = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @('/S', '/D=C:\llvm')
-        if ($process.ExitCode -ne 0) { throw "The LLVM installer failed (exit code $($process.ExitCode))" }
-        Add-Path 'C:\llvm\bin'
+        Write-Host '    Asking Chocolatey once more'
+        & choco upgrade llvm -y --no-progress
         $have = Get-ClangMajor 'clang-cl'
+    }
+    if ($needed -and $have -lt $needed) {
+        try {
+            $bin = Install-LLVMFromGitHub $needed
+            Add-Path $bin
+            $have = Get-ClangMajor 'clang-cl'
+        } catch {
+            Write-Host "    LLVM from GitHub didn't work: $_"
+        }
     }
     if ($needed -and $have -lt $needed) {
         # Still too old: Visual Studio's documented override for the check.
