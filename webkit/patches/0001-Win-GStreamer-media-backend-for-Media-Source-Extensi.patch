@@ -38,6 +38,11 @@ binaries:
   triggerRepaint() asks for a repaint for each one. paint() doesn't skip
   frames on the page-visibility flag there, and logs why it doesn't
   paint; failed frame conversions are logged too.
+- The page's tiles are painted through the GPU process, whose graphics
+  context only takes video frames on Cocoa. Without coordinated graphics,
+  paint() converts each frame to an image once and paints that image, and
+  RemoteGraphicsContextProxy::drawVideoFrame() falls back to painting the
+  frame as an image off Cocoa.
 ---
  Source/WTF/wtf/Platform.h                     |  5 +-
  Source/WTF/wtf/PlatformWin.cmake              | 29 ++++++
@@ -58,14 +63,15 @@ binaries:
  .../gstreamer/GStreamerRegistryScanner.cpp    |  2 +
  .../GStreamerVideoFrameConverter.cpp          |  2 +
  .../gstreamer/ImageDecoderGStreamer.cpp       |  5 +
- .../gstreamer/MediaPlayerPrivateGStreamer.cpp | 25 ++++-
- .../gstreamer/MediaPlayerPrivateGStreamer.h   |  9 +-
+ .../gstreamer/MediaPlayerPrivateGStreamer.cpp | 48 +++++++++-
+ .../gstreamer/MediaPlayerPrivateGStreamer.h   | 13 ++-
  .../gstreamer/VideoFrameGStreamer.cpp         |  9 +-
  .../graphics/gstreamer/mse/AppendPipeline.cpp |  1 -
  Source/WebKit/PlatformWin.cmake               | 22 +++++
+ .../graphics/RemoteGraphicsContextProxy.cpp   |  3 +
  Source/cmake/GStreamerWin.cmake               | 95 +++++++++++++++++++
  Source/cmake/OptionsWin.cmake                 | 20 +++-
- 26 files changed, 311 insertions(+), 27 deletions(-)
+ 27 files changed, 341 insertions(+), 27 deletions(-)
  create mode 100644 Source/cmake/GStreamerWin.cmake
 
 diff --git a/Source/WTF/wtf/Platform.h b/Source/WTF/wtf/Platform.h
@@ -553,7 +559,7 @@ index 75f95d0c1..e1ba1cf43 100644
      m_error = false;
  
 diff --git a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
-index 3b62489b8..f73849f0b 100644
+index 3b62489b8..992ec3b8f 100644
 --- a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
 +++ b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
 @@ -32,7 +32,9 @@
@@ -614,16 +620,41 @@ index 3b62489b8..f73849f0b 100644
  
          sample = m_sample;
          videoInfo = m_videoInfo;
-@@ -4441,6 +4463,7 @@ void MediaPlayerPrivateGStreamer::paint(GraphicsContext& context, const FloatRec
+@@ -4440,8 +4462,32 @@ void MediaPlayerPrivateGStreamer::paint(GraphicsContext& context, const FloatRec
+     if (!presentationSize)
          return;
  
++#if USE(COORDINATED_GRAPHICS)
      Ref frame = VideoFrameGStreamer::create(WTF::move(sample), { IntSize(*presentationSize), WTF::move(videoInfo) });
 +    GST_LOG_OBJECT(pipeline(), "Painting a %.0fx%.0f frame into %.0fx%.0f at %.0f,%.0f", presentationSize->width(), presentationSize->height(), rect.width(), rect.height(), rect.x(), rect.y());
      context.drawVideoFrame(frame, rect, ShouldDiscardAlpha::No, { m_videoSourceOrientation });
++#else
++    // The page's tiles can be painted through a GPU-process graphics context,
++    // which can't take video frames on this port, so paint the frame as an
++    // image. The same frame is painted once per tile; convert it only once,
++    // so the GPU process gets one image per frame.
++    if (sample.get() != m_paintedSample.get()) {
++        Ref frame = VideoFrameGStreamer::create(GRefPtr<GstSample>(sample), { IntSize(*presentationSize), WTF::move(videoInfo) });
++        m_paintedImage = frame->copyNativeImage();
++        m_paintedSample = WTF::move(sample);
++        if (!m_paintedImage)
++            GST_WARNING_OBJECT(pipeline(), "Couldn't make an image from a %.0fx%.0f frame", presentationSize->width(), presentationSize->height());
++    }
++    RefPtr image = m_paintedImage;
++    if (!image)
++        return;
++    GST_LOG_OBJECT(pipeline(), "Painting a %.0fx%.0f frame into %.0fx%.0f at %.0f,%.0f", presentationSize->width(), presentationSize->height(), rect.width(), rect.height(), rect.x(), rect.y());
++    FloatSize imageSize = image->size();
++    ImageOrientation orientation = m_videoSourceOrientation;
++    if (orientation.usesWidthAsHeight())
++        imageSize = imageSize.transposedSize();
++    context.drawNativeImage(*image, rect, { { }, imageSize }, { orientation, image->hasAlpha() ? CompositeOperator::SourceOver : CompositeOperator::Copy });
++#endif
  }
  
+ ColorSpace MediaPlayerPrivateGStreamer::colorSpace()
 diff --git a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.h b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.h
-index 289315c6c..fd5a3c54f 100644
+index 289315c6c..593359231 100644
 --- a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.h
 +++ b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.h
 @@ -190,7 +190,13 @@ public:
@@ -650,6 +681,17 @@ index 289315c6c..fd5a3c54f 100644
 +#if USE(COORDINATED_GRAPHICS)
      void pushTextureToCompositor(IsDuplicateSample, IsInitialBuffer = IsInitialBuffer::No);
  #endif
+ 
+@@ -461,6 +468,10 @@ protected:
+     bool m_isBeingDestroyed WTF_GUARDED_BY_LOCK(m_drawLock) { false };
+ 
+     ImageOrientation m_videoSourceOrientation;
++#if !USE(COORDINATED_GRAPHICS)
++    GRefPtr<GstSample> m_paintedSample;
++    RefPtr<NativeImage> m_paintedImage;
++#endif
+ 
+     DataMutex<VideoSinkStats> m_videoSinkStatsDataMutex;
  
 diff --git a/Source/WebCore/platform/graphics/gstreamer/VideoFrameGStreamer.cpp b/Source/WebCore/platform/graphics/gstreamer/VideoFrameGStreamer.cpp
 index fa4c69dea..fb0708c1f 100644
@@ -714,6 +756,20 @@ index 9135f7b80..6c2f03960 100644
 +        GLib::Gio
 +    )
 +endif ()
+diff --git a/Source/WebKit/WebProcess/GPU/graphics/RemoteGraphicsContextProxy.cpp b/Source/WebKit/WebProcess/GPU/graphics/RemoteGraphicsContextProxy.cpp
+index 2d1f7deaa..5bdcf5cf3 100644
+--- a/Source/WebKit/WebProcess/GPU/graphics/RemoteGraphicsContextProxy.cpp
++++ b/Source/WebKit/WebProcess/GPU/graphics/RemoteGraphicsContextProxy.cpp
+@@ -659,6 +659,9 @@ void RemoteGraphicsContextProxy::drawVideoFrame(const VideoFrame& frame, const F
+     if (!sharedVideoFrame)
+         return;
+     send(Messages::RemoteGraphicsContext::DrawVideoFrame(WTF::move(*sharedVideoFrame), destination, shouldDiscardAlpha, options));
++#else
++    // No shared video frames here: send the frame as an image.
++    GraphicsContext::drawVideoFrame(frame, destination, shouldDiscardAlpha, options);
+ #endif
+ }
+ #endif
 diff --git a/Source/cmake/GStreamerWin.cmake b/Source/cmake/GStreamerWin.cmake
 new file mode 100644
 index 000000000..5412f726d
