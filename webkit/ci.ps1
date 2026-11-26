@@ -144,6 +144,30 @@ function Install-LLVMFromGitHub([int]$Minimum) {
     throw "no LLVM $Minimum or newer for Windows on GitHub"
 }
 
+# How many failed steps in a ninja log printed no compiler error at all.
+function Test-QuietFailures([string]$Log) {
+    $quiet = 0
+    $inBlock = $false
+    $hadError = $true
+    foreach ($line in [IO.File]::ReadLines($Log)) {
+        if ($line.StartsWith('FAILED: ')) {
+            if ($inBlock -and -not $hadError) { $quiet++ }
+            $inBlock = $true
+            $hadError = $false
+            continue
+        }
+        if (-not $inBlock) { continue }
+        if ($line -match '^\[\d+/\d+\] ') {
+            if (-not $hadError) { $quiet++ }
+            $inBlock = $false
+            continue
+        }
+        if ($line -match '(: (fatal )?error|error LNK\d+|^error: |: undefined symbol|lld-link: error)') { $hadError = $true }
+    }
+    if ($inBlock -and -not $hadError) { $quiet++ }
+    return $quiet
+}
+
 function Get-ClangMajor([string]$Command) {
     $text = (& $Command --version 2>$null) -join ' '
     if ($text -match 'clang version (\d+)') { return [int]$Matches[1] }
@@ -466,6 +490,34 @@ switch ($Step) {
         & taskkill.exe /PID $ninja.Id /T /F | Out-Null
         Start-Sleep -Seconds 10
     }
+
+    # Many steps failing at once with no compiler message usually means the
+    # machine ran out of memory (clang-cl dies quietly). Try what failed once
+    # more with fewer compilers at a time; real errors just fail again.
+    if ($finished -and $ninja.ExitCode -ne 0) {
+        $quiet = Test-QuietFailures $log
+        $left = [int]($deadline - [DateTimeOffset]::UtcNow).TotalSeconds
+        if ($quiet -and $left -gt 900) {
+            $jobs = [math]::Max(1, [int]([Environment]::ProcessorCount / 2))
+            Write-Step "$quiet step(s) failed without a compiler message; trying again with $jobs at a time"
+            Add-Summary "Stage $Stage`: $quiet step(s) failed without a compiler message (likely out of memory); retried with -j $jobs"
+            Copy-Item $log "$log.first" -Force
+            $ninja = Start-Process -FilePath ninja -ArgumentList @('-C', $Build, '-k', '0', '-j', "$jobs") -NoNewWindow -PassThru `
+                -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+            $handle = $ninja.Handle
+            $finished = $false
+            while ([DateTimeOffset]::UtcNow -lt $deadline) {
+                if ($ninja.WaitForExit(600000)) { $finished = $true; break }
+                $last = Get-Content $log -Tail 1 -ErrorAction SilentlyContinue
+                Write-Host "    $([DateTime]::UtcNow.ToString('HH:mm')) $last"
+            }
+            if (-not $finished) {
+                Write-Step 'Out of time for this stage: stopping ninja'
+                & taskkill.exe /PID $ninja.Id /T /F | Out-Null
+                Start-Sleep -Seconds 10
+            }
+        }
+    }
     Get-Content "$log.err" -ErrorAction SilentlyContinue | Add-Content $log
 
     # Collect what failed, with the compiler's messages.
@@ -478,19 +530,38 @@ switch ($Step) {
     $inBlock = $false
     $keep = 0
     $blockLines = 0
+    $blockHadError = $true
+    $blockStart = @()
+    $noteQuiet = {
+        # A failed step without any recognized message: keep what it printed
+        # (after the command line), so the summary still says something.
+        if (-not $blockHadError) {
+            $text = @($blockStart | Where-Object { $_.Trim() -and $_.Length -lt 1000 } | Select-Object -First 6)
+            foreach ($t in $text) { $errors.Add($t) }
+            $first = if ($text.Count) { ($text[0] -replace '\s+', ' ') } else { '(no output: the compiler stopped without a message; out of memory?)' }
+            if ($first.Length -gt 220) { $first = $first.Substring(0, 220) }
+            $key = "[no compiler error] $first"
+            $messages[$key] = 1 + [int]$messages[$key]
+        }
+    }
     foreach ($line in [IO.File]::ReadLines($log)) {
         if ($line.StartsWith('FAILED: ')) {
+            if ($inBlock) { & $noteQuiet }
             if ($errors.Count) { $errors.Add('') }
             $errors.Add($line)
             $inBlock = $true
+            $blockHadError = $false
+            $blockStart = @()
             $keep = 0
             $blockLines = 0
             continue
         }
         if (-not $inBlock) { continue }
-        if ($line -match '^\[\d+/\d+\] ') { $inBlock = $false; continue }
-        $isError = $line -match '(: (fatal )?error|error LNK\d+|^error: |: undefined symbol|lld-link: error)'
+        if ($line -match '^\[\d+/\d+\] ') { & $noteQuiet; $inBlock = $false; $blockHadError = $true; continue }
+        if ($inBlock -and $blockStart.Count -lt 8 -and -not $line.StartsWith('C:\') -and $line -notmatch 'clang-cl(\.exe)?"? ') { $blockStart += $line }
+        $isError = $line -match '(: (fatal )?error|error LNK\d+|^error: |: undefined symbol|lld-link: error|LLVM ERROR|out of memory|PLEASE submit a bug report|Exception Code|not enough memory|cannot allocate)'
         if ($isError) {
+            $blockHadError = $true
             $keep = 6
             $message = ($line -replace '^.*?: (fatal )?error: ', '') -replace '\s+', ' '
             if ($message.Length -gt 220) { $message = $message.Substring(0, 220) }
@@ -505,6 +576,7 @@ switch ($Step) {
         }
         if ($errors.Count -ge 8000) { break }
     }
+    if ($inBlock) { & $noteQuiet }
     if ($messages.Count) {
         $distinct = $messages.GetEnumerator() | Sort-Object -Property Value -Descending | ForEach-Object { '{0,5}x  {1}' -f $_.Value, $_.Key }
         $errors.InsertRange(0, [string[]](@('Distinct errors (count, message):') + $distinct + @('', '----', '')))
