@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.37
+
+- Extensions: `importScripts()` in background service workers ran each file with indirect `eval`, where top-level `const`/`let`/`class` stay inside that eval. A worker using them from an imported file (Enhancer for YouTube: `ReferenceError: Can't find variable: config` in service-worker.js) failed. Each file now runs as an inline classic `<script>` (synchronous on insertion, shared global lexical scope); its errors are rethrown, and `eval` remains the fallback if inline scripts can't run.
+
 ## 0.9.36
 
 - Fix: 0.9.35 listed the new full screen functions (`WKViewSetFullScreenClient`, `WKViewExitFullScreen`, `WKPreferencesSetFullScreenEnabled`) as required, so Prism refused to start on a WebKit without patches/0003 ("This WebKit build is missing functions"). They're optional now: without them, full screen stays off.

@@ -489,7 +489,7 @@
     setUninstallURL: resolved(undefined),
     requestUpdateCheck: resolved({ status: 'no_update' }),
     getPlatformInfo: resolved({ os: 'win', arch: 'x86-64', nacl_arch: 'x86-64' }),
-    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.36', buildID: '0' }),
+    getBrowserInfo: resolved({ name: 'Prism', vendor: 'Prism', version: '0.9.37', buildID: '0' }),
     getContexts: withCallback((filter) => call('runtime.getContexts').then((contexts) => {
       const f = filter || {};
       const has = (list, value) => !Array.isArray(list) || list.includes(value);
@@ -1144,12 +1144,32 @@
 
   // ---- Background service workers run as a page -------------------------------------------------------
   if (isBackground && config.worker) {
+    // Like a worker's importScripts: each file runs as its own classic
+    // script, so its top-level const/let/class (e.g. "const config = ...")
+    // are visible to the scripts after it. An inline <script> runs at once
+    // when inserted; eval is the fallback if inline scripts are blocked
+    // (eval keeps const/let to itself, which is why it isn't the first try).
     window.importScripts = (...urls) => {
       for (const url of urls) {
         const absolute = new URL(url, location.href).href;
         const code = window.prompt('prism-ext:read\n' + absolute);
         if (code === null) throw new Error("importScripts: couldn't load " + url);
-        (0, eval)(code + '\n//# sourceURL=' + absolute);
+        const marker = '__prismImported' + Math.random().toString(36).slice(2);
+        let failure = null;
+        const onError = (event) => { failure = event.error || new Error(event.message); };
+        window.addEventListener('error', onError);
+        const script = document.createElement('script');
+        script.textContent = code + '\n;window.' + marker + ' = true;\n//# sourceURL=' + absolute;
+        (document.head || document.documentElement).appendChild(script);
+        script.remove();
+        window.removeEventListener('error', onError);
+        if (window[marker]) {
+          delete window[marker];
+        } else if (failure) {
+          throw failure;
+        } else {
+          (0, eval)(code + '\n//# sourceURL=' + absolute);
+        }
       }
     };
     window.registration = {
