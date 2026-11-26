@@ -338,7 +338,7 @@ void downloadDidFail(WKDownloadRef, WKErrorRef error, WKDataRef, const void* cli
 bool BrowserWindow::registerWindowClass(HINSTANCE instance)
 {
     WNDCLASSEXW wc = { sizeof(wc) };
-    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
     wc.lpfnWndProc = windowProc;
     wc.hInstance = instance;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
@@ -520,12 +520,85 @@ LRESULT BrowserWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         layout();
         return 0;
     }
+    case WM_SETCURSOR:
+        if (LOWORD(lParam) == HTCLIENT && reinterpret_cast<HWND>(wParam) == m_hwnd) {
+            POINT point;
+            GetCursorPos(&point);
+            ScreenToClient(m_hwnd, &point);
+            if (int divider = m_splitDrag ? m_splitDrag : splitDividerAt(point)) {
+                SetCursor(LoadCursorW(nullptr, divider == 1 ? IDC_SIZEWE : IDC_SIZENS));
+                return TRUE;
+            }
+        }
+        break;
+    case WM_LBUTTONDOWN: {
+        POINT point = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        if (int divider = splitDividerAt(point)) {
+            m_splitDrag = divider;
+            SetCapture(m_hwnd);
+            return 0;
+        }
+        break;
+    }
+    case WM_LBUTTONDBLCLK: {
+        // Double-click a line between split tabs: equal sizes again.
+        POINT point = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        if (int divider = splitDividerAt(point)) {
+            (divider == 1 ? m_splitX : m_splitY) = 0.5;
+            layout();
+            return 0;
+        }
+        break;
+    }
+    case WM_MOUSEMOVE:
+        if (m_splitDrag) {
+            RECT content = contentRect();
+            POINT point = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            if (m_splitDrag == 1 && content.right > content.left)
+                m_splitX = std::clamp(double(point.x - content.left) / (content.right - content.left), 0.15, 0.85);
+            else if (m_splitDrag == 2 && content.bottom > content.top)
+                m_splitY = std::clamp(double(point.y - content.top) / (content.bottom - content.top), 0.15, 0.85);
+            layout();
+            return 0;
+        }
+        break;
+    case WM_LBUTTONUP:
+    case WM_CAPTURECHANGED:
+        if (m_splitDrag) {
+            m_splitDrag = 0;
+            if (message == WM_LBUTTONUP)
+                ReleaseCapture();
+            return 0;
+        }
+        break;
     case WM_ERASEBKGND: {
         RECT rect;
         GetClientRect(m_hwnd, &rect);
         HBRUSH brush = CreateSolidBrush(m_darkTheme ? RGB(28, 28, 32) : RGB(246, 246, 248));
         FillRect(reinterpret_cast<HDC>(wParam), &rect, brush);
         DeleteObject(brush);
+        // Split view: a line in the accent color around the selected tab.
+        auto shown = shownTabs();
+        if (shown.size() > 1) {
+            auto rects = splitRects(contentRect(), shown.size());
+            for (size_t i = 0; i < shown.size(); ++i) {
+                if (shown[i]->id != m_activeTabId)
+                    continue;
+                std::wstring accent = settings::accent();
+                unsigned long rgb = accent.size() > 1 ? wcstoul(accent.c_str() + 1, nullptr, 16) : 0x3aa0ffUL;
+                HBRUSH frame = CreateSolidBrush(RGB((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff));
+                RECT around = rects[i];
+                int pad = std::max(1, splitGap() / 2);
+                InflateRect(&around, pad, pad);
+                RECT content = contentRect();
+                IntersectRect(&around, &around, &content);
+                for (int line = 0; line < pad; ++line) {
+                    FrameRect(reinterpret_cast<HDC>(wParam), &around, frame);
+                    InflateRect(&around, -1, -1);
+                }
+                DeleteObject(frame);
+            }
+        }
         return 1;
     }
     case WM_SETTINGCHANGE:
@@ -810,8 +883,149 @@ void BrowserWindow::layout()
         MoveWindow(m_toolbarHwnd, 0, 0, width, toolbar, TRUE);
     if (m_sidebarHwnd && !fullScreen)
         MoveWindow(m_sidebarHwnd, 0, toolbar, side, std::max(0, height - toolbar), TRUE);
-    if (auto* tab = activeTab())
-        MoveWindow(tab->hwnd, side, toolbar, std::max(0, width - side), std::max(0, height - toolbar), TRUE);
+
+    RECT content = { side, toolbar, std::max(side, width), std::max(toolbar, height) };
+    auto shown = shownTabs();
+    auto rects = splitRects(content, shown.size());
+    for (size_t i = 0; i < shown.size(); ++i) {
+        const RECT& r = rects[i];
+        MoveWindow(shown[i]->hwnd, r.left, r.top, std::max(0L, r.right - r.left), std::max(0L, r.bottom - r.top), TRUE);
+    }
+    // Split view: every tab in it is on screen; the others aren't.
+    for (auto& tab : m_tabs) {
+        bool show = std::find(shown.begin(), shown.end(), tab.get()) != shown.end();
+        if (show == !!IsWindowVisible(tab->hwnd) || (!show && !inSplit(tab->id)))
+            continue;
+        WKViewSetIsInWindow(tab->view.get(), show);
+        ShowWindow(tab->hwnd, show ? SW_SHOWNA : SW_HIDE);
+    }
+    // The frame around the selected tab of a split view.
+    InvalidateRect(m_hwnd, nullptr, TRUE);
+}
+
+int BrowserWindow::splitGap() const
+{
+    return std::max(2, static_cast<int>(std::lround(6 * scaleFactor())));
+}
+
+RECT BrowserWindow::contentRect() const
+{
+    RECT client;
+    GetClientRect(m_hwnd, &client);
+    if (isFullScreen())
+        return client;
+    int width = client.right - client.left;
+    int height = client.bottom - client.top;
+    int toolbar = std::min(toolbarHeight(), height);
+    int side = std::min(sidebarWidth(), width / 2);
+    return { side, toolbar, width, height };
+}
+
+bool BrowserWindow::inSplit(int tabId) const
+{
+    return std::find(m_split.begin(), m_split.end(), tabId) != m_split.end();
+}
+
+std::vector<Tab*> BrowserWindow::shownTabs() const
+{
+    Tab* active = activeTab();
+    if (!active)
+        return { };
+    if (isFullScreen() || m_split.size() < 2 || !inSplit(active->id))
+        return { active };
+    std::vector<Tab*> shown;
+    for (int id : m_split) {
+        if (Tab* tab = findTab(id))
+            shown.push_back(tab);
+    }
+    return shown;
+}
+
+// Two: side by side. Three: one on the left, two stacked on the right.
+// Four: a grid. m_splitX and m_splitY are where the lines between them are.
+std::vector<RECT> BrowserWindow::splitRects(const RECT& content, size_t count) const
+{
+    if (count <= 1)
+        return { content };
+    int gap = splitGap();
+    int w = content.right - content.left;
+    int h = content.bottom - content.top;
+    int x = content.left + static_cast<int>(std::lround(w * m_splitX));
+    int y = content.top + static_cast<int>(std::lround(h * m_splitY));
+    RECT left = { content.left, content.top, x - gap / 2, content.bottom };
+    RECT right = { x + (gap - gap / 2), content.top, content.right, content.bottom };
+    if (count == 2)
+        return { left, right };
+    RECT rightTop = { right.left, content.top, right.right, y - gap / 2 };
+    RECT rightBottom = { right.left, y + (gap - gap / 2), right.right, content.bottom };
+    if (count == 3)
+        return { left, rightTop, rightBottom };
+    RECT leftTop = { left.left, content.top, left.right, y - gap / 2 };
+    RECT leftBottom = { left.left, y + (gap - gap / 2), left.right, content.bottom };
+    return { leftTop, rightTop, leftBottom, rightBottom };
+}
+
+int BrowserWindow::splitDividerAt(POINT point) const
+{
+    auto shown = shownTabs();
+    if (shown.size() < 2)
+        return 0;
+    RECT content = contentRect();
+    if (!PtInRect(&content, point))
+        return 0;
+    int gap = splitGap();
+    int w = content.right - content.left;
+    int h = content.bottom - content.top;
+    int x = content.left + static_cast<int>(std::lround(w * m_splitX));
+    int y = content.top + static_cast<int>(std::lround(h * m_splitY));
+    int slop = gap / 2 + 2;
+    if (std::abs(point.x - x) <= slop)
+        return 1;
+    if (shown.size() >= 3 && std::abs(point.y - y) <= slop && (shown.size() == 4 || point.x > x))
+        return 2;
+    return 0;
+}
+
+void BrowserWindow::splitWith(Tab* tab, Tab* other)
+{
+    if (!tab)
+        return;
+    if (!inSplit(tab->id))
+        m_split = { tab->id };
+    if (m_split.size() >= kMaxSplit)
+        return;
+    if (!other) {
+        other = newTab(L"prism://newtab", false);
+        if (!other)
+            return;
+        moveTab(other->id, indexOf(tab) + 1);
+    }
+    if (other == tab || inSplit(other->id))
+        return;
+    m_split.push_back(other->id);
+    m_splitX = 0.5;
+    m_splitY = 0.5;
+    selectTab(other->id);
+    layout();
+    pushState();
+}
+
+void BrowserWindow::removeFromSplit(int tabId)
+{
+    if (!inSplit(tabId))
+        return;
+    m_split.erase(std::remove(m_split.begin(), m_split.end(), tabId), m_split.end());
+    if (m_split.size() < 2)
+        m_split.clear();
+    layout();
+    pushState();
+}
+
+void BrowserWindow::closeSplit()
+{
+    m_split.clear();
+    layout();
+    pushState();
 }
 
 // ---------------------------------------------------------------------------
@@ -993,6 +1207,12 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
         int id = 0, index = 0, group = 0;
         swscanf_s(argument.c_str(), L"%d\n%d\n%d", &id, &index, &group);
         moveTabTo(id, index, group);
+    } else if (command == L"splitTab") {
+        // A tab dragged onto the page: next to the selected tab.
+        Tab* dragged = findTab(_wtoi(argument.c_str()));
+        Tab* active = activeTab();
+        if (dragged && active && dragged != active)
+            splitWith(active, dragged);
     } else if (command == L"moveUnit") {
         // "<unit>\n<index among units>"
         int unit = 0, index = 0;
@@ -1191,6 +1411,14 @@ void BrowserWindow::pushState()
     json += ",\"active\":" + std::to_string(m_activeTabId);
     json += ",\"actions\":" + (extensionsHere() ? extensions::actionsJSON(m_activeTabId) : std::string("[]"));
     json += ",\"private\":" + std::string(m_private ? "true" : "false");
+    {
+        std::string split = "[";
+        for (int id : m_split)
+            split += (split.size() > 1 ? "," : "") + std::to_string(id);
+        json += ",\"split\":" + split + "]";
+        json += ",\"splitShown\":" + std::string(shownTabs().size() > 1 ? "true" : "false");
+        json += ",\"splitFull\":" + std::string(m_split.size() >= kMaxSplit ? "true" : "false");
+    }
     json += ",\"extensionsHere\":" + std::string(extensionsHere() ? "true" : "false");
     json += ",\"palette\":" + util::jsonString(settings::palette());
     json += ",\"vertical\":" + std::string(settings::verticalTabs() ? "true" : "false");
@@ -1470,7 +1698,8 @@ void BrowserWindow::selectTab(int id)
         next->reloadWhenShown.clear();
         navigate(next, url);
     }
-    if (previous && previous != next) {
+    auto stillShown = shownTabs();
+    if (previous && previous != next && std::find(stillShown.begin(), stillShown.end(), previous) == stillShown.end()) {
         // The page that's going away shouldn't keep thinking the mouse is
         // over it (sites like YouTube play previews on hover).
         PostMessageW(previous->hwnd, WM_MOUSELEAVE, 0, 0);
@@ -1519,6 +1748,11 @@ void BrowserWindow::closeTab(int id)
         extensions::tabRemoved(tab->id, m_id, m_tabs.size() == 1);
     if (tab->id == m_fullScreenTabId)
         setFullScreen(tab, false);
+    if (inSplit(tab->id)) {
+        m_split.erase(std::remove(m_split.begin(), m_split.end(), tab->id), m_split.end());
+        if (m_split.size() < 2)
+            m_split.clear();
+    }
     if (WKViewSetFullScreenClient)
         WKViewSetFullScreenClient(tab->view.get(), nullptr, nullptr);
     detachClients(tab->page);
@@ -2617,6 +2851,15 @@ void BrowserWindow::showDevTools()
 
 bool BrowserWindow::handleShortcut(const MSG& msg)
 {
+    // Split view: clicking into one of the tabs selects it.
+    if ((msg.message == WM_LBUTTONDOWN || msg.message == WM_RBUTTONDOWN || msg.message == WM_MBUTTONDOWN || msg.message == WM_POINTERDOWN) && m_split.size() > 1) {
+        for (Tab* tab : shownTabs()) {
+            if (tab->id != m_activeTabId && (msg.hwnd == tab->hwnd || IsChild(tab->hwnd, msg.hwnd))) {
+                selectTab(tab->id);
+                break;
+            }
+        }
+    }
     // Prism's own shortcuts first; keys it doesn't use can be extensions'.
     if (handleBrowserShortcut(msg))
         return true;
@@ -3690,11 +3933,37 @@ void BrowserWindow::showTabMenu(int tabId, POINT screen)
     Tab* tab = findTab(tabId);
     if (!tab)
         return;
-    enum { NewTabRight = 1, Reload, Duplicate, NewGroup, RemoveFromGroup, Close, CloseOthers, CloseRight, FirstGroup = 100 };
+    enum { NewTabRight = 1, Reload, Duplicate, NewGroup, RemoveFromGroup, Close, CloseOthers, CloseRight,
+        SplitNew, RemoveSplit, CloseSplit, FirstGroup = 100, FirstSplit = 300 };
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, NewTabRight, L"New tab to the right");
     AppendMenuW(menu, MF_STRING, Reload, L"Reload");
     AppendMenuW(menu, MF_STRING, Duplicate, L"Duplicate");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
+    // Split view: this tab next to a new tab or one of the others.
+    std::vector<int> splitChoices;
+    bool splitFull = inSplit(tab->id) && m_split.size() >= kMaxSplit;
+    HMENU split = CreatePopupMenu();
+    AppendMenuW(split, MF_STRING | (splitFull ? MF_GRAYED : 0), SplitNew, L"New tab");
+    for (auto& other : m_tabs) {
+        if (other->id == tab->id || (inSplit(tab->id) && inSplit(other->id)))
+            continue;
+        if (splitChoices.empty())
+            AppendMenuW(split, MF_SEPARATOR, 0, nullptr);
+        splitChoices.push_back(other->id);
+        std::wstring label = other->title.empty() ? other->url : other->title;
+        if (label.size() > 60)
+            label = label.substr(0, 57) + L"...";
+        AppendMenuW(split, MF_STRING | (splitFull ? MF_GRAYED : 0), FirstSplit + splitChoices.size() - 1, menuText(label).c_str());
+        if (splitChoices.size() >= 20)
+            break;
+    }
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(split), inSplit(tab->id) ? L"Add to split view" : L"Split view with");
+    if (inSplit(tab->id)) {
+        AppendMenuW(menu, MF_STRING, RemoveSplit, L"Remove from split view");
+        AppendMenuW(menu, MF_STRING, CloseSplit, L"Close split view");
+    }
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, NewGroup, L"Add tab to new group");
     std::vector<int> groupChoices;
@@ -3745,6 +4014,9 @@ void BrowserWindow::showTabMenu(int tabId, POINT screen)
     }
     case NewGroup: createGroup(tab); break;
     case RemoveFromGroup: removeTabFromGroup(tab); break;
+    case SplitNew: splitWith(tab, nullptr); break;
+    case RemoveSplit: removeFromSplit(tab->id); break;
+    case CloseSplit: closeSplit(); break;
     case Close: closeTab(tabId); break;
     case CloseOthers: {
         std::vector<int> ids;
@@ -3763,7 +4035,9 @@ void BrowserWindow::showTabMenu(int tabId, POINT screen)
         break;
     }
     default:
-        if (choice >= FirstGroup && static_cast<size_t>(choice - FirstGroup) < groupChoices.size())
+        if (choice >= FirstSplit && static_cast<size_t>(choice - FirstSplit) < splitChoices.size())
+            splitWith(tab, findTab(splitChoices[static_cast<size_t>(choice - FirstSplit)]));
+        else if (choice >= FirstGroup && static_cast<size_t>(choice - FirstGroup) < groupChoices.size())
             addTabToGroup(tab, groupChoices[static_cast<size_t>(choice - FirstGroup)]);
     }
 }

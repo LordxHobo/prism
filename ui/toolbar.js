@@ -192,6 +192,11 @@ function makeTab(tab) {
   element.setAttribute('aria-selected', tab.id === state.active ? 'true' : 'false');
   element.title = tabTitle(tab);
   element.dataset.id = tab.id;
+  // Split view: its tabs are marked, the more so while it's on screen.
+  if ((state.split || []).includes(tab.id)) {
+    element.classList.add('in-split');
+    if (state.splitShown) element.classList.add('split-shown');
+  }
   const group = groupById(tab.group);
   if (group) {
     element.classList.add('grouped');
@@ -459,6 +464,11 @@ document.addEventListener('mousemove', (event) => {
     document.documentElement.classList.add('dragging-tab');
   }
   clearDropMarks();
+  // A tab dragged down onto the page (or across, from the sidebar): split view.
+  const overPage = drag.kind === 'tab' && (isSidebar ? event.clientX > window.innerWidth : event.clientY > window.innerHeight);
+  document.documentElement.classList.toggle('drop-split', overPage && drag.id !== state.active && !state.splitFull);
+  if (overPage) { drag.target = null; drag.toPage = true; return; }
+  drag.toPage = false;
   const target = dropTargetAt(event.clientX, event.clientY);
   drag.target = target;
   if (!target) return;
@@ -471,7 +481,12 @@ document.addEventListener('mouseup', () => {
   const finished = drag;
   drag = null;
   document.documentElement.classList.remove('dragging-tab');
+  document.documentElement.classList.remove('drop-split');
   clearDropMarks();
+  if (finished.moving && finished.toPage && finished.kind === 'tab') {
+    if (finished.id !== state.active) send('splitTab', String(finished.id));
+    return;
+  }
   if (!finished.moving || !finished.target) return;
   const element = finished.target.element;
 

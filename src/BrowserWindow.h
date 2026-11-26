@@ -146,6 +146,23 @@ private:
     void destroySidebar();
     int sidebarWidth() const; // device pixels, 0 without vertical tabs
     void layout();
+
+    // Split view: up to four tabs side by side. Selecting one of them shows
+    // them all (the selected one has the address bar); another tab shows
+    // alone, and the split comes back when you select one of its tabs.
+    static constexpr size_t kMaxSplit = 4;
+    std::vector<Tab*> shownTabs() const;
+    bool inSplit(int tabId) const;
+    // Adds `other` (or a new tab, if null) to `tab`'s split view, starting
+    // one with just the two if `tab` isn't in it.
+    void splitWith(Tab* tab, Tab* other);
+    void removeFromSplit(int tabId);
+    void closeSplit();
+    RECT contentRect() const;
+    std::vector<RECT> splitRects(const RECT& content, size_t count) const;
+    // 1 = the line between columns, 2 = between rows, 0 = neither.
+    int splitDividerAt(POINT client) const;
+    int splitGap() const;
     double scaleFactor() const;
     int toolbarHeight() const;
     int toolbarCSSHeight() const;
@@ -257,6 +274,10 @@ private:
     int m_id { 0 };
     bool m_private { false };
     int m_fullScreenTabId { 0 };
+    std::vector<int> m_split;
+    double m_splitX { 0.5 };
+    double m_splitY { 0.5 };
+    int m_splitDrag { 0 };
     LONG_PTR m_savedStyle { 0 };
     WINDOWPLACEMENT m_savedPlacement { sizeof(WINDOWPLACEMENT) };
     static void fullScreenChanged(WKViewRef, bool enter, const void* clientInfo);
