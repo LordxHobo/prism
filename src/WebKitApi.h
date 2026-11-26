@@ -512,9 +512,6 @@ typedef struct WKPageContextMenuClientV4 {
     X(WKViewGetPage, WKPageRef, (WKViewRef)) \
     X(WKViewSetIsInWindow, void, (WKViewRef, bool)) \
     X(WKViewSetUsesOffscreenRendering, void, (WKViewRef, bool)) \
-    X(WKViewSetFullScreenClient, void, (WKViewRef, WKViewFullScreenCallback, const void*)) \
-    X(WKViewExitFullScreen, void, (WKViewRef)) \
-    X(WKPreferencesSetFullScreenEnabled, void, (WKPreferencesRef, bool)) \
     X(WKPageLoadURL, void, (WKPageRef, WKURLRef)) \
     X(WKPageLoadFile, void, (WKPageRef, WKURLRef, WKURLRef)) \
     X(WKPageStopLoading, void, (WKPageRef)) \
@@ -568,6 +565,10 @@ typedef struct WKPageContextMenuClientV4 {
     X(WKCompletionListenerComplete, void, (WKCompletionListenerRef, WKTypeRef))
 
 #define PRISM_WK_OPTIONAL(X) \
+    /* Full screen: Prism WebKit with patches/0003 and later. */ \
+    X(WKViewSetFullScreenClient, void, (WKViewRef, WKViewFullScreenCallback, const void*)) \
+    X(WKViewExitFullScreen, void, (WKViewRef)) \
+    X(WKPreferencesSetFullScreenEnabled, void, (WKPreferencesRef, bool)) \
     X(WKWebsiteDataStoreConfigurationSetNetworkCacheDirectory, void, (WKWebsiteDataStoreConfigurationRef, WKStringRef)) \
     X(WKWebsiteDataStoreConfigurationSetIndexedDBDatabaseDirectory, void, (WKWebsiteDataStoreConfigurationRef, WKStringRef)) \
     X(WKWebsiteDataStoreConfigurationSetLocalStorageDirectory, void, (WKWebsiteDataStoreConfigurationRef, WKStringRef)) \

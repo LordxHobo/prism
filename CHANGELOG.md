@@ -2,6 +2,7 @@
 
 ## 0.9.36
 
+- Fix: 0.9.35 listed the new full screen functions (`WKViewSetFullScreenClient`, `WKViewExitFullScreen`, `WKPreferencesSetFullScreenEnabled`) as required, so Prism refused to start on a WebKit without patches/0003 ("This WebKit build is missing functions"). They're optional now: without them, full screen stays off.
 - **Split view** (up to 4 tabs, `kMaxSplit`). `BrowserWindow::m_split` holds the tab ids; `shownTabs()` is the split when the selected tab is in it (and the window isn't in full screen), else the selected tab. `layout()` places them with `splitRects()` (2: columns; 3: left plus two stacked right; 4: grid; `m_splitX`/`m_splitY` set the lines, `splitGap()` apart) and shows split tabs only while the split is on screen. The lines between them are dragged in the main window (`WM_SETCURSOR`, `WM_LBUTTONDOWN`/`MOUSEMOVE`/`UP`, double-click resets; the class has `CS_DBLCLKS`), and the selected tab gets an accent frame (`WM_ERASEBKGND`). A click in a split tab selects it (`handleShortcut`); `selectTab` keeps other split tabs on screen. Tab menu: "Split view with" (a new tab or another tab) / "Add to split view", "Remove from split view", "Close split view". Toolbar: dragging a tab below the toolbar (or right of the sidebar) sends `splitTab`; state has `split`, `splitShown`, `splitFull`; split tabs get a line along their top. Closing a tab takes it out of the split; fewer than two ends it. Not saved in the session.
 
 ## 0.9.35
