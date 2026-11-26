@@ -201,6 +201,11 @@ bool showHomeButton()
     return util::readSetting(L"HomeButton", L"0") == L"1";
 }
 
+bool compatibleDrawing()
+{
+    return util::readSetting(L"CompatibleDrawing", L"0") == L"1";
+}
+
 bool extensionsInPrivate()
 {
     return util::readSetting(L"ExtensionsInPrivate", L"0") == L"1";
@@ -295,6 +300,7 @@ std::string toJSON()
     json += ",\"stripTrackingParams\":" + jsonBool(util::readSetting(L"StripTrackingParams", L"1") != L"0");
     json += ",\"fingerprinting\":" + jsonBool(util::readSetting(L"Fingerprinting", L"1") != L"0");
     json += ",\"extensionsInPrivate\":" + jsonBool(extensionsInPrivate());
+    json += ",\"compatibleDrawing\":" + jsonBool(compatibleDrawing());
     json += ",\"tabLayout\":" + util::jsonString(verticalTabs() ? L"vertical" : L"horizontal");
     json += ",\"groupStyle\":" + util::jsonString(groupStyle());
     json += ",\"palette\":" + util::jsonString(palette());
@@ -380,6 +386,10 @@ bool set(const std::wstring& key, const std::wstring& value)
         if (!isOneOf(value, { L"default", L"midnight", L"nord", L"forest", L"rose", L"sepia" }))
             return false;
         util::writeSetting(L"Palette", value);
+    } else if (key == L"compatibleDrawing") {
+        if (!isOneOf(value, { L"0", L"1" }))
+            return false;
+        util::writeSetting(L"CompatibleDrawing", value);
     } else if (key == L"extensionsInPrivate") {
         if (!isOneOf(value, { L"0", L"1" }))
             return false;

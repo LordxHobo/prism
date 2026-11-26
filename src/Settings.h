@@ -62,6 +62,9 @@ std::wstring palette();
 bool showHomeButton();
 // Extensions also run in (and see) private windows. Off by default.
 bool extensionsInPrivate();
+// Pages are drawn into an image that Prism shows, instead of straight into
+// their window by the GPU process. Slower; for pages that stop updating.
+bool compatibleDrawing();
 // Extensions whose buttons are hidden from the toolbar (still in the
 // Extensions menu).
 bool isActionHidden(const std::string& extensionId);

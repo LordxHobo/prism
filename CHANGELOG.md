@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.34
+
+- Plain media files didn't play: `MediaPlayerPrivateGStreamer::configureDownloadBuffer` set the download buffer's `temp-template` to `/var/tmp/WebKit-Media-XXXXXX`, and `downloadbuffer` failed to create it ("Could not create temp file", seen in a GStreamer log of mov_bbb.mp4). `webkit/patches/0001`: on Windows the template is in `g_get_tmp_dir()`.
+- Settings › General › "Compatible page drawing" (`CompatibleDrawing`, off): new tabs call `WKViewSetUsesOffscreenRendering`, so the GPU process renders into a texture, reads it back and the UI process paints it, instead of presenting into the view's window. A test for pages whose display stops updating (input and scrolling still work; switching tabs shows the current state), which points at presentation into the window.
+
 ## 0.9.33
 
 - **"Extensions in private windows"** (Settings › Privacy, `ExtensionsInPrivate`, off by default). `BrowserWindow::extensionsHere()` (normal window, or private with the setting on) gates extension events, action buttons, context menu items, shortcuts and webRequest main-frame notes; `tabs::` includes private windows with it. The private user content controller now has the extension message handlers too, refusing messages from private pages while the setting is off (`extensionMessageAllowed`), and registers the "extensions" user-script group when it's on. PrismBundle in private processes gets the content scripts at start (`prism:contentScripts?`) and on changes (`Extensions.cpp`), and `engine::privateExtensionsChanged()` (from `settingsChanged`) sends the scripts or none when the setting flips; it applies to documents loaded afterwards. RequestFilter passes private requests to webRequest listeners only with the setting on. Toolbar (`extensionsHere` in the state) and the private new tab page say which applies.

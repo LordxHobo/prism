@@ -93,6 +93,7 @@ function render(settings) {
   $('stripTrackingParams').checked = !!settings.stripTrackingParams;
   $('fingerprinting').checked = !!settings.fingerprinting;
   $('extensionsInPrivate').checked = !!settings.extensionsInPrivate;
+  $('compatibleDrawing').checked = !!settings.compatibleDrawing;
   renderSegmented('tabLayout', settings.tabLayout);
   renderSegmented('groupStyle', settings.groupStyle);
   renderSegmented('newTabShortcuts', settings.newTabShortcuts);
@@ -299,6 +300,9 @@ $('stripTrackingParams').addEventListener('change', () => {
 });
 $('fingerprinting').addEventListener('change', () => {
   setSetting('fingerprinting', $('fingerprinting').checked ? '1' : '0');
+});
+$('compatibleDrawing').addEventListener('change', () => {
+  setSetting('compatibleDrawing', $('compatibleDrawing').checked ? '1' : '0');
 });
 $('extensionsInPrivate').addEventListener('change', () => {
   setSetting('extensionsInPrivate', $('extensionsInPrivate').checked ? '1' : '0');

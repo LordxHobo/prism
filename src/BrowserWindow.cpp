@@ -1273,6 +1273,10 @@ Tab* BrowserWindow::newTab(const std::wstring& url, bool select, WKPageConfigura
     if (!pageConfiguration)
         pageConfiguration = m_private && engine::privatePageConfiguration() ? engine::privatePageConfiguration() : engine::pageConfiguration();
     tab->view = Ref<WKViewRef>::adopt(WKViewCreate(rect, pageConfiguration, m_hwnd));
+    // Settings > General > Compatible page drawing (before the page's web
+    // process starts, which reads it).
+    if (settings::compatibleDrawing() && WKViewSetUsesOffscreenRendering)
+        WKViewSetUsesOffscreenRendering(tab->view.get(), true);
     // Only the selected tab counts as "in the window" (see selectTab).
     WKViewSetIsInWindow(tab->view.get(), false);
     tab->hwnd = WKViewGetWindow(tab->view.get());

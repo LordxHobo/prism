@@ -510,6 +510,7 @@ typedef struct WKPageContextMenuClientV4 {
     X(WKViewGetWindow, HWND, (WKViewRef)) \
     X(WKViewGetPage, WKPageRef, (WKViewRef)) \
     X(WKViewSetIsInWindow, void, (WKViewRef, bool)) \
+    X(WKViewSetUsesOffscreenRendering, void, (WKViewRef, bool)) \
     X(WKPageLoadURL, void, (WKPageRef, WKURLRef)) \
     X(WKPageLoadFile, void, (WKPageRef, WKURLRef, WKURLRef)) \
     X(WKPageStopLoading, void, (WKPageRef)) \

@@ -22,12 +22,20 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.33</span>
+      <span class="version">Version 0.9.34</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Extensions in private windows</h2>
+    <h2 style="margin-top:0">Plain video files</h2>
+    <p>Videos that are ordinary files (not streamed like YouTube) failed to start: WebKit wanted to buffer them in a Linux folder that doesn't exist on Windows. They now buffer in your temporary folder.</p>
+    <p class="dim">Needs a new Prism WebKit build.</p>
+    <h2>Compatible page drawing</h2>
+    <p>Some pages stop showing changes until you switch tabs, though they still react. A new switch in <strong>Settings › General</strong> has Prism draw pages itself instead. It's a test for now: tell me if it helps.</p>
+  </div>
+
+  <div class="card">
+    <h2>Extensions in private windows</h2>
     <p>A new switch in <strong>Settings › Privacy</strong> lets your extensions run in private windows, uBlock included. It's off by default: extensions can keep what they see.</p>
     <h2>Toolbar fixes</h2>
     <ul class="notes">
