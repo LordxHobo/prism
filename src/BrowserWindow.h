@@ -104,6 +104,9 @@ public:
 
     HWND hwnd() const { return m_hwnd; }
     bool isPrivate() const { return m_private; }
+    // A page shows something in full screen (a video): the window covers
+    // the monitor with only that tab.
+    bool isFullScreen() const { return m_fullScreenTabId != 0; }
     // Extensions run in (and see) this window: a normal one, or a private one
     // with "Extensions in private windows" on.
     bool extensionsHere() const;
@@ -253,6 +256,12 @@ private:
     HWND m_hwnd { };
     int m_id { 0 };
     bool m_private { false };
+    int m_fullScreenTabId { 0 };
+    LONG_PTR m_savedStyle { 0 };
+    WINDOWPLACEMENT m_savedPlacement { sizeof(WINDOWPLACEMENT) };
+    static void fullScreenChanged(WKViewRef, bool enter, const void* clientInfo);
+    void setFullScreen(Tab*, bool enter);
+    void exitFullScreen();
     wk::Ref<WKViewRef> m_toolbarView;
     WKPageRef m_toolbarPage { };
     HWND m_toolbarHwnd { };

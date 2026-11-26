@@ -627,8 +627,12 @@ void BrowserWindow::onDestroy()
     detachClients(m_toolbarPage);
     detachClients(m_sidebarPage);
     m_sidebarReady = false;
-    for (auto& tab : m_tabs)
+    for (auto& tab : m_tabs) {
+        if (WKViewSetFullScreenClient)
+            WKViewSetFullScreenClient(tab->view.get(), nullptr, nullptr);
         detachClients(tab->page);
+    }
+    m_fullScreenTabId = 0;
     m_toolbarReady = false;
     KillTimer(m_hwnd, kSessionTimer);
     KillTimer(m_hwnd, kStatsTimer);
@@ -725,6 +729,62 @@ void BrowserWindow::updateTheme()
     InvalidateRect(m_hwnd, nullptr, TRUE);
 }
 
+// WebKit asks (from the page's Fullscreen API) to show a tab across the
+// screen, or to put it back; done before returning, so the page lays out at
+// the final size.
+void BrowserWindow::fullScreenChanged(WKViewRef, bool enter, const void* clientInfo)
+{
+    auto* tab = static_cast<Tab*>(const_cast<void*>(clientInfo));
+    if (tab && tab->window)
+        tab->window->setFullScreen(tab, enter);
+}
+
+void BrowserWindow::setFullScreen(Tab* tab, bool enter)
+{
+    if (enter) {
+        if (m_fullScreenTabId == tab->id)
+            return;
+        if (tab->id != m_activeTabId)
+            selectTab(tab->id);
+        suggestions::hide();
+        if (!m_fullScreenTabId) {
+            m_savedStyle = GetWindowLongPtrW(m_hwnd, GWL_STYLE);
+            m_savedPlacement.length = sizeof(m_savedPlacement);
+            GetWindowPlacement(m_hwnd, &m_savedPlacement);
+        }
+        m_fullScreenTabId = tab->id;
+        MONITORINFO monitor = { sizeof(monitor) };
+        GetMonitorInfoW(MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST), &monitor);
+        SetWindowLongPtrW(m_hwnd, GWL_STYLE, (m_savedStyle & ~WS_OVERLAPPEDWINDOW) | WS_POPUP);
+        SetWindowPos(m_hwnd, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
+            monitor.rcMonitor.right - monitor.rcMonitor.left, monitor.rcMonitor.bottom - monitor.rcMonitor.top,
+            SWP_FRAMECHANGED | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+        layout();
+        SetFocus(tab->hwnd);
+        return;
+    }
+    if (!m_fullScreenTabId)
+        return;
+    m_fullScreenTabId = 0;
+    SetWindowLongPtrW(m_hwnd, GWL_STYLE, m_savedStyle);
+    SetWindowPlacement(m_hwnd, &m_savedPlacement);
+    SetWindowPos(m_hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+    layout();
+    pushState();
+}
+
+// Prism leaves full screen (another tab, Esc): the page is told, and WebKit
+// then calls back to put the window back.
+void BrowserWindow::exitFullScreen()
+{
+    Tab* tab = findTab(m_fullScreenTabId);
+    if (tab && WKViewExitFullScreen)
+        WKViewExitFullScreen(tab->view.get());
+    // If the page didn't answer (crashed, gone), put the window back anyway.
+    if (tab && m_fullScreenTabId)
+        setFullScreen(tab, false);
+}
+
 void BrowserWindow::layout()
 {
     RECT client;
@@ -735,9 +795,20 @@ void BrowserWindow::layout()
 
     int side = std::min(sidebarWidth(), width / 2);
 
+    // Full screen: only the tab, across the whole window.
+    bool fullScreen = isFullScreen();
     if (m_toolbarHwnd)
-        MoveWindow(m_toolbarHwnd, 0, 0, width, toolbar, TRUE);
+        ShowWindow(m_toolbarHwnd, fullScreen ? SW_HIDE : SW_SHOWNA);
     if (m_sidebarHwnd)
+        ShowWindow(m_sidebarHwnd, fullScreen ? SW_HIDE : SW_SHOWNA);
+    if (fullScreen) {
+        toolbar = 0;
+        side = 0;
+    }
+
+    if (m_toolbarHwnd && !fullScreen)
+        MoveWindow(m_toolbarHwnd, 0, 0, width, toolbar, TRUE);
+    if (m_sidebarHwnd && !fullScreen)
         MoveWindow(m_sidebarHwnd, 0, toolbar, side, std::max(0, height - toolbar), TRUE);
     if (auto* tab = activeTab())
         MoveWindow(tab->hwnd, side, toolbar, std::max(0, width - side), std::max(0, height - toolbar), TRUE);
@@ -1277,6 +1348,8 @@ Tab* BrowserWindow::newTab(const std::wstring& url, bool select, WKPageConfigura
     // process starts, which reads it).
     if (settings::compatibleDrawing() && WKViewSetUsesOffscreenRendering)
         WKViewSetUsesOffscreenRendering(tab->view.get(), true);
+    if (WKViewSetFullScreenClient)
+        WKViewSetFullScreenClient(tab->view.get(), fullScreenChanged, tab.get());
     // Only the selected tab counts as "in the window" (see selectTab).
     WKViewSetIsInWindow(tab->view.get(), false);
     tab->hwnd = WKViewGetWindow(tab->view.get());
@@ -1377,6 +1450,9 @@ void BrowserWindow::selectTab(int id)
         return;
     Tab* previous = activeTab();
     suggestions::hide();
+    // Another tab: the full screen one leaves full screen first.
+    if (m_fullScreenTabId && m_fullScreenTabId != id)
+        exitFullScreen();
     next->lastActive = ++s_activationCounter;
     // A tab in a collapsed group opens the group.
     if (TabGroup* group = findGroup(next->groupId); group && group->collapsed)
@@ -1441,6 +1517,10 @@ void BrowserWindow::closeTab(int id)
     denyPrompts(tab);
     if (extensionsHere())
         extensions::tabRemoved(tab->id, m_id, m_tabs.size() == 1);
+    if (tab->id == m_fullScreenTabId)
+        setFullScreen(tab, false);
+    if (WKViewSetFullScreenClient)
+        WKViewSetFullScreenClient(tab->view.get(), nullptr, nullptr);
     detachClients(tab->page);
     scheduleSessionSave();
     // Destroying the view's window makes WebKit close the page and its process.
@@ -2399,6 +2479,8 @@ void BrowserWindow::webProcessDidTerminate(WKPageRef, uint32_t reason, const voi
     std::wstring lastURL = engine::isInternalURL(tab->url) ? L"" : tab->url;
     std::wstring query = L"kind=crash&url=" + util::urlEncode(lastURL) + L"&code=" + std::to_wstring(reason);
     tab->crashed = true;
+    if (tab->window->m_fullScreenTabId == tab->id)
+        tab->window->setFullScreen(tab, false);
     tab->loading = false;
     // Like other browsers, a tab you weren't looking at simply reloads when
     // you switch to it; the one in front shows what happened.
@@ -2569,6 +2651,12 @@ bool BrowserWindow::handleBrowserShortcut(const MSG& msg)
     bool alt = GetKeyState(VK_MENU) < 0;
     UINT key = static_cast<UINT>(msg.wParam);
     Tab* tab = activeTab();
+
+    // Esc (or F11) always leaves full screen, whatever the page does with it.
+    if (isFullScreen() && (key == VK_ESCAPE || key == VK_F11) && !ctrl && !alt) {
+        exitFullScreen();
+        return true;
+    }
 
     if (ctrl && !alt) {
         switch (key) {

@@ -52,6 +52,10 @@ static Ref<WKPreferencesRef> createPreferences()
     // Developer tools (F12).
     if (WKPreferencesSetDeveloperExtrasEnabled)
         WKPreferencesSetDeveloperExtrasEnabled(preferences.get(), true);
+    // Element full screen (a video's full screen button); needs a WebKit
+    // that tells Prism (WKViewSetFullScreenClient).
+    if (WKPreferencesSetFullScreenEnabled && WKViewSetFullScreenClient)
+        WKPreferencesSetFullScreenEnabled(preferences.get(), true);
     return preferences;
 }
 static Ref<WKUserContentControllerRef> s_userContent;

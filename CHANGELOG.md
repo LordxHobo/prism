@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.35
+
+- **Full screen video** (the Fullscreen API). `webkit/patches/0003`: WebKit's Windows `PageClientImpl` had every full screen method as `notImplemented`; now `WKViewSetFullScreenClient` tells the app to show the view across the screen (or put it back) before returning, `WKViewIsFullScreen` and `WKViewExitFullScreen` complete it, and without a client full screen is refused. Prism: `FullScreenEnabled` is turned on only when that WebKit API exists; `BrowserWindow::setFullScreen` makes the window a borderless popup covering its monitor with only that tab (toolbar and sidebar hidden) and restores style and placement after. Esc or F11 leaves (`exitFullScreen`, which asks the page and puts the window back regardless); so do switching tabs, closing the tab and a crashed page.
+
 ## 0.9.34
 
 - Plain media files didn't play: `MediaPlayerPrivateGStreamer::configureDownloadBuffer` set the download buffer's `temp-template` to `/var/tmp/WebKit-Media-XXXXXX`, and `downloadbuffer` failed to create it ("Could not create temp file", seen in a GStreamer log of mov_bbb.mp4). `webkit/patches/0001`: on Windows the template is in `g_get_tmp_dir()`. The first try still failed ("Invalid argument"): the template was built with a leading separator meant for `/var/tmp`, giving `\C:\Users\...`; on Windows it is now built without one.

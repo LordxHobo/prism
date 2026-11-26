@@ -114,6 +114,7 @@ typedef void (*WKScriptMessageHandlerCallback)(WKScriptMessageRef message, WKCom
 
 // Completion callback used by the data-removal functions.
 typedef void (*WKCompletionFunction)(void*);
+typedef void (*WKViewFullScreenCallback)(WKViewRef view, bool enter, const void* clientInfo);
 
 // UI client (WKPageUIClient.h)
 typedef void (*WKPageUIClientCallback)(WKPageRef page, const void* clientInfo);
@@ -511,6 +512,9 @@ typedef struct WKPageContextMenuClientV4 {
     X(WKViewGetPage, WKPageRef, (WKViewRef)) \
     X(WKViewSetIsInWindow, void, (WKViewRef, bool)) \
     X(WKViewSetUsesOffscreenRendering, void, (WKViewRef, bool)) \
+    X(WKViewSetFullScreenClient, void, (WKViewRef, WKViewFullScreenCallback, const void*)) \
+    X(WKViewExitFullScreen, void, (WKViewRef)) \
+    X(WKPreferencesSetFullScreenEnabled, void, (WKPreferencesRef, bool)) \
     X(WKPageLoadURL, void, (WKPageRef, WKURLRef)) \
     X(WKPageLoadFile, void, (WKPageRef, WKURLRef, WKURLRef)) \
     X(WKPageStopLoading, void, (WKPageRef)) \

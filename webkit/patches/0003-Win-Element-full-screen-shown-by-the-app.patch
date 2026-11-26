@@ -1,0 +1,195 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Prism <prism@users.noreply.github.com>
+Date: Thu, 26 Nov 2026 18:34:32 +0100
+Subject: [PATCH 3/3] [Win] Element full screen, shown by the app
+
+PageClientImpl's full screen client methods were all notImplemented, so
+the Fullscreen API (a video's full screen button) did nothing on Windows.
+
+WKView gets a full screen client (WKViewSetFullScreenClient): when the
+page enters or leaves full screen, the app is told and shows the view
+across the screen, or puts it back, before the callback returns.
+PageClientImpl refuses full screen without a client, and tells the client
+when the full screen manager closes. WKViewIsFullScreen and
+WKViewExitFullScreen (leave as if the page asked) complete the API.
+---
+ Source/WebKit/UIProcess/API/C/win/WKView.cpp  | 15 +++++++++++
+ Source/WebKit/UIProcess/API/C/win/WKView.h    | 11 ++++++++
+ .../WebKit/UIProcess/win/PageClientImpl.cpp   | 22 ++++++++++------
+ Source/WebKit/UIProcess/win/WebView.cpp       | 25 +++++++++++++++++++
+ Source/WebKit/UIProcess/win/WebView.h         | 11 ++++++++
+ 5 files changed, 76 insertions(+), 8 deletions(-)
+
+diff --git a/Source/WebKit/UIProcess/API/C/win/WKView.cpp b/Source/WebKit/UIProcess/API/C/win/WKView.cpp
+index 13788d7e2..a5ae26b92 100644
+--- a/Source/WebKit/UIProcess/API/C/win/WKView.cpp
++++ b/Source/WebKit/UIProcess/API/C/win/WKView.cpp
+@@ -68,6 +68,21 @@ void WKViewSetUsesOffscreenRendering(WKViewRef viewRef, bool enabled)
+     toImpl(viewRef)->setUsesOffscreenRendering(enabled);
+ }
+ 
++void WKViewSetFullScreenClient(WKViewRef viewRef, WKViewFullScreenCallback callback, const void* clientInfo)
++{
++    toImpl(viewRef)->setFullScreenClient(callback, clientInfo);
++}
++
++bool WKViewIsFullScreen(WKViewRef viewRef)
++{
++    return toImpl(viewRef)->isFullScreen();
++}
++
++void WKViewExitFullScreen(WKViewRef viewRef)
++{
++    toImpl(viewRef)->requestExitFullScreen();
++}
++
+ void WKViewSetScrollOffsetOnNextResize(WKViewRef viewRef, WKSize scrollOffset)
+ {
+     toImpl(viewRef)->setScrollOffsetOnNextResize(toIntSize(scrollOffset));
+diff --git a/Source/WebKit/UIProcess/API/C/win/WKView.h b/Source/WebKit/UIProcess/API/C/win/WKView.h
+index a59a8a2f2..6294f1a5d 100644
+--- a/Source/WebKit/UIProcess/API/C/win/WKView.h
++++ b/Source/WebKit/UIProcess/API/C/win/WKView.h
+@@ -44,6 +44,17 @@ WK_EXPORT void WKViewSetIsInWindow(WKViewRef view, bool isInWindow);
+ WK_EXPORT void WKViewSetUsesOffscreenRendering(WKViewRef view, bool enabled);
+ WK_EXPORT void WKViewSetScrollOffsetOnNextResize(WKViewRef view, WKSize scrollOffset);
+ 
++// Element full screen (the Fullscreen API, e.g. a video's full screen
++// button). The view doesn't change its own window: the app is told to show
++// the view across the screen (enter = true) or put it back (enter = false),
++// and should do so before returning. Without a client, full screen requests
++// are refused.
++typedef void (*WKViewFullScreenCallback)(WKViewRef view, bool enter, const void* clientInfo);
++WK_EXPORT void WKViewSetFullScreenClient(WKViewRef view, WKViewFullScreenCallback callback, const void* clientInfo);
++WK_EXPORT bool WKViewIsFullScreen(WKViewRef view);
++// Leaves full screen as if the page asked (e.g. the user pressed Esc).
++WK_EXPORT void WKViewExitFullScreen(WKViewRef view);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/Source/WebKit/UIProcess/win/PageClientImpl.cpp b/Source/WebKit/UIProcess/win/PageClientImpl.cpp
+index 0ec4f66b0..c03503976 100644
+--- a/Source/WebKit/UIProcess/win/PageClientImpl.cpp
++++ b/Source/WebKit/UIProcess/win/PageClientImpl.cpp
+@@ -306,38 +306,44 @@ void PageClientImpl::setFullScreenClientForTesting(std::unique_ptr<WebFullScreen
+ {
+ }
+ 
++// The app shows the view across the screen when told (WKViewSetFullScreenClient);
++// without an app client, full screen is refused.
+ void PageClientImpl::closeFullScreenManager()
+ {
+-    notImplemented();
++    if (m_view.isFullScreen())
++        m_view.setFullScreen(false);
+ }
+ 
+ bool PageClientImpl::isFullScreen()
+ {
+-    notImplemented();
+-    return false;
++    return m_view.isFullScreen();
+ }
+ 
+ void PageClientImpl::enterFullScreen(FloatSize, CompletionHandler<void(bool)>&& completionHandler)
+ {
+-    notImplemented();
+-    completionHandler(false);
++    if (m_view.isFullScreen() || !m_view.hasFullScreenClient()) {
++        completionHandler(false);
++        return;
++    }
++    // The app resizes the view to the screen before this returns, so the
++    // page lays out the full screen element at the final size.
++    completionHandler(m_view.setFullScreen(true));
+ }
+ 
+ void PageClientImpl::exitFullScreen(CompletionHandler<void()>&& completionHandler)
+ {
+-    notImplemented();
++    if (m_view.isFullScreen())
++        m_view.setFullScreen(false);
+     completionHandler();
+ }
+ 
+ void PageClientImpl::beganEnterFullScreen(const IntRect& /* initialFrame */, const IntRect& /* finalFrame */, CompletionHandler<void(bool)>&& completionHandler)
+ {
+-    notImplemented();
+     completionHandler(true);
+ }
+ 
+ void PageClientImpl::beganExitFullScreen(const IntRect& /* initialFrame */, const IntRect& /* finalFrame */, CompletionHandler<void()>&& completionHandler)
+ {
+-    notImplemented();
+     completionHandler();
+ }
+ #endif // ENABLE(FULLSCREEN_API)
+diff --git a/Source/WebKit/UIProcess/win/WebView.cpp b/Source/WebKit/UIProcess/win/WebView.cpp
+index 2957c75de..038b53502 100644
+--- a/Source/WebKit/UIProcess/win/WebView.cpp
++++ b/Source/WebKit/UIProcess/win/WebView.cpp
+@@ -959,6 +959,31 @@ void WebView::setToolTip(const String& toolTip)
+     ::SendMessage(m_toolTipWindow, TTM_ACTIVATE, !toolTip.isEmpty(), 0);
+ }
+ 
++void WebView::setFullScreenClient(WKViewFullScreenCallback callback, const void* clientInfo)
++{
++    m_fullScreenCallback = callback;
++    m_fullScreenClientInfo = clientInfo;
++}
++
++bool WebView::setFullScreen(bool enter)
++{
++    if (!m_fullScreenCallback)
++        return false;
++    m_isFullScreen = enter;
++    m_fullScreenCallback(toAPI(this), enter, m_fullScreenClientInfo);
++    return true;
++}
++
++void WebView::requestExitFullScreen()
++{
++#if ENABLE(FULLSCREEN_API)
++    if (!m_isFullScreen || !m_page)
++        return;
++    if (RefPtr manager = m_page->fullScreenManager())
++        manager->requestExitFullScreen();
++#endif
++}
++
+ void WebView::setUsesOffscreenRendering(bool enabled)
+ {
+     m_usesOffscreenRendering = enabled;
+diff --git a/Source/WebKit/UIProcess/win/WebView.h b/Source/WebKit/UIProcess/win/WebView.h
+index c1f10ebb4..2728dc857 100644
+--- a/Source/WebKit/UIProcess/win/WebView.h
++++ b/Source/WebKit/UIProcess/win/WebView.h
+@@ -73,6 +73,14 @@ public:
+     void setUsesOffscreenRendering(bool);
+     bool usesOffscreenRendering() const;
+ 
++    // Element full screen, shown by the app (WKViewSetFullScreenClient).
++    void setFullScreenClient(WKViewFullScreenCallback, const void* clientInfo);
++    bool hasFullScreenClient() const { return !!m_fullScreenCallback; }
++    bool isFullScreen() const { return m_isFullScreen; }
++    // Tells the app; false if there is no app to tell.
++    bool setFullScreen(bool);
++    void requestExitFullScreen();
++
+     void setViewNeedsDisplay(const WebCore::Region&);
+ 
+     WebPageProxy* page() const { return m_page.get(); }
+@@ -154,6 +162,9 @@ private:
+     bool m_trackingMouseLeave { false };
+     bool m_isBeingDestroyed { false };
+     bool m_usesOffscreenRendering { false };
++    bool m_isFullScreen { false };
++    WKViewFullScreenCallback m_fullScreenCallback { nullptr };
++    const void* m_fullScreenClientInfo { nullptr };
+ 
+     const std::unique_ptr<WebKit::PageClientImpl> m_pageClient;
+     const RefPtr<WebPageProxy> m_page;
+-- 
+2.43.0
+
