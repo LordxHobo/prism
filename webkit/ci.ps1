@@ -144,6 +144,51 @@ function Install-LLVMFromGitHub([int]$Minimum) {
     throw "no LLVM $Minimum or newer for Windows on GitHub"
 }
 
+# Gives the system headers that precompiled headers read one fixed time.
+function Set-SystemHeaderTimes {
+    $dirs = @()
+    if ($env:VCToolsInstallDir) {
+        $dirs += Join-Path $env:VCToolsInstallDir 'include'
+        $dirs += Join-Path $env:VCToolsInstallDir 'ATLMFC\include'
+    }
+    if ($env:WindowsSdkDir -and $env:WindowsSDKVersion) {
+        $dirs += Join-Path $env:WindowsSdkDir ('Include\' + $env:WindowsSDKVersion.TrimEnd('\'))
+    }
+    $resource = (& clang-cl /clang:-print-resource-dir 2>$null | Select-Object -First 1)
+    if ($resource) { $dirs += Join-Path $resource.Trim() 'include' }
+    $time = [datetime]::SpecifyKind([datetime]::Parse($OldTime), [DateTimeKind]::Utc)
+    foreach ($dir in $dirs) {
+        if (-not (Test-Path -LiteralPath $dir)) { continue }
+        $count = 0
+        foreach ($file in Get-ChildItem -LiteralPath $dir -Recurse -File -Force -ErrorAction SilentlyContinue) {
+            try {
+                if ($file.LastWriteTimeUtc -ne $time) { $file.LastWriteTimeUtc = $time }
+                $count++
+            } catch {
+                # read-only or locked: leave it
+            }
+        }
+        Write-Host "    $count files in $dir"
+    }
+}
+
+# Precompiled headers that clang refused as "modified since" (a system
+# header with another time): removes them and their object files, so ninja
+# makes them again. Returns how many.
+function Remove-StalePrecompiledHeaders([string]$Log) {
+    $found = @{}
+    foreach ($match in Select-String -Path $Log -Pattern "has been modified since the precompiled header '([^']+)'" -AllMatches) {
+        foreach ($m in $match.Matches) { $found[$m.Groups[1].Value] = $true }
+    }
+    foreach ($pch in $found.Keys) {
+        Write-Host "    Out of date: $pch"
+        foreach ($file in @($pch, ($pch -replace '\.pch$', '.obj'))) {
+            if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force }
+        }
+    }
+    return $found.Count
+}
+
 # How many failed steps in a ninja log printed no compiler error at all.
 function Test-QuietFailures([string]$Log) {
     $quiet = 0
@@ -162,7 +207,7 @@ function Test-QuietFailures([string]$Log) {
             $inBlock = $false
             continue
         }
-        if ($line -match '(: (fatal )?error|error LNK\d+|^error: |: undefined symbol|lld-link: error)') { $hadError = $true }
+        if ($line -match '(: (fatal )?error|^fatal error: |error LNK\d+|^error: |: undefined symbol|lld-link: error)') { $hadError = $true }
     }
     if ($inBlock -and -not $hadError) { $quiet++ }
     return $quiet
@@ -271,6 +316,14 @@ switch ($Step) {
         Add-Env '_CL_' '/D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH'
     }
     & clang-cl --version
+
+    # Precompiled headers record the times of the system headers they read
+    # (Visual Studio's, the Windows SDK's, Clang's own), and every runner
+    # image installs those at a different time, so a precompiled header
+    # saved on one runner is "modified since" on the next. Give them all one
+    # fixed time, like the sources.
+    Write-Step 'Fixing the times of system headers'
+    Set-SystemHeaderTimes
 
     Write-Step 'vcpkg'
     if (-not (Test-Path "$VcpkgRoot\vcpkg.exe")) {
@@ -496,11 +549,19 @@ switch ($Step) {
     # more with fewer compilers at a time; real errors just fail again.
     if ($finished -and $ninja.ExitCode -ne 0) {
         $quiet = Test-QuietFailures $log
+        # Precompiled headers made with system headers of another time (see
+        # Set-SystemHeaderTimes): remove them, so ninja makes them again.
+        $stale = Remove-StalePrecompiledHeaders $log
         $left = [int]($deadline - [DateTimeOffset]::UtcNow).TotalSeconds
-        if ($quiet -and $left -gt 900) {
-            $jobs = [math]::Max(1, [int]([Environment]::ProcessorCount / 2))
-            Write-Step "$quiet step(s) failed without a compiler message; trying again with $jobs at a time"
-            Add-Summary "Stage $Stage`: $quiet step(s) failed without a compiler message (likely out of memory); retried with -j $jobs"
+        if (($quiet -or $stale) -and $left -gt 900) {
+            $jobs = if ($quiet -and -not $stale) { [math]::Max(1, [int]([Environment]::ProcessorCount / 2)) } else { [Environment]::ProcessorCount }
+            if ($stale) {
+                Write-Step "$stale precompiled header(s) were out of date; making them again and building on"
+                Add-Summary "Stage $Stage`: $stale precompiled header(s) were out of date (system headers from another runner); rebuilt them and retried"
+            } else {
+                Write-Step "$quiet step(s) failed without a compiler message; trying again with $jobs at a time"
+                Add-Summary "Stage $Stage`: $quiet step(s) failed without a compiler message (likely out of memory); retried with -j $jobs"
+            }
             Copy-Item $log "$log.first" -Force
             $ninja = Start-Process -FilePath ninja -ArgumentList @('-C', $Build, '-k', '0', '-j', "$jobs") -NoNewWindow -PassThru `
                 -RedirectStandardOutput $log -RedirectStandardError "$log.err"
@@ -559,11 +620,11 @@ switch ($Step) {
         if (-not $inBlock) { continue }
         if ($line -match '^\[\d+/\d+\] ') { & $noteQuiet; $inBlock = $false; $blockHadError = $true; continue }
         if ($inBlock -and $blockStart.Count -lt 8 -and -not $line.StartsWith('C:\') -and $line -notmatch 'clang-cl(\.exe)?"? ') { $blockStart += $line }
-        $isError = $line -match '(: (fatal )?error|error LNK\d+|^error: |: undefined symbol|lld-link: error|LLVM ERROR|out of memory|PLEASE submit a bug report|Exception Code|not enough memory|cannot allocate)'
+        $isError = $line -match '(: (fatal )?error|^fatal error: |error LNK\d+|^error: |: undefined symbol|lld-link: error|LLVM ERROR|out of memory|PLEASE submit a bug report|Exception Code|not enough memory|cannot allocate)'
         if ($isError) {
             $blockHadError = $true
             $keep = 6
-            $message = ($line -replace '^.*?: (fatal )?error: ', '') -replace '\s+', ' '
+            $message = ($line -replace '^(.*?: )?(fatal )?error: ', '') -replace '\s+', ' '
             if ($message.Length -gt 220) { $message = $message.Substring(0, 220) }
             $messages[$message] = 1 + [int]$messages[$message]
         } elseif ($line -match ': warning: ') {
