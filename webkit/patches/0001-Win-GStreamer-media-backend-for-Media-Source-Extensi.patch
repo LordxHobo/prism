@@ -66,7 +66,7 @@ binaries:
  .../gstreamer/GStreamerRegistryScanner.cpp    |  2 +
  .../GStreamerVideoFrameConverter.cpp          |  2 +
  .../gstreamer/ImageDecoderGStreamer.cpp       |  5 +
- .../gstreamer/MediaPlayerPrivateGStreamer.cpp | 51 +++++++++-
+ .../gstreamer/MediaPlayerPrivateGStreamer.cpp | 56 ++++++++++-
  .../gstreamer/MediaPlayerPrivateGStreamer.h   | 13 ++-
  .../gstreamer/VideoFrameGStreamer.cpp         |  9 +-
  .../graphics/gstreamer/mse/AppendPipeline.cpp |  1 -
@@ -74,7 +74,7 @@ binaries:
  .../graphics/RemoteGraphicsContextProxy.cpp   |  3 +
  Source/cmake/GStreamerWin.cmake               | 95 +++++++++++++++++++
  Source/cmake/OptionsWin.cmake                 | 20 +++-
- 27 files changed, 344 insertions(+), 27 deletions(-)
+ 27 files changed, 349 insertions(+), 27 deletions(-)
  create mode 100644 Source/cmake/GStreamerWin.cmake
 
 diff --git a/Source/WTF/wtf/Platform.h b/Source/WTF/wtf/Platform.h
@@ -562,7 +562,7 @@ index 75f95d0c1..e1ba1cf43 100644
      m_error = false;
  
 diff --git a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
-index 3b62489b8..6e52421b0 100644
+index 3b62489b8..9a457e94a 100644
 --- a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
 +++ b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
 @@ -32,7 +32,9 @@
@@ -575,7 +575,7 @@ index 3b62489b8..6e52421b0 100644
  #include "GStreamerCommon.h"
  #include "GStreamerQuirks.h"
  #include "GStreamerRegistryScanner.h"
-@@ -2948,6 +2950,9 @@ void MediaPlayerPrivateGStreamer::configureDownloadBuffer(GstElement* element)
+@@ -2948,11 +2950,19 @@ void MediaPlayerPrivateGStreamer::configureDownloadBuffer(GstElement* element)
      auto mediaDiskCachePath = GMallocString::unsafeAdoptFromUTF8(g_strdup(std::getenv("WPE_SHELL_MEDIA_DISK_CACHE_PATH")));
      if (mediaDiskCachePath.isEmpty())
          mediaDiskCachePath = gBuildFilename(G_DIR_SEPARATOR_S, "var", "tmp");
@@ -585,7 +585,17 @@ index 3b62489b8..6e52421b0 100644
  #else
      auto mediaDiskCachePath = gBuildFilename(G_DIR_SEPARATOR_S, "var", "tmp");
  #endif
-@@ -3910,8 +3915,14 @@ void MediaPlayerPrivateGStreamer::eosTimerFired()
+ 
++#if OS(WINDOWS)
++    // The path already starts with a drive letter: no leading separator.
++    auto newDownloadTemplate = gBuildFilename(mediaDiskCachePath, "WebKit-Media-XXXXXX");
++#else
+     auto newDownloadTemplate = gBuildFilename(G_DIR_SEPARATOR_S, mediaDiskCachePath, "WebKit-Media-XXXXXX");
++#endif
+     g_object_set(element, "temp-template", newDownloadTemplate.utf8(), nullptr);
+     GST_DEBUG_OBJECT(pipeline(), "Reconfigured file download template from '%s' to '%s'", oldDownloadTemplate.get(), newDownloadTemplate.utf8());
+ 
+@@ -3910,8 +3920,14 @@ void MediaPlayerPrivateGStreamer::eosTimerFired()
  
  void MediaPlayerPrivateGStreamer::acceleratedRenderingStateChanged()
  {
@@ -600,7 +610,7 @@ index 3b62489b8..6e52421b0 100644
  }
  
  bool MediaPlayerPrivateGStreamer::performTaskAtTime(Function<void(const MediaTime&)>&& task, const MediaTime& time)
-@@ -4413,8 +4424,20 @@ void MediaPlayerPrivateGStreamer::paint(GraphicsContext& context, const FloatRec
+@@ -4413,8 +4429,20 @@ void MediaPlayerPrivateGStreamer::paint(GraphicsContext& context, const FloatRec
      if (context.paintingDisabled())
          return;
  
@@ -621,7 +631,7 @@ index 3b62489b8..6e52421b0 100644
  
      // Keep a reference to the sample to avoid keeping the sampleMutex locked, which would be prone
      // to deadlocks if triggerRepaint is called while the video frame converter is blocked on its
-@@ -4423,8 +4446,10 @@ void MediaPlayerPrivateGStreamer::paint(GraphicsContext& context, const FloatRec
+@@ -4423,8 +4451,10 @@ void MediaPlayerPrivateGStreamer::paint(GraphicsContext& context, const FloatRec
      std::optional<VideoFrameGStreamer::Info> videoInfo;
      {
          Locker sampleLocker { m_sampleMutex };
@@ -633,7 +643,7 @@ index 3b62489b8..6e52421b0 100644
  
          sample = m_sample;
          videoInfo = m_videoInfo;
-@@ -4440,8 +4465,32 @@ void MediaPlayerPrivateGStreamer::paint(GraphicsContext& context, const FloatRec
+@@ -4440,8 +4470,32 @@ void MediaPlayerPrivateGStreamer::paint(GraphicsContext& context, const FloatRec
      if (!presentationSize)
          return;
  

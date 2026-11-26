@@ -2,7 +2,7 @@
 
 ## 0.9.34
 
-- Plain media files didn't play: `MediaPlayerPrivateGStreamer::configureDownloadBuffer` set the download buffer's `temp-template` to `/var/tmp/WebKit-Media-XXXXXX`, and `downloadbuffer` failed to create it ("Could not create temp file", seen in a GStreamer log of mov_bbb.mp4). `webkit/patches/0001`: on Windows the template is in `g_get_tmp_dir()`.
+- Plain media files didn't play: `MediaPlayerPrivateGStreamer::configureDownloadBuffer` set the download buffer's `temp-template` to `/var/tmp/WebKit-Media-XXXXXX`, and `downloadbuffer` failed to create it ("Could not create temp file", seen in a GStreamer log of mov_bbb.mp4). `webkit/patches/0001`: on Windows the template is in `g_get_tmp_dir()`. The first try still failed ("Invalid argument"): the template was built with a leading separator meant for `/var/tmp`, giving `\C:\Users\...`; on Windows it is now built without one.
 - Settings › General › "Compatible page drawing" (`CompatibleDrawing`, off): new tabs call `WKViewSetUsesOffscreenRendering`, so the GPU process renders into a texture, reads it back and the UI process paints it, instead of presenting into the view's window. A test for pages whose display stops updating (input and scrolling still work; switching tabs shows the current state), which points at presentation into the window.
 
 ## 0.9.33
