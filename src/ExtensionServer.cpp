@@ -38,6 +38,7 @@ namespace {
 
 std::mutex g_lock;
 std::map<std::string, Site> g_sites; // by host label
+std::map<std::string, Site> g_prismSites; // Prism's own, by host label
 std::atomic<uint16_t> g_port { 0 };
 
 std::string lowerASCII(std::string text)
@@ -186,8 +187,11 @@ void handle(SOCKET socket)
         std::lock_guard<std::mutex> lock(g_lock);
         auto found = g_sites.find(label);
         if (found == g_sites.end()) {
-            respond(socket, 404, "Not Found");
-            return;
+            found = g_prismSites.find(label);
+            if (found == g_prismSites.end()) {
+                respond(socket, 404, "Not Found");
+                return;
+            }
         }
         site = found->second;
     }
@@ -238,9 +242,18 @@ void handle(SOCKET socket)
     }
 
     std::error_code error;
-    fs::path file = site.dir / fs::path(util::fromUTF8(path)).make_preferred();
+    fs::path base = site.dir;
+    std::string inside = path;
+    for (auto& [prefix, dir] : site.mounts) {
+        if (path.size() > prefix.size() + 1 && path.compare(0, prefix.size(), prefix) == 0 && path[prefix.size()] == '/') {
+            base = dir;
+            inside = path.substr(prefix.size() + 1);
+            break;
+        }
+    }
+    fs::path file = base / fs::path(util::fromUTF8(inside)).make_preferred();
     fs::path canonical = fs::weakly_canonical(file, error);
-    fs::path root = fs::weakly_canonical(site.dir, error);
+    fs::path root = fs::weakly_canonical(base, error);
     auto relative = canonical.lexically_relative(root);
     if (error || relative.empty() || relative.native().rfind(L"..", 0) == 0 || !fs::is_regular_file(canonical, error)) {
         respond(socket, 404, "Not Found", { }, "Not found\n", head);
@@ -283,6 +296,12 @@ void setSites(std::vector<Site> sites)
     g_sites.clear();
     for (auto& site : sites)
         g_sites[hostLabel(site.id)] = std::move(site);
+}
+
+void setPrismSite(Site site)
+{
+    std::lock_guard<std::mutex> lock(g_lock);
+    g_prismSites[hostLabel(site.id)] = std::move(site);
 }
 
 uint16_t port()

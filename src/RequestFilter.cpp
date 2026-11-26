@@ -221,7 +221,8 @@ void didReceiveSynchronousMessageWithListener(WKContextRef context, WKStringRef 
     if (message == "prism:contentScripts?") {
         // A new web process: the extension content scripts it should run
         // (none in private windows, unless extensions are allowed there).
-        reply(privateContext && !settings::extensionsInPrivate() ? std::string("0\n") : extensions::contentScriptsPayload());
+        // (and Prism's translator in both).
+        reply(engine::contentScriptsPayload(privateContext));
         return;
     }
     if (message != "prism:check") {

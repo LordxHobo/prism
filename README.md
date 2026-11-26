@@ -6,6 +6,7 @@ A private, independent web browser for Windows, built on **WebKit** (the engine 
 - **Private by default.** WebKit's tracking prevention, third-party cookie blocking, HTTPS first, tracking parameters removed from links, fingerprinting protection, no DNS prefetching, no link-click pings, and popups only when you click. Each protection can be switched per site.
 - **Prism Shields, a built-in ad and tracker blocker.** Brave's blocking engine with uBlock Origin's filter lists: ad and tracker domains, leftover ad boxes, and site-specific fixes (like YouTube's video ads). On everywhere, switchable per site.
 - **Extensions from both stores**, with toolbar buttons, popups, background tasks and options pages. Install from the Chrome Web Store or Firefox Add-ons; the Extensions page shows what each one can and can't do in Prism yet.
+- **A translator that stays on your PC.** Pages in another language are translated as they load with Bergamot, the translator in Firefox. Each language is downloaded once from Mozilla; after that, nothing you read leaves your computer.
 - **The basics:** bookmarks (with a bookmarks bar, folders, and import from Chrome, Edge, Brave, Vivaldi, Opera or an HTML file), history with address-bar suggestions, find in page, and location and notification prompts.
 - **Tabs your way:** tab groups in one row (like Chrome) or two rows (like Vivaldi), vertical tabs, drag to reorder, site icons.
 - **Customizable:** color palettes, your own CSS for Prism's interface and for websites, a new tab page with shortcuts and your own background. The whole interface is HTML and CSS (see [`ui/`](ui)).
@@ -55,4 +56,4 @@ dist\Prism.exe
 
 ## License
 
-[Mozilla Public License 2.0](LICENSE). WebKit is licensed separately under LGPL and BSD licenses. adblock-rust is MPL-2.0. uBlock Origin's scriptlets, which Prism ships as a separate data file (`shields\scriptlets.json`), are GPLv3; filter lists are downloaded from their authors and keep their own licenses.
+[Mozilla Public License 2.0](LICENSE). WebKit is licensed separately under LGPL and BSD licenses. adblock-rust is MPL-2.0. uBlock Origin's scriptlets, which Prism ships as a separate data file (`shields\scriptlets.json`), are GPLv3; filter lists are downloaded from their authors and keep their own licenses. The translator ([`ui/translate`](ui/translate)) uses Firefox's Bergamot code (MPL-2.0), CLD2 (Apache-2.0) and fzstd (MIT); its engine and language models are downloaded from Mozilla.

@@ -13,6 +13,7 @@
 #include "Permissions.h"
 #include "Passwords.h"
 #include "Aci.h"
+#include "Translate.h"
 #include "Perf.h"
 #include "Privacy.h"
 #include "Recovery.h"
@@ -70,6 +71,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     passwords::initialize();
     perf::start(); // notes when Prism's main thread keeps pages waiting
     aci::initialize(); // reading views
+    translate::initialize(); // translating pages (Bergamot, on this PC)
         icons::setChangeListener([] { BrowserWindow::refreshToolbars(); });
     // Your own CSS for Prism's interface and for websites.
     usercss::initialize([] { BrowserWindow::applyInterfaceCSS(); });
@@ -147,6 +149,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     recovery::finish();
     extensions::flushStorage();
     permissions::shutdown();
+    translate::shutdown();
 
     if (settings::clearOnExit()) {
         // Delete cookies, site data and caches now. Give WebKit up to five

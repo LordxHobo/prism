@@ -481,6 +481,28 @@ button {
   fill: currentColor;
 }
 
+/* ---- Translate button ----------------------------------------------------- */
+
+#translate.on {
+  color: var(--accent);
+}
+
+#translate.busy svg {
+  animation: translate-busy 1.2s ease-in-out infinite;
+}
+
+#translate.failed {
+  color: #e5484d;
+}
+
+@keyframes translate-busy {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #translate.busy svg { animation: none; }
+}
+
 /* ---- Rows under the navigation bar --------------------------------------- */
 /* Heights must match the k...CSSHeight constants in BrowserWindow.cpp. */
 

@@ -22,12 +22,24 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.37</span>
+      <span class="version">Version 0.9.38</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Extension fix</h2>
+    <h2 style="margin-top:0">Translate pages</h2>
+    <p>Pages in another language are translated into yours while they load, on your own PC. Nothing you read is sent anywhere.</p>
+    <ul class="notes">
+      <li>Prism uses Bergamot, the translator built into Firefox, with Firefox's language detector. It knows about 50 languages.</li>
+      <li>The first time a language comes up, Prism downloads it from Mozilla (usually 20 to 60 MB) and checks it. After that it works offline.</li>
+      <li>The translate button in the address bar shows the page's language. Its menu has <strong>Show original</strong>, another language to translate into, and never translating a language or a site.</li>
+      <li>Links, buttons and forms keep working on translated pages, and text a page adds later is translated too.</li>
+      <li>Settings › Translation: translate automatically or only when you ask, which language to translate into (English to start with), and the languages on your PC.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Extension fix</h2>
     <p>Extensions whose background worker loads helper files (like Enhancer for YouTube) failed with errors such as "Can't find variable: config". Those files now share their settings with the worker, as in Chrome.</p>
   </div>
 

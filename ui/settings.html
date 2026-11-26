@@ -20,6 +20,7 @@
     <a href="#newtabpage">New tab page</a>
     <a href="#customcss">Custom CSS</a>
     <a href="#reading">Reading views</a>
+    <a href="#translation">Translation</a>
     <a href="#privacy">Privacy</a>
     <a href="#permissions">Site permissions</a>
     <a href="#shields">Shields</a>
@@ -301,6 +302,51 @@
         <h2>Sites with their own view</h2>
         <p class="dim">Set from a reading view's <b>Aa</b> menu.</p>
         <div id="aciSites"></div>
+      </div>
+    </section>
+
+    <section id="translation">
+      <h1>Translation</h1>
+      <p class="dim">Prism translates pages in other languages on this computer, with Bergamot, the engine of Firefox Translations. What you read is never sent anywhere. Each language is downloaded from Mozilla the first time it’s needed (usually 20 to 60 MB) and checked before it’s used.</p>
+      <p class="dim" id="translateUnavailable" hidden>Translating needs Prism’s page helper (PrismBundle), which this WebKit build couldn’t load.</p>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Translate pages</span>
+          <p class="dim">With “When I ask”, the translate button in the address bar shows on pages in another language.</p>
+        </div>
+        <div class="control"><select id="translateMode">
+          <option value="auto">Automatically, as they load</option>
+          <option value="offer">When I ask</option>
+          <option value="off">Off</option>
+        </select></div>
+      </div>
+
+      <div class="row">
+        <div class="label">
+          <span class="title">Translate into</span>
+          <p class="dim" id="translateCatalog"></p>
+        </div>
+        <div class="control"><select id="translateTo"></select></div>
+      </div>
+
+      <div class="card">
+        <h2>Languages on this PC</h2>
+        <p class="dim" id="translateUsed"></p>
+        <p class="dim" id="translateProgress" hidden></p>
+        <div id="translateLanguages" class="translate-languages"></div>
+        <div class="buttons"><button class="button secondary" id="translateRemoveAll">Delete all languages</button></div>
+      </div>
+
+      <div class="card">
+        <h2>Never translated</h2>
+        <p class="dim">Set from the translate button’s menu.</p>
+        <div id="translateNever"></div>
+      </div>
+
+      <div class="card" id="translateAlwaysCard" hidden>
+        <h2>Always translated</h2>
+        <div id="translateAlways"></div>
       </div>
     </section>
 

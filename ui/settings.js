@@ -688,3 +688,93 @@ $('aciSystemFont').addEventListener('change', () => {
 $('aciPickFile').addEventListener('click', () => showAci(ask('aci.fontFile')));
 $('aciBionic').addEventListener('change', () => showAci(ask('aci.set', 'bionic\n' + ($('aciBionic').checked ? 'true' : 'false'))));
 showAci(ask('aci.get'));
+
+// ---- Translation ----------------------------------------------------------------------
+function megabytes(bytes) {
+  return bytes >= 1e9 ? (bytes / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(bytes / 1e6)) + ' MB';
+}
+let translateTimer = 0;
+function translateRow(titleText, detailText, buttonText, onClick) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const label = document.createElement('div');
+  label.className = 'label';
+  const title = document.createElement('span');
+  title.className = 'title';
+  title.textContent = titleText;
+  label.appendChild(title);
+  if (detailText) {
+    const detail = document.createElement('p');
+    detail.className = 'dim';
+    detail.textContent = detailText;
+    label.appendChild(detail);
+  }
+  row.appendChild(label);
+  if (buttonText) {
+    const button = document.createElement('button');
+    button.className = 'button secondary';
+    button.textContent = buttonText;
+    button.addEventListener('click', onClick);
+    row.appendChild(button);
+  }
+  return row;
+}
+function showTranslate(data) {
+  if (!data) return;
+  $('translateUnavailable').hidden = data.available !== false;
+  $('translateMode').value = data.mode || 'auto';
+  const select = $('translateTo');
+  const targets = data.targets && data.targets.length ? data.targets : [{ code: data.to, name: data.toName }];
+  const key = targets.map((t) => t.code).join(',');
+  if (select.dataset.key !== key) {
+    select.textContent = '';
+    for (const target of targets) select.appendChild(new Option(target.name, target.code));
+    select.dataset.key = key;
+  }
+  select.value = data.to;
+  const catalog = $('translateCatalog');
+  if (data.catalog === 'loading') catalog.textContent = 'Getting the list of languages from Mozilla…';
+  else if (data.catalog === 'error') catalog.textContent = 'Couldn’t get the list of languages: ' + (data.error || 'no connection') + '.';
+  else catalog.textContent = '';
+
+  const downloading = data.downloading;
+  const progress = $('translateProgress');
+  progress.hidden = !downloading;
+  if (downloading) {
+    const percent = downloading.total ? Math.round(downloading.received * 100 / downloading.total) : 0;
+    progress.textContent = 'Downloading ' + downloading.name + '… ' + percent + '% of ' + megabytes(downloading.total);
+  }
+  $('translateUsed').textContent = data.used ? 'Using ' + megabytes(data.used) + '. A language translates both ways (to and from English).' : 'None downloaded yet. A language translates both ways (to and from English).';
+  const list = $('translateLanguages');
+  list.textContent = '';
+  for (const language of data.languages || []) {
+    list.appendChild(translateRow(language.name, megabytes(language.size) + (language.downloaded ? ', on this PC' : ''),
+      language.downloaded ? 'Delete' : 'Download',
+      () => showTranslate(ask(language.downloaded ? 'translate.remove' : 'translate.download', language.code))));
+  }
+  if (!(data.languages || []).length) list.innerHTML = '<p class="dim">The list appears once Prism has it from Mozilla.</p>';
+
+  const never = $('translateNever');
+  never.textContent = '';
+  for (const language of data.neverLanguages || [])
+    never.appendChild(translateRow(language.name, 'Language', 'Remove', () => showTranslate(ask('translate.removeNeverLanguage', language.code))));
+  for (const site of data.neverSites || [])
+    never.appendChild(translateRow(site, 'Site', 'Remove', () => showTranslate(ask('translate.removeNeverSite', site))));
+  if (!never.children.length) never.innerHTML = '<p class="dim">None.</p>';
+
+  const always = $('translateAlways');
+  always.textContent = '';
+  for (const language of data.alwaysLanguages || [])
+    always.appendChild(translateRow(language.name, null, 'Remove', () => showTranslate(ask('translate.removeAlwaysLanguage', language.code))));
+  $('translateAlwaysCard').hidden = !(data.alwaysLanguages || []).length;
+
+  // Keep up with downloads and the list arriving.
+  clearTimeout(translateTimer);
+  if (downloading || data.catalog === 'loading') translateTimer = setTimeout(() => showTranslate(ask('translate.get')), 1000);
+}
+$('translateMode').addEventListener('change', () => showTranslate(ask('translate.set', 'mode\n' + $('translateMode').value)));
+$('translateTo').addEventListener('change', () => showTranslate(ask('translate.set', 'to\n' + $('translateTo').value)));
+$('translateRemoveAll').addEventListener('click', () => {
+  if (window.confirm('Delete every downloaded language? They download again when needed.')) showTranslate(ask('translate.removeAll'));
+});
+showTranslate(ask('translate.get'));

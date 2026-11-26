@@ -4,6 +4,7 @@
 
 #include "Extensions.h"
 #include "Aci.h"
+#include "Translate.h"
 #include "ExtensionsInternal.h"
 #include "ExtensionServer.h"
 
@@ -834,11 +835,9 @@ void rebuildUserScripts()
     if (isolated) {
         // Every web process gets them (they ask at start, see RequestFilter).
         g_contentPayload = std::to_string(count) + "\n" + payload;
-        if (WKContextRef context = engine::context())
-            WKContextPostMessageToInjectedBundle(context, wk::stringUTF8("prism:contentScripts").get(), wk::stringUTF8(g_contentPayload).get());
-        // Private windows' processes too, when extensions may run there.
-        if (WKContextRef context = engine::privateContextIfCreated(); context && settings::extensionsInPrivate())
-            WKContextPostMessageToInjectedBundle(context, wk::stringUTF8("prism:contentScripts").get(), wk::stringUTF8(g_contentPayload).get());
+        // With Prism's translator added (and private windows' processes
+        // without extensions unless they may run there).
+        engine::sendContentScripts();
     }
 }
 
@@ -1685,6 +1684,13 @@ void handleBundleContentMessage(WKPageRef page, const std::string& body)
         if (WKPagePostMessageToInjectedBundle)
             WKPagePostMessageToInjectedBundle(heldPage.get(), wk::stringUTF8("prism:contentReply").get(), wk::stringUTF8(document + "\t" + callId + "\t" + answer).get());
     });
+    if (extensionId == "prism-translate") {
+        // Prism's translator (Translate.cpp), from its world; answers may come later.
+        translate::handleMessage(page, mainFrame, text, [listener](const std::string& answer) {
+            listener.send("{\"ok\":true,\"result\":" + answer + "}");
+        });
+        return;
+    }
     if (extensionId == "prism-aci") {
         // Prism's own reading views (Aci.cpp), from their world.
         listener.send("{\"ok\":true,\"result\":" + aci::handleMessage(page, text) + "}");

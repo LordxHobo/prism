@@ -443,6 +443,12 @@ ul.tips li { margin: 6px 0; }
 .site-rule .head .remove { flex: none; }
 .site-rule .sites { rows: 1; }
 
+.translate-languages {
+  max-height: 360px;
+  overflow: auto;
+  margin-top: 8px;
+}
+
 .perfLog {
   max-height: 260px;
   overflow: auto;

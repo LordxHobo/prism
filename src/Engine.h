@@ -68,6 +68,11 @@ WKContextRef privateContextIfCreated();
 // "Extensions in private windows" may have changed: gives private pages
 // opened from now on extension content scripts, or takes them away.
 void privateExtensionsChanged();
+// What PrismBundle runs in new documents (extensions' content scripts and
+// Prism's translator), for a web process of the normal or private context.
+std::string contentScriptsPayload(bool privateContext);
+// Sends it again to both contexts (for documents loaded from now on).
+void sendContentScripts();
 
 // Applies per-page privacy settings (user agent, scale). Call on every new page.
 void configurePage(WKPageRef, double scaleFactor);

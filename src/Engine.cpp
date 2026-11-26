@@ -9,6 +9,7 @@
 #include "Passwords.h"
 #include "Aci.h"
 #include "Tabs.h"
+#include "Translate.h"
 #include "Icons.h"
 #include "RequestFilter.h"
 #include "Shields.h"
@@ -469,12 +470,25 @@ void privateExtensionsChanged()
     if (s_privateUserContent)
         registerAllUserScripts(s_privateUserContent.get(), now == 1);
     // PrismBundle in private web processes: the scripts for documents loaded
-    // from now on (none when off).
-    if (s_privateContext && WKContextPostMessageToInjectedBundle) {
-        std::string payload = now ? extensions::contentScriptsPayload() : std::string("0\n");
-        if (!payload.empty())
-            WKContextPostMessageToInjectedBundle(s_privateContext.get(), stringUTF8("prism:contentScripts").get(), stringUTF8(payload).get());
-    }
+    // from now on (no extensions' when off).
+    if (s_privateContext && WKContextPostMessageToInjectedBundle)
+        WKContextPostMessageToInjectedBundle(s_privateContext.get(), stringUTF8("prism:contentScripts").get(), stringUTF8(contentScriptsPayload(true)).get());
+}
+
+std::string contentScriptsPayload(bool privateContext)
+{
+    std::string payload = privateContext && !settings::extensionsInPrivate() ? std::string("0\n") : extensions::contentScriptsPayload();
+    return translate::withTranslator(payload.empty() ? std::string("0\n") : payload);
+}
+
+void sendContentScripts()
+{
+    if (!WKContextPostMessageToInjectedBundle)
+        return;
+    if (s_context)
+        WKContextPostMessageToInjectedBundle(s_context.get(), stringUTF8("prism:contentScripts").get(), stringUTF8(contentScriptsPayload(false)).get());
+    if (s_privateContext)
+        WKContextPostMessageToInjectedBundle(s_privateContext.get(), stringUTF8("prism:contentScripts").get(), stringUTF8(contentScriptsPayload(true)).get());
 }
 
 bool isPrivateContext(WKContextRef context)

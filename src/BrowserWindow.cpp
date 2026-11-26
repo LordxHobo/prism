@@ -4,6 +4,7 @@
 
 #include "BrowserWindow.h"
 #include "Aci.h"
+#include "Translate.h"
 
 #include "Dialogs.h"
 #include "Blocker.h"
@@ -678,6 +679,7 @@ static void detachClients(WKPageRef page)
 {
     if (!page)
         return;
+    translate::pageClosed(page);
     WKPageUIClientV6 uiClient = { };
     uiClient.base.version = 6;
     WKPageSetPageUIClient(page, &uiClient.base);
@@ -1191,6 +1193,13 @@ void BrowserWindow::handleToolbarCommand(const std::wstring& command, const std:
     } else if (command == L"aci") {
         if (Tab* tab = activeTab(); tab && !tab->extensionPages)
             aci::toggle(tab->page, tab->url, m_hwnd);
+    } else if (command == L"translateMenu") {
+        if (Tab* tab = activeTab(); tab && !tab->extensionPages) {
+            WKPageRef page = tab->page;
+            if (translate::showMenu(page, m_hwnd, toolbarPoint(argument)))
+                openInternalPage(L"settings", L"translation");
+            pushState();
+        }
     } else if (command == L"passwords") {
         openInternalPage(L"passwords");
     } else if (command == L"extensions") {
@@ -1463,6 +1472,7 @@ void BrowserWindow::pushState()
             && (schemeOf(tab->url) == L"http" || schemeOf(tab->url) == L"https" || schemeOf(tab->url) == L"file");
         json += ",\"bookmarkable\":" + std::string(bookmarkable ? "true" : "false");
         json += ",\"readable\":" + std::string(!tab->extensionPages && aci::canRun(tab->url) ? "true" : "false");
+        json += ",\"translate\":" + (tab->extensionPages || engine::isInternalURL(tab->url) ? std::string("null") : translate::stateJSON(tab->page));
         // Only the active tab shows the star.
         bool bookmarked = bookmarkable && tab->id == m_activeTabId && bookmarks::findURL(tab->url);
         json += ",\"bookmarked\":" + std::string(bookmarked ? "true" : "false");
@@ -2430,6 +2440,8 @@ void BrowserWindow::runJavaScriptPrompt(WKPageRef, WKStringRef text, WKStringRef
                 refreshToolbars();
             } else if (isSettings && command.rfind(L"privacy.", 0) == 0)
                 answer = privacy::handleCommand(command.substr(8), argument);
+            else if (isSettings && command.rfind(L"translate.", 0) == 0)
+                answer = translate::handleCommand(command.substr(10), argument);
             else if (isSettings && command.rfind(L"aci.", 0) == 0)
                 answer = aci::handleCommand(command.substr(4), argument, tab->window->hwnd());
             else if (isSettings && command == L"perf.log")
@@ -3069,6 +3081,7 @@ void BrowserWindow::didCommitNavigation(WKPageRef page, WKNavigationRef, WKTypeR
     Tab* tab = tabFromClientInfo(clientInfo);
     tab->upgradedFrom.clear(); // the upgrade worked (or was replaced)
     requestfilter::pageCommitted(page);
+    translate::pageCommitted(page); // the translator starts over too
     // A new page: the old page's questions go away, and find starts over.
     tab->window->denyPrompts(tab);
     if (tab->findOpen) {

@@ -25,6 +25,7 @@ const elements = {
   progress: $('progress'),
   star: $('star'),
   aci: $('aci'),
+  translate: $('translate'),
   bookmarksbar: $('bookmarksbar'),
   bookmarkItems: $('bookmarkItems'),
   bookmarksEmpty: $('bookmarksEmpty'),
@@ -623,9 +624,37 @@ function renderNavigation() {
 
 // ---- Bookmark star and bookmarks bar -----------------------------------------------
 
+// The translate button: shown on pages in another language.
+function renderTranslate(tab) {
+  const state = tab && tab.translate;
+  const button = elements.translate;
+  button.hidden = !state;
+  if (!state) return;
+  const busy = state.status === 'downloading' || state.status === 'translating';
+  button.classList.toggle('on', state.status === 'translated' || busy);
+  button.classList.toggle('busy', busy);
+  button.classList.toggle('failed', state.status === 'failed');
+  let title;
+  if (state.status === 'downloading') {
+    const percent = state.progress >= 0 ? ' (' + Math.round(state.progress * 100) + '%)' : '';
+    title = 'Downloading ' + state.fromName + ' for translating' + percent + '…';
+  } else if (state.status === 'translating') {
+    title = 'Translating from ' + state.fromName + ' to ' + state.toName + '…';
+  } else if (state.status === 'translated') {
+    title = 'Translated from ' + state.fromName + ' to ' + state.toName;
+  } else if (state.status === 'failed') {
+    title = 'Couldn’t translate this page' + (state.error ? ': ' + state.error : '');
+  } else {
+    title = 'This page is in ' + state.fromName + '. Translate it?';
+  }
+  button.title = title;
+  button.setAttribute('aria-label', title);
+}
+
 function renderStar() {
   const tab = activeTab();
   elements.aci.hidden = !(tab && tab.readable);
+  renderTranslate(tab);
   const show = !!(tab && tab.bookmarkable);
   elements.star.hidden = !show;
   elements.star.classList.toggle('on', !!(tab && tab.bookmarked));
@@ -934,6 +963,10 @@ elements.extensions.addEventListener('click', () => {
 $('home').addEventListener('click', () => send('home'));
 $('passwords').addEventListener('click', () => send('passwords'));
 elements.aci.addEventListener('click', () => send('aci'));
+elements.translate.addEventListener('click', () => {
+  const rect = elements.translate.getBoundingClientRect();
+  send('translateMenu', Math.round(rect.right) + ',' + Math.round(rect.bottom + 4));
+});
 $('sidebarToggle').addEventListener('click', () => send('sidebarToggle'));
 $('sidebarNewTab').addEventListener('click', () => send('newtab'));
 
