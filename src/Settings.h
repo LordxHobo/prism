@@ -65,6 +65,10 @@ bool extensionsInPrivate();
 // Pages are drawn into an image that Prism shows, instead of straight into
 // their window by the GPU process. Slower; for pages that stop updating.
 bool compatibleDrawing();
+// The largest video sites are told Prism can play: "1080", "1440", "2160"
+// or "max". Prism decodes video on the processor for now, so above 1080p
+// usually stutters. Applied when Prism starts (see main.cpp).
+std::wstring videoQualityLimit();
 // Extensions whose buttons are hidden from the toolbar (still in the
 // Extensions menu).
 bool isActionHidden(const std::string& extensionId);

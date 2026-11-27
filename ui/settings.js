@@ -94,6 +94,7 @@ function render(settings) {
   $('fingerprinting').checked = !!settings.fingerprinting;
   $('extensionsInPrivate').checked = !!settings.extensionsInPrivate;
   $('compatibleDrawing').checked = !!settings.compatibleDrawing;
+  $('videoQualityLimit').value = settings.videoQualityLimit || '1080';
   renderSegmented('tabLayout', settings.tabLayout);
   renderSegmented('groupStyle', settings.groupStyle);
   renderSegmented('newTabShortcuts', settings.newTabShortcuts);
@@ -303,6 +304,9 @@ $('fingerprinting').addEventListener('change', () => {
 });
 $('compatibleDrawing').addEventListener('change', () => {
   setSetting('compatibleDrawing', $('compatibleDrawing').checked ? '1' : '0');
+});
+$('videoQualityLimit').addEventListener('change', () => {
+  setSetting('videoQualityLimit', $('videoQualityLimit').value);
 });
 $('extensionsInPrivate').addEventListener('change', () => {
   setSetting('extensionsInPrivate', $('extensionsInPrivate').checked ? '1' : '0');

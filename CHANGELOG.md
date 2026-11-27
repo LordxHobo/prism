@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.39
+
+- **WebKit patch 0004** (`webkit/patches`): without accelerated compositing (Windows), `MediaPlayerPrivateGStreamer::triggerRepaint()` no longer waits on `m_drawCondition` until the main thread has painted each frame; it starts the draw timer (if it isn't pending) and returns. `paint()` draws the newest sample, so frames the main thread has no time for are skipped. Fixes YouTube pages freezing for good when playback starts (the streaming thread waiting for the main thread while the main thread waits for the pipeline, like https://bugs.webkit.org/show_bug.cgi?id=170003) and uneven video while the page is busy.
+- **Highest video quality** (Settings › General, `VideoQualityLimit`: 1080 by default, 1440, 2160, max): Prism sets `WEBKIT_GST_VIDEO_DECODING_LIMIT` (`1920x1920@60` etc., square for vertical video) before WebKit starts, unless it's set already, so `isTypeSupported()` and Media Capabilities turn down bigger video and YouTube picks at most that quality. Video is decoded and copied on the processor for now, which 1440p and 4K are too much for.
+
 ## 0.9.38
 
 - **Translator** (`src/Translate.cpp`, `ui/translate-page.js`, `ui/translate/`). Pages are translated on this PC with Bergamot, the engine of Firefox Translations: Firefox's `bergamot-translator.js` (v0.6.0, MPL-2.0) and CLD2 (`cld-worker.js`, Apache-2.0) are in `ui/translate`; the WebAssembly engine and the language models come from Mozilla's Remote Settings (`translations-wasm`, `translations-models`), like in Firefox, and are kept in `<data>\translations\files` by SHA-256 (checked after download). Versions: engine 4.x with models 3.x (zstd, decompressed in the worker by `fzstd.js`, MIT), or engine 3.x with models 1.x/2.x if there's no 4.x; `filter_expression` is read as a desktop release Firefox would; no lexical shortlist (Firefox's default, more accurate). The record list is cached and refreshed daily.

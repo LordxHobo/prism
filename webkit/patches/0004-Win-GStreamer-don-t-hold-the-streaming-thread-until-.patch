@@ -1,0 +1,48 @@
+From 2adf3bcc948f45103f7e464766e6a37b9e04c3c4 Mon Sep 17 00:00:00 2001
+From: Prism <prism@users.noreply.github.com>
+Date: Fri, 27 Nov 2026 17:36:55 +0100
+Subject: [PATCH] [Win] GStreamer: don't hold the streaming thread until the
+ main thread paints
+
+Without accelerated compositing, MediaPlayerPrivateGStreamer::triggerRepaint()
+waited on m_drawCondition for every video frame until the main thread had
+painted. On Windows that slowed video down whenever the page's main thread
+was busy (YouTube), and could deadlock the page when the main thread waited
+for the pipeline while the streaming thread waited for the main thread.
+paint() always draws the newest sample, so the wait isn't needed: frames the
+main thread has no time for are skipped.
+---
+ .../gstreamer/MediaPlayerPrivateGStreamer.cpp      | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
+index 9a457e94a..59ef095c0 100644
+--- a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
++++ b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
+@@ -4277,9 +4277,23 @@ void MediaPlayerPrivateGStreamer::triggerRepaint(GRefPtr<GstSample>&& sample)
+         Locker locker { m_drawLock };
+         if (m_isBeingDestroyed)
+             return;
++#if PLATFORM(WIN)
++        // Starting a RunLoop timer from another thread is safe; one pending
++        // draw is enough.
++        if (!m_drawTimer.isActive())
++            m_drawTimer.startOneShot(0_s);
++        // Don't hold the streaming thread until the main thread has painted.
++        // paint() draws whatever m_sample is newest, so frames the main thread
++        // has no time for are skipped instead of slowing down decoding, and the
++        // streaming thread can't deadlock with a main thread that waits for it
++        // (pausing, seeking, flushing: https://bugs.webkit.org/show_bug.cgi?id=170003
++        // when "repaint-cancelled" doesn't come).
++        return;
++#else
+         m_drawTimer.startOneShot(0_s);
+         m_drawCondition.wait(m_drawLock);
+         return;
++#endif
+     }
+ 
+ #if USE(COORDINATED_GRAPHICS)
+-- 
+2.43.0
+

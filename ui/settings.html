@@ -81,6 +81,19 @@
           <label class="switch"><input type="checkbox" id="compatibleDrawing"><span></span></label>
         </div>
       </div>
+
+      <div class="row">
+        <div class="label">
+          <label for="videoQualityLimit" class="title">Highest video quality</label>
+          <p class="dim">Prism decodes video on the processor for now, not the graphics card, so videos above 1080p usually stutter and slow pages down. Sites like YouTube won’t offer more than this. Applies after you restart Prism.</p>
+        </div>
+        <div class="control"><select id="videoQualityLimit">
+          <option value="1080">1080p (smoothest)</option>
+          <option value="1440">1440p</option>
+          <option value="2160">4K</option>
+          <option value="max">No limit</option>
+        </select></div>
+      </div>
     </section>
 
     <section id="appearance">

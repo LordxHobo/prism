@@ -39,6 +39,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 
     engine::deleteProfileIfRequested();
 
+    // WebKit's GStreamer media backend (in the page processes, which inherit
+    // this) tells sites it can't play video above this size, so YouTube and
+    // the like pick a quality the processor can decode smoothly. Square, so
+    // vertical videos get the same quality. Unless it's set already.
+    if (!GetEnvironmentVariableW(L"WEBKIT_GST_VIDEO_DECODING_LIMIT", nullptr, 0)) {
+        std::wstring limit = settings::videoQualityLimit();
+        const wchar_t* value = limit == L"1440" ? L"2560x2560@60" : limit == L"2160" ? L"3840x3840@60" : limit == L"max" ? nullptr : L"1920x1920@60";
+        if (value)
+            SetEnvironmentVariableW(L"WEBKIT_GST_VIDEO_DECODING_LIMIT", value);
+    }
+
     std::wstring error;
     if (!engine::initialize(error)) {
         MessageBoxW(nullptr, error.c_str(), L"Prism can't start", MB_OK | MB_ICONERROR);

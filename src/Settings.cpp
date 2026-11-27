@@ -206,6 +206,12 @@ bool compatibleDrawing()
     return util::readSetting(L"CompatibleDrawing", L"0") == L"1";
 }
 
+std::wstring videoQualityLimit()
+{
+    std::wstring value = util::readSetting(L"VideoQualityLimit", L"1080");
+    return value == L"1440" || value == L"2160" || value == L"max" ? value : L"1080";
+}
+
 bool extensionsInPrivate()
 {
     return util::readSetting(L"ExtensionsInPrivate", L"0") == L"1";
@@ -301,6 +307,7 @@ std::string toJSON()
     json += ",\"fingerprinting\":" + jsonBool(util::readSetting(L"Fingerprinting", L"1") != L"0");
     json += ",\"extensionsInPrivate\":" + jsonBool(extensionsInPrivate());
     json += ",\"compatibleDrawing\":" + jsonBool(compatibleDrawing());
+    json += ",\"videoQualityLimit\":" + util::jsonString(videoQualityLimit());
     json += ",\"tabLayout\":" + util::jsonString(verticalTabs() ? L"vertical" : L"horizontal");
     json += ",\"groupStyle\":" + util::jsonString(groupStyle());
     json += ",\"palette\":" + util::jsonString(palette());
@@ -390,6 +397,10 @@ bool set(const std::wstring& key, const std::wstring& value)
         if (!isOneOf(value, { L"0", L"1" }))
             return false;
         util::writeSetting(L"CompatibleDrawing", value);
+    } else if (key == L"videoQualityLimit") {
+        if (!isOneOf(value, { L"1080", L"1440", L"2160", L"max" }))
+            return false;
+        util::writeSetting(L"VideoQualityLimit", value);
     } else if (key == L"extensionsInPrivate") {
         if (!isOneOf(value, { L"0", L"1" }))
             return false;
