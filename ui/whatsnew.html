@@ -22,15 +22,24 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.39</span>
+      <span class="version">Version 0.9.40</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Smoother video</h2>
+    <h2 style="margin-top:0">Video and crash fixes</h2>
+    <ul class="notes">
+      <li>YouTube no longer freezes at the start of a video. Prism now decodes video with DirectX 11 on your graphics card. The DirectX 12 decoder sometimes never delivered the first frame.</li>
+      <li>New in Settings › General: <strong>Video decoding</strong> (graphics card, processor, or automatic). It applies after you restart Prism.</li>
+      <li>Fixed Prism closing when you came back to its window from another one. (This part needs the new WebKit build.)</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Smoother video</h2>
     <ul class="notes">
       <li>Videos no longer wait for the page to finish drawing each frame. YouTube should stop getting stuck at the start of a video, and video plays more evenly while the page is busy. (This part needs the new WebKit build.)</li>
-      <li>New in Settings › General: <strong>Highest video quality</strong>, 1080p to start with. Prism decodes video on the processor for now, not the graphics card, and 1440p or 4K is too much for that. Sites like YouTube won't offer more than you choose. It applies after you restart Prism.</li>
+      <li>New in Settings › General: <strong>Highest video quality</strong>, 1080p to start with. Each frame is still copied and drawn on the processor for now, and 1440p or 4K is too much for that. Sites like YouTube won't offer more than you choose. It applies after you restart Prism.</li>
     </ul>
   </div>
 

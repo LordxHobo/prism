@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.40
+
+- **Video decoding** (Settings › General, `VideoDecoder`: `d3d11` by default, `cpu`, `auto`): Prism sets `GST_PLUGIN_FEATURE_RANK` before WebKit starts (unless it's set already) so the DirectX 12 decoders (`d3d12*dec`), and with `cpu` the DirectX 11 ones too, aren't used. A log showed `d3d12vp9dec` never delivering YouTube's first frame; the page then froze in the seek's FLUSH_START. With DirectX 11 or the processor it didn't freeze.
+- **WebKit patch 0005**: `WebView::paint()` (Skia) checks `SkSurfaces::Raster()` before `getCanvas()`. Three crash dumps of the UI process: null `this` + 0x38 under the WebView's window procedure, when going back to Prism's window.
+
 ## 0.9.39
 
 - **WebKit patch 0004** (`webkit/patches`): without accelerated compositing (Windows), `MediaPlayerPrivateGStreamer::triggerRepaint()` no longer waits on `m_drawCondition` until the main thread has painted each frame; it starts the draw timer (if it isn't pending) and returns. `paint()` draws the newest sample, so frames the main thread has no time for are skipped. Fixes YouTube pages freezing for good when playback starts (the streaming thread waiting for the main thread while the main thread waits for the pipeline, like https://bugs.webkit.org/show_bug.cgi?id=170003) and uneven video while the page is busy.

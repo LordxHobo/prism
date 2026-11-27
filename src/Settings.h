@@ -66,9 +66,14 @@ bool extensionsInPrivate();
 // their window by the GPU process. Slower; for pages that stop updating.
 bool compatibleDrawing();
 // The largest video sites are told Prism can play: "1080", "1440", "2160"
-// or "max". Prism decodes video on the processor for now, so above 1080p
+// or "max". Frames are copied and drawn on the processor for now, so above 1080p
 // usually stutters. Applied when Prism starts (see main.cpp).
 std::wstring videoQualityLimit();
+// Which video decoders GStreamer may use: "d3d11" (the graphics card through
+// DirectX 11; the DirectX 12 ones can stall before the first frame),
+// "cpu" (the processor) or "auto" (GStreamer's choice). Applied when Prism
+// starts (see main.cpp).
+std::wstring videoDecoder();
 // Extensions whose buttons are hidden from the toolbar (still in the
 // Extensions menu).
 bool isActionHidden(const std::string& extensionId);

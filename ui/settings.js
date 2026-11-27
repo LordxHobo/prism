@@ -95,6 +95,7 @@ function render(settings) {
   $('extensionsInPrivate').checked = !!settings.extensionsInPrivate;
   $('compatibleDrawing').checked = !!settings.compatibleDrawing;
   $('videoQualityLimit').value = settings.videoQualityLimit || '1080';
+  $('videoDecoder').value = settings.videoDecoder || 'd3d11';
   renderSegmented('tabLayout', settings.tabLayout);
   renderSegmented('groupStyle', settings.groupStyle);
   renderSegmented('newTabShortcuts', settings.newTabShortcuts);
@@ -304,6 +305,9 @@ $('fingerprinting').addEventListener('change', () => {
 });
 $('compatibleDrawing').addEventListener('change', () => {
   setSetting('compatibleDrawing', $('compatibleDrawing').checked ? '1' : '0');
+});
+$('videoDecoder').addEventListener('change', () => {
+  setSetting('videoDecoder', $('videoDecoder').value);
 });
 $('videoQualityLimit').addEventListener('change', () => {
   setSetting('videoQualityLimit', $('videoQualityLimit').value);

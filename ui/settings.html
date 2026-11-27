@@ -84,8 +84,20 @@
 
       <div class="row">
         <div class="label">
+          <label for="videoDecoder" class="title">Video decoding</label>
+          <p class="dim">Graphics card (DirectX 11) is the most reliable. Try Processor if videos stay black or freeze. Applies after you restart Prism.</p>
+        </div>
+        <div class="control"><select id="videoDecoder">
+          <option value="d3d11">Graphics card</option>
+          <option value="cpu">Processor</option>
+          <option value="auto">Automatic (DirectX 12 too)</option>
+        </select></div>
+      </div>
+
+      <div class="row">
+        <div class="label">
           <label for="videoQualityLimit" class="title">Highest video quality</label>
-          <p class="dim">Prism decodes video on the processor for now, not the graphics card, so videos above 1080p usually stutter and slow pages down. Sites like YouTube won’t offer more than this. Applies after you restart Prism.</p>
+          <p class="dim">Each video frame is copied and drawn on the processor for now, so videos above 1080p usually stutter and slow pages down. Sites like YouTube won’t offer more than this. Applies after you restart Prism.</p>
         </div>
         <div class="control"><select id="videoQualityLimit">
           <option value="1080">1080p (smoothest)</option>
