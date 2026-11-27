@@ -212,6 +212,11 @@ std::wstring videoQualityLimit()
     return value == L"1440" || value == L"2160" || value == L"max" ? value : L"1080";
 }
 
+bool videoCompositor()
+{
+    return util::readSetting(L"VideoCompositor", L"1") == L"1";
+}
+
 std::wstring videoDecoder()
 {
     std::wstring value = util::readSetting(L"VideoDecoder", L"d3d11");
@@ -315,6 +320,7 @@ std::string toJSON()
     json += ",\"compatibleDrawing\":" + jsonBool(compatibleDrawing());
     json += ",\"videoQualityLimit\":" + util::jsonString(videoQualityLimit());
     json += ",\"videoDecoder\":" + util::jsonString(videoDecoder());
+    json += ",\"videoCompositor\":" + jsonBool(videoCompositor());
     json += ",\"tabLayout\":" + util::jsonString(verticalTabs() ? L"vertical" : L"horizontal");
     json += ",\"groupStyle\":" + util::jsonString(groupStyle());
     json += ",\"palette\":" + util::jsonString(palette());
@@ -404,6 +410,10 @@ bool set(const std::wstring& key, const std::wstring& value)
         if (!isOneOf(value, { L"0", L"1" }))
             return false;
         util::writeSetting(L"CompatibleDrawing", value);
+    } else if (key == L"videoCompositor") {
+        if (!isOneOf(value, { L"0", L"1" }))
+            return false;
+        util::writeSetting(L"VideoCompositor", value);
     } else if (key == L"videoDecoder") {
         if (!isOneOf(value, { L"d3d11", L"cpu", L"auto" }))
             return false;

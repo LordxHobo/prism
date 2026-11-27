@@ -1,0 +1,923 @@
+From bf20a4ec57ba8b2353315e9436eb16f5b241b14f Mon Sep 17 00:00:00 2001
+From: Prism <prism@users.noreply.github.com>
+Date: Fri, 27 Nov 2026 23:01:17 +0100
+Subject: [PATCH] [Win] Video frames straight to the GPU process's compositor
+
+Without coordinated graphics, every video frame was painted on the web
+process's main thread (converted to a NativeImage, recorded in a display list
+and rasterized in the GPU process), so video stuttered whenever the page was
+busy and topped out at ~20-25 fps at 1080p.
+
+Now, on the WC compositor (Windows), MediaPlayerPrivateGStreamer gets a
+WCVideoFrameSink: the video's layer is composited, and the streaming thread
+copies each new frame into shared memory and sends it to the GPU process
+(GPUConnectionToWebProcess::PushWCVideoFrame). There WCVideoLayerManager keeps
+the newest frame per video as a TextureMapperPlatformLayer, uploads it when
+painted, and recomposites the scenes showing it right away (WCScene::
+recomposite()), without waiting for the page's next rendering update.
+WCLayerUpdateInfo carries the video layer's identifier.
+
+Pages rendered offscreen fall back to painting (their scenes only reach the
+screen with an update), and WEBKIT_WC_VIDEO_LAYER=0 turns it off.
+---
+ .../gstreamer/MediaPlayerPrivateGStreamer.cpp |  43 +++++
+ .../gstreamer/MediaPlayerPrivateGStreamer.h   |  15 ++
+ .../platform/graphics/wc/WCPlatformLayer.h    |  30 ++-
+ .../GPUProcess/GPUConnectionToWebProcess.cpp  |  18 ++
+ .../GPUProcess/GPUConnectionToWebProcess.h    |   4 +
+ .../GPUConnectionToWebProcess.messages.in     |   2 +
+ .../WebKit/GPUProcess/graphics/wc/WCScene.cpp |  55 +++++-
+ .../WebKit/GPUProcess/graphics/wc/WCScene.h   |  10 +
+ .../graphics/wc/WCVideoLayerManager.cpp       | 182 ++++++++++++++++++
+ .../graphics/wc/WCVideoLayerManager.h         |  85 ++++++++
+ Source/WebKit/Platform/WC.cmake               |   1 +
+ .../wc/RemoteWCLayerTreeHostProxy.cpp         |  95 +++++++++
+ .../graphics/wc/RemoteWCLayerTreeHostProxy.h  |   5 +
+ .../WebProcess/WebPage/wc/DrawingAreaWC.cpp   |   1 +
+ .../WebProcess/WebPage/wc/GraphicsLayerWC.cpp |  11 +-
+ .../WebProcess/WebPage/wc/WCUpdateInfo.h      |   2 +
+ .../WebPage/wc/WCUpdateInfo.serialization.in  |   1 +
+ 17 files changed, 556 insertions(+), 4 deletions(-)
+ create mode 100644 Source/WebKit/GPUProcess/graphics/wc/WCVideoLayerManager.cpp
+ create mode 100644 Source/WebKit/GPUProcess/graphics/wc/WCVideoLayerManager.h
+
+diff --git a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
+index 59ef095c0..c718d4660 100644
+--- a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
++++ b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
+@@ -209,6 +209,12 @@ MediaPlayerPrivateGStreamer::MediaPlayerPrivateGStreamer(MediaPlayer& player)
+ 
+     ensureGStreamerInitialized();
+     m_audioSink = createAudioSink();
++
++#if !USE(COORDINATED_GRAPHICS) && USE(GRAPHICS_LAYER_WC)
++    // Null when WebKit can't send frames to the compositor (offscreen
++    // rendering); then frames are painted through paint().
++    m_wcVideoSink = WCVideoFrameSink::create();
++#endif
+ }
+ 
+ MediaPlayerPrivateGStreamer::~MediaPlayerPrivateGStreamer()
+@@ -3923,6 +3929,11 @@ void MediaPlayerPrivateGStreamer::acceleratedRenderingStateChanged()
+ #if USE(COORDINATED_GRAPHICS)
+     RefPtr player = m_player.get();
+     m_canRenderingBeAccelerated = player && player->acceleratedCompositingEnabled();
++#elif USE(GRAPHICS_LAYER_WC)
++    // With a WCVideoFrameSink, the video's layer is composited and frames go
++    // straight to the compositor; otherwise triggerRepaint() must repaint.
++    RefPtr player = m_player.get();
++    m_canRenderingBeAccelerated = m_wcVideoSink && player && player->acceleratedCompositingEnabled();
+ #else
+     // Frames can only reach the page through paint() here (see
+     // supportsAcceleratedRendering()), so triggerRepaint() must repaint.
+@@ -4298,9 +4309,41 @@ void MediaPlayerPrivateGStreamer::triggerRepaint(GRefPtr<GstSample>&& sample)
+ 
+ #if USE(COORDINATED_GRAPHICS)
+     pushTextureToCompositor(isDuplicateSample);
++#elif USE(GRAPHICS_LAYER_WC)
++    if (isDuplicateSample == IsDuplicateSample::No)
++        pushFrameToWCCompositor();
+ #endif
+ }
+ 
++#if !USE(COORDINATED_GRAPHICS) && USE(GRAPHICS_LAYER_WC)
++// On the streaming thread: the newest frame, to the GPU process.
++void MediaPlayerPrivateGStreamer::pushFrameToWCCompositor()
++{
++    RefPtr sink = m_wcVideoSink;
++    if (!sink)
++        return;
++    GRefPtr<GstSample> sample;
++    {
++        Locker sampleLocker { m_sampleMutex };
++        sample = m_sample;
++    }
++    if (!sample)
++        return;
++    GstMappedFrame frame(sample, GST_MAP_READ);
++    if (!frame) {
++        GST_WARNING_OBJECT(pipeline(), "Couldn't map a video frame for the compositor");
++        return;
++    }
++    auto format = static_cast<GstVideoFormat>(frame.format());
++    if (format != GST_VIDEO_FORMAT_BGRx && format != GST_VIDEO_FORMAT_BGRA) {
++        GST_WARNING_OBJECT(pipeline(), "Video frame format %s can't go to the compositor", gst_video_format_to_string(format));
++        return;
++    }
++    if (!sink->pushFrame(frame.planeData(0), IntSize(frame.width(), frame.height()), frame.planeStride(0)))
++        GST_WARNING_OBJECT(pipeline(), "Couldn't send a video frame to the compositor");
++}
++#endif
++
+ void MediaPlayerPrivateGStreamer::cancelRepaint(bool destroying)
+ {
+     // The goal of this function is to release the GStreamer thread from m_drawCondition in triggerRepaint() in non-AC case,
+diff --git a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.h b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.h
+index 593359231..e66563283 100644
+--- a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.h
++++ b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.h
+@@ -61,6 +61,10 @@
+ #include "CoordinatedPlatformLayerBufferVideo.h"
+ #endif
+ 
++#if !USE(COORDINATED_GRAPHICS) && USE(GRAPHICS_LAYER_WC)
++#include "WCPlatformLayer.h"
++#endif
++
+ typedef struct _GstMpegtsSection GstMpegtsSection;
+ 
+ #if USE(GSTREAMER_GL)
+@@ -200,6 +204,12 @@ public:
+     void setPlatformLayerBufferProxy(Ref<CoordinatedPlatformLayerBufferProxy>&&) override;
+     RefPtr<CoordinatedPlatformLayerBufferProxy> platformLayerBufferProxy() const override;
+ #endif
++#if !USE(COORDINATED_GRAPHICS) && USE(GRAPHICS_LAYER_WC)
++    // Windows: frames go from the streaming thread straight to the GPU
++    // process's compositor (WCVideoFrameSink), not through paint().
++    PlatformLayer* platformLayer() override { return m_wcVideoSink ? m_wcVideoSink->platformLayer() : nullptr; }
++    bool supportsAcceleratedRendering() const override { return !!m_wcVideoSink; }
++#endif
+ 
+ #if ENABLE(ENCRYPTED_MEDIA)
+     void cdmInstanceAttached(CDMInstance&) final;
+@@ -356,6 +366,11 @@ protected:
+ #if USE(COORDINATED_GRAPHICS)
+     void pushTextureToCompositor(IsDuplicateSample, IsInitialBuffer = IsInitialBuffer::No);
+ #endif
++#if !USE(COORDINATED_GRAPHICS) && USE(GRAPHICS_LAYER_WC)
++    void pushFrameToWCCompositor();
++    // Set in the constructor, used by the streaming thread until tearDown().
++    RefPtr<WCVideoFrameSink> m_wcVideoSink;
++#endif
+ 
+     GstElement* videoSink() const { return m_videoSink.get(); }
+ 
+diff --git a/Source/WebCore/platform/graphics/wc/WCPlatformLayer.h b/Source/WebCore/platform/graphics/wc/WCPlatformLayer.h
+index d88bb8de4..d4867133e 100644
+--- a/Source/WebCore/platform/graphics/wc/WCPlatformLayer.h
++++ b/Source/WebCore/platform/graphics/wc/WCPlatformLayer.h
+@@ -25,17 +25,45 @@
+ 
+ #pragma once
+ 
++#include "IntSize.h"
+ #include "TextureMapperPlatformLayer.h"
++#include <optional>
++#include <span>
++#include <wtf/RefPtr.h>
++#include <wtf/ThreadSafeRefCounted.h>
+ #include <wtf/TZoneMallocInlines.h>
+ 
+ namespace WebCore {
+ 
+ class WCPlatformLayer : public TextureMapperPlatformLayer {
+     WTF_MAKE_TZONE_ALLOCATED_INLINE(WCPlatformLayer);
++public:
++    // A video's layer in the GPU process (WCVideoLayerManager), if this is one.
++    virtual std::optional<uint64_t> videoLayerIdentifier() const { return std::nullopt; }
+ 
+ private:
+     // TextureMapperPlatformLayer
+     void paintToTextureMapper(TextureMapper&, const FloatRect&, const TransformationMatrix&, float) final { }
+ };
+ 
+-} // namespace WebKit
++// Sends a video's frames straight to the compositor in the GPU process, from
++// the media backend's own thread: the page's main thread doesn't draw them,
++// and the GPU process shows each one as it arrives. WebKit provides it
++// (RemoteWCLayerTreeHostProxy.cpp); the media player asks for one.
++class WCVideoFrameSink : public ThreadSafeRefCounted<WCVideoFrameSink> {
++public:
++    using Factory = RefPtr<WCVideoFrameSink> (*)();
++    static void setFactory(Factory factory) { s_factory = factory; }
++    static RefPtr<WCVideoFrameSink> create() { return s_factory ? s_factory() : nullptr; }
++
++    virtual ~WCVideoFrameSink() = default;
++    // For the video element's GraphicsLayer (main thread).
++    virtual TextureMapperPlatformLayer* platformLayer() = 0;
++    // A BGRx/BGRA frame (any thread). False if it couldn't be sent.
++    virtual bool pushFrame(std::span<const uint8_t> pixels, const IntSize&, unsigned bytesPerRow) = 0;
++
++private:
++    static inline Factory s_factory { nullptr };
++};
++
++} // namespace WebCore
+diff --git a/Source/WebKit/GPUProcess/GPUConnectionToWebProcess.cpp b/Source/WebKit/GPUProcess/GPUConnectionToWebProcess.cpp
+index 3deef2f90..bf10f099d 100644
+--- a/Source/WebKit/GPUProcess/GPUConnectionToWebProcess.cpp
++++ b/Source/WebKit/GPUProcess/GPUConnectionToWebProcess.cpp
+@@ -168,6 +168,7 @@
+ #include "RemoteWCLayerTreeHost.h"
+ #include "WCContentBufferManager.h"
+ #include "WCRemoteFrameHostLayerManager.h"
++#include "WCVideoLayerManager.h"
+ #endif
+ 
+ #if ENABLE(IPC_TESTING_API)
+@@ -456,6 +457,7 @@ void GPUConnectionToWebProcess::didClose(IPC::Connection& connection)
+         WCContentBufferManager::singleton().removeAllContentBuffersForProcess(webProcessIdentifier);
+ #endif
+         WCRemoteFrameHostLayerManager::singleton().removeAllLayersForProcess(webProcessIdentifier);
++        WCVideoLayerManager::singleton().removeAllForProcess(webProcessIdentifier);
+     });
+ #endif
+ #if PLATFORM(COCOA) && USE(LIBWEBRTC)
+@@ -530,6 +532,22 @@ void GPUConnectionToWebProcess::releaseWCLayerTreeHost(WebKit::WCLayerTreeHostId
+ {
+     m_remoteWCLayerTreeHostMap.remove(identifier);
+ }
++
++// A video frame from a media player (BGRA, see WCVideoFrameSink).
++void GPUConnectionToWebProcess::pushWCVideoFrame(uint64_t videoLayer, WebCore::SharedMemory::Handle&& handle, const WebCore::IntSize& size, uint32_t bytesPerRow)
++{
++    if (!videoLayer || size.isEmpty() || size.width() > 16384 || size.height() > 16384 || bytesPerRow < static_cast<uint32_t>(size.width()) * 4)
++        return;
++    RefPtr memory = WebCore::SharedMemory::map(WTF::move(handle), WebCore::SharedMemory::Protection::ReadOnly);
++    if (!memory || memory->size() < static_cast<size_t>(bytesPerRow) * static_cast<size_t>(size.height()))
++        return;
++    WCVideoLayerManager::singleton().pushFrame(m_webProcessIdentifier, videoLayer, memory.releaseNonNull(), size, bytesPerRow);
++}
++
++void GPUConnectionToWebProcess::releaseWCVideoLayer(uint64_t videoLayer)
++{
++    WCVideoLayerManager::singleton().release(m_webProcessIdentifier, videoLayer);
++}
+ #endif
+ 
+ bool GPUConnectionToWebProcess::allowsExitUnderMemoryPressure() const
+diff --git a/Source/WebKit/GPUProcess/GPUConnectionToWebProcess.h b/Source/WebKit/GPUProcess/GPUConnectionToWebProcess.h
+index 189345953..ac035fee4 100644
+--- a/Source/WebKit/GPUProcess/GPUConnectionToWebProcess.h
++++ b/Source/WebKit/GPUProcess/GPUConnectionToWebProcess.h
+@@ -73,6 +73,8 @@
+ 
+ #if USE(GRAPHICS_LAYER_WC)
+ #include "WCLayerTreeHostIdentifier.h"
++#include <WebCore/IntSize.h>
++#include <WebCore/SharedMemory.h>
+ #endif
+ 
+ #if ENABLE(IPC_TESTING_API)
+@@ -363,6 +365,8 @@ private:
+ #if USE(GRAPHICS_LAYER_WC)
+     void createWCLayerTreeHost(WebKit::WCLayerTreeHostIdentifier, uint64_t nativeWindow, bool usesOffscreenRendering);
+     void releaseWCLayerTreeHost(WebKit::WCLayerTreeHostIdentifier);
++    void pushWCVideoFrame(uint64_t videoLayer, WebCore::SharedMemory::Handle&&, const WebCore::IntSize&, uint32_t bytesPerRow);
++    void releaseWCVideoLayer(uint64_t videoLayer);
+ #endif
+ 
+     // IPC::Connection::Client
+diff --git a/Source/WebKit/GPUProcess/GPUConnectionToWebProcess.messages.in b/Source/WebKit/GPUProcess/GPUConnectionToWebProcess.messages.in
+index 775cec563..697f264ad 100644
+--- a/Source/WebKit/GPUProcess/GPUConnectionToWebProcess.messages.in
++++ b/Source/WebKit/GPUProcess/GPUConnectionToWebProcess.messages.in
+@@ -67,6 +67,8 @@ messages -> GPUConnectionToWebProcess WantsDispatchMessage {
+ #if USE(GRAPHICS_LAYER_WC)
+     CreateWCLayerTreeHost(WebKit::WCLayerTreeHostIdentifier identifier, uint64_t nativeWindow, bool usesOffscreenRendering) AllowedWhenWaitingForSyncReply
+     ReleaseWCLayerTreeHost(WebKit::WCLayerTreeHostIdentifier identifier) AllowedWhenWaitingForSyncReply
++    PushWCVideoFrame(uint64_t videoLayer, WebCore::SharedMemory::Handle frame, WebCore::IntSize size, uint32_t bytesPerRow)
++    ReleaseWCVideoLayer(uint64_t videoLayer)
+ #endif
+ #if ENABLE(VIDEO)
+     CanDecodeExtendedType(enum:uint8_t WebCore::PlatformMediaDecodingType platformType, WebCore::ContentType contentType) -> (bool supported);
+diff --git a/Source/WebKit/GPUProcess/graphics/wc/WCScene.cpp b/Source/WebKit/GPUProcess/graphics/wc/WCScene.cpp
+index cbca2078f..b42ad5728 100644
+--- a/Source/WebKit/GPUProcess/graphics/wc/WCScene.cpp
++++ b/Source/WebKit/GPUProcess/graphics/wc/WCScene.cpp
+@@ -34,6 +34,7 @@
+ #include "WCRemoteFrameHostLayerManager.h"
+ #include "WCSceneContext.h"
+ #include "WCUpdateInfo.h"
++#include "WCVideoLayerManager.h"
+ #include <WebCore/BitmapTexturePool.h>
+ #include <WebCore/NativeImage.h>
+ #include <WebCore/ShareableBitmap.h>
+@@ -54,6 +55,8 @@ public:
+     Layer() = default;
+     ~Layer()
+     {
++        if (videoLayer && scene)
++            WCVideoLayerManager::singleton().detach(scene->m_webProcessIdentifier, videoLayer, *scene);
+         if (contentBuffer)
+             contentBuffer->setClient(nullptr);
+         if (hostIdentifier)
+@@ -72,6 +75,8 @@ public:
+     std::unique_ptr<WebCore::TextureMapperLayer> backdropLayer;
+     WCContentBuffer* contentBuffer { nullptr };
+     Markable<WebCore::LayerHostingContextIdentifier> hostIdentifier;
++    WCScene* scene { nullptr };
++    uint64_t videoLayer { 0 }; // WCVideoLayerManager's
+ };
+ 
+ void WCScene::initialize(WCSceneContext& context)
+@@ -104,6 +109,7 @@ std::optional<UpdateInfo> WCScene::update(WCUpdateInfo&& update)
+ 
+     for (auto id : update.addedLayers) {
+         auto layer = makeUnique<Layer>();
++        layer->scene = this;
+         m_layers.add(id, WTF::move(layer));
+     }
+ 
+@@ -217,7 +223,21 @@ std::optional<UpdateInfo> WCScene::update(WCUpdateInfo&& update)
+             layer->texmapLayer.setBackdropFiltersRect(layerUpdate.backdropFiltersRect);
+         }
+         if (layerUpdate.changes & WCLayerChange::PlatformLayer) {
+-            if (!layerUpdate.platformLayer.hasLayer) {
++            if (layer->videoLayer && layer->videoLayer != layerUpdate.platformLayer.videoLayer) {
++                WCVideoLayerManager::singleton().detach(m_webProcessIdentifier, layer->videoLayer, *this);
++                layer->videoLayer = 0;
++                layer->texmapLayer.setContentsLayer(nullptr);
++            }
++            if (layerUpdate.platformLayer.hasLayer && layerUpdate.platformLayer.videoLayer) {
++                if (layer->contentBuffer) {
++                    layer->contentBuffer->setClient(nullptr);
++                    layer->contentBuffer = nullptr;
++                }
++                if (!layer->videoLayer) {
++                    layer->videoLayer = layerUpdate.platformLayer.videoLayer;
++                    layer->texmapLayer.setContentsLayer(WCVideoLayerManager::singleton().attach(m_webProcessIdentifier, layer->videoLayer, *this));
++                }
++            } else if (!layerUpdate.platformLayer.hasLayer) {
+                 if (layer->contentBuffer) {
+                     layer->contentBuffer->setClient(nullptr);
+                     layer->contentBuffer = nullptr;
+@@ -251,6 +271,10 @@ std::optional<UpdateInfo> WCScene::update(WCUpdateInfo&& update)
+     for (auto id : update.removedLayers)
+         m_layers.remove(id);
+ 
++    m_rootLayer = update.rootLayer;
++    m_viewport = update.viewport;
++    m_canRecomposite = !update.remoteContextHostedIdentifier && !m_usesOffscreenRendering;
++
+     auto rootLayer = &m_layers.get(*update.rootLayer)->texmapLayer;
+     rootLayer->applyAnimationsRecursively(MonotonicTime::now());
+ 
+@@ -300,6 +324,35 @@ std::optional<UpdateInfo> WCScene::update(WCUpdateInfo&& update)
+     return result;
+ }
+ 
++void WCScene::recomposite()
++{
++    // Offscreen rendering hands its pixels back to the web process with an
++    // update; a remote frame's scene is drawn by its host. Those wait for
++    // the next update.
++    if (!m_canRecomposite || !m_rootLayer || !m_context || !m_textureMapper || m_viewport.isEmpty())
++        return;
++    auto* root = m_layers.get(*m_rootLayer);
++    if (!root || !m_context->makeContextCurrent())
++        return;
++    root->texmapLayer.applyAnimationsRecursively(MonotonicTime::now());
++    glViewport(0, 0, m_viewport.width(), m_viewport.height());
++    m_textureMapper->beginPainting(WebCore::TextureMapper::FlipY::No, nullptr);
++    root->texmapLayer.paint(*m_textureMapper);
++    m_fpsCounter.updateFPSAndDisplay(*m_textureMapper);
++    m_textureMapper->endPainting();
++    m_context->swapBuffers();
++}
++
++void WCScene::videoLayerRemoved(uint64_t videoLayer)
++{
++    for (auto& layer : m_layers.values()) {
++        if (layer->videoLayer == videoLayer) {
++            layer->videoLayer = 0;
++            layer->texmapLayer.setContentsLayer(nullptr);
++        }
++    }
++}
++
+ } // namespace WebKit
+ 
+ #endif // USE(GRAPHICS_LAYER_WC)
+diff --git a/Source/WebKit/GPUProcess/graphics/wc/WCScene.h b/Source/WebKit/GPUProcess/graphics/wc/WCScene.h
+index a54c0da62..46f47c7ac 100644
+--- a/Source/WebKit/GPUProcess/graphics/wc/WCScene.h
++++ b/Source/WebKit/GPUProcess/graphics/wc/WCScene.h
+@@ -32,7 +32,9 @@
+ #include <WebCore/ProcessIdentifier.h>
+ #include <WebCore/TextureMapperFPSCounter.h>
+ #include <wtf/Forward.h>
++#include <WebCore/IntSize.h>
+ #include <wtf/HashMap.h>
++#include <wtf/Markable.h>
+ #include <wtf/TZoneMalloc.h>
+ 
+ namespace WebCore {
+@@ -54,6 +56,10 @@ public:
+     ~WCScene();
+     void initialize(WCSceneContext&);
+     std::optional<UpdateInfo> update(WCUpdateInfo&&);
++    // A video's new frame (WCVideoLayerManager): paints and presents the
++    // scene as the last update left it.
++    void recomposite();
++    void videoLayerRemoved(uint64_t videoLayer);
+ 
+ private:
+     struct Layer;
+@@ -65,6 +71,10 @@ private:
+     WebCore::TextureMapperFPSCounter m_fpsCounter;
+     LayerMap m_layers;
+     bool m_usesOffscreenRendering;
++    // What recomposite() needs from the last update.
++    Markable<WebCore::PlatformLayerIdentifier> m_rootLayer;
++    WebCore::IntSize m_viewport;
++    bool m_canRecomposite { false };
+ };
+ 
+ } // namespace WebKit
+diff --git a/Source/WebKit/GPUProcess/graphics/wc/WCVideoLayerManager.cpp b/Source/WebKit/GPUProcess/graphics/wc/WCVideoLayerManager.cpp
+new file mode 100644
+index 000000000..16ee72e6f
+--- /dev/null
++++ b/Source/WebKit/GPUProcess/graphics/wc/WCVideoLayerManager.cpp
+@@ -0,0 +1,182 @@
++/*
++ * Copyright (C) 2026 The Prism authors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS''
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS
++ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "config.h"
++#include "WCVideoLayerManager.h"
++
++#if USE(GRAPHICS_LAYER_WC)
++
++#include "RemoteWCLayerTreeHost.h"
++#include "WCScene.h"
++#include <WebCore/BitmapTexture.h>
++#include <WebCore/TextureMapper.h>
++#include <WebCore/TextureMapperPlatformLayer.h>
++#include <wtf/HashCountedSet.h>
++#include <wtf/NeverDestroyed.h>
++#include <wtf/TZoneMallocInlines.h>
++
++namespace WebKit {
++
++class WCVideoLayerManager::VideoLayer final : public WebCore::TextureMapperPlatformLayer {
++    WTF_MAKE_TZONE_ALLOCATED_INLINE(VideoLayer);
++public:
++    void setFrame(Frame&& frame) { m_frame = WTF::move(frame); }
++    HashCountedSet<WCScene*>& scenes() { return m_scenes; }
++
++    void paintToTextureMapper(WebCore::TextureMapper& textureMapper, const WebCore::FloatRect& targetRect, const WebCore::TransformationMatrix& modelViewMatrix, float opacity) final
++    {
++        // Uploaded here, with the painting scene's GL context current.
++        if (m_frame && m_frame->memory) {
++            if (!m_texture || m_texture->size() != m_frame->size)
++                m_texture = WebCore::BitmapTexture::create(m_frame->size);
++            m_texture->updateContents(m_frame->memory->span().data(), WebCore::IntRect({ }, m_frame->size), WebCore::IntPoint(), m_frame->bytesPerRow, WebCore::PixelFormat::BGRA8);
++        }
++        m_frame = std::nullopt;
++        if (m_texture)
++            textureMapper.drawTexture(*m_texture, targetRect, modelViewMatrix, opacity);
++    }
++
++private:
++    std::optional<Frame> m_frame;
++    RefPtr<WebCore::BitmapTexture> m_texture;
++    HashCountedSet<WCScene*> m_scenes;
++};
++
++WCVideoLayerManager& WCVideoLayerManager::singleton()
++{
++    static NeverDestroyed<WCVideoLayerManager> manager;
++    return manager;
++}
++
++void WCVideoLayerManager::pushFrame(WebCore::ProcessIdentifier process, uint64_t videoLayer, Ref<WebCore::SharedMemory>&& memory, const WebCore::IntSize& size, uint32_t bytesPerRow)
++{
++    if (!videoLayer)
++        return;
++    bool alreadyOnItsWay;
++    {
++        Locker locker { m_pendingLock };
++        auto& frames = m_pending.ensure(process, [] {
++            return HashMap<uint64_t, Frame> { };
++        }).iterator->value;
++        // A frame that hasn't reached the compositing thread yet is replaced:
++        // only the newest is worth showing.
++        alreadyOnItsWay = !frames.set(videoLayer, Frame { WTF::move(memory), size, bytesPerRow }).isNewEntry;
++    }
++    if (alreadyOnItsWay)
++        return;
++    remoteGraphicsStreamWorkQueue().dispatch([process, videoLayer] {
++        WCVideoLayerManager::singleton().deliver(process, videoLayer);
++    });
++}
++
++void WCVideoLayerManager::deliver(WebCore::ProcessIdentifier process, uint64_t videoLayer)
++{
++    std::optional<Frame> frame;
++    {
++        Locker locker { m_pendingLock };
++        auto frames = m_pending.find(process);
++        if (frames != m_pending.end()) {
++            auto found = frames->value.find(videoLayer);
++            if (found != frames->value.end()) {
++                frame = WTF::move(found->value);
++                frames->value.remove(found);
++            }
++        }
++    }
++    if (!frame)
++        return;
++    auto& layer = ensureLayer(process, videoLayer);
++    layer.setFrame(WTF::move(*frame));
++    for (auto* scene : copyToVector(layer.scenes().values()))
++        scene->recomposite();
++}
++
++WCVideoLayerManager::VideoLayer& WCVideoLayerManager::ensureLayer(WebCore::ProcessIdentifier process, uint64_t videoLayer)
++{
++    auto& layers = m_layers.ensure(process, [] {
++        return VideoLayers { };
++    }).iterator->value;
++    return *layers.ensure(videoLayer, [] {
++        return makeUnique<VideoLayer>();
++    }).iterator->value;
++}
++
++void WCVideoLayerManager::release(WebCore::ProcessIdentifier process, uint64_t videoLayer)
++{
++    {
++        Locker locker { m_pendingLock };
++        auto frames = m_pending.find(process);
++        if (frames != m_pending.end())
++            frames->value.remove(videoLayer);
++    }
++    remoteGraphicsStreamWorkQueue().dispatch([process, videoLayer] {
++        auto& manager = WCVideoLayerManager::singleton();
++        auto layers = manager.m_layers.find(process);
++        if (layers == manager.m_layers.end())
++            return;
++        auto layer = layers->value.take(videoLayer);
++        if (layer)
++            manager.removeLayer(process, videoLayer, WTF::move(layer));
++    });
++}
++
++void WCVideoLayerManager::removeLayer(WebCore::ProcessIdentifier, uint64_t videoLayer, std::unique_ptr<VideoLayer>&& layer)
++{
++    // The scenes stop showing it before it goes.
++    for (auto* scene : copyToVector(layer->scenes().values()))
++        scene->videoLayerRemoved(videoLayer);
++}
++
++WebCore::TextureMapperPlatformLayer* WCVideoLayerManager::attach(WebCore::ProcessIdentifier process, uint64_t videoLayer, WCScene& scene)
++{
++    auto& layer = ensureLayer(process, videoLayer);
++    layer.scenes().add(&scene);
++    return &layer;
++}
++
++void WCVideoLayerManager::detach(WebCore::ProcessIdentifier process, uint64_t videoLayer, WCScene& scene)
++{
++    auto layers = m_layers.find(process);
++    if (layers == m_layers.end())
++        return;
++    auto layer = layers->value.find(videoLayer);
++    if (layer != layers->value.end())
++        layer->value->scenes().remove(&scene);
++}
++
++void WCVideoLayerManager::removeAllForProcess(WebCore::ProcessIdentifier process)
++{
++    {
++        Locker locker { m_pendingLock };
++        m_pending.remove(process);
++    }
++    auto layers = m_layers.take(process);
++    for (auto& entry : layers)
++        removeLayer(process, entry.key, WTF::move(entry.value));
++}
++
++} // namespace WebKit
++
++#endif // USE(GRAPHICS_LAYER_WC)
+diff --git a/Source/WebKit/GPUProcess/graphics/wc/WCVideoLayerManager.h b/Source/WebKit/GPUProcess/graphics/wc/WCVideoLayerManager.h
+new file mode 100644
+index 000000000..b9ab93210
+--- /dev/null
++++ b/Source/WebKit/GPUProcess/graphics/wc/WCVideoLayerManager.h
+@@ -0,0 +1,85 @@
++/*
++ * Copyright (C) 2026 The Prism authors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS''
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
++ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
++ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS
++ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#pragma once
++
++#if USE(GRAPHICS_LAYER_WC)
++
++#include <WebCore/IntSize.h>
++#include <WebCore/ProcessIdentifier.h>
++#include <WebCore/SharedMemory.h>
++#include <wtf/HashMap.h>
++#include <wtf/Lock.h>
++
++namespace WebCore {
++class TextureMapperPlatformLayer;
++}
++
++namespace WebKit {
++
++class WCScene;
++
++// Videos whose frames the web process sends straight here (a media player's
++// WCVideoFrameSink, see RemoteWCLayerTreeHostProxy.cpp), each a platform
++// layer the scenes show. A new frame recomposites the scenes showing it
++// right away, without waiting for the page's next rendering update, so a
++// busy page doesn't hold the video back.
++class WCVideoLayerManager {
++public:
++    static WCVideoLayerManager& singleton();
++
++    // The GPU process's main thread (IPC from the web process).
++    void pushFrame(WebCore::ProcessIdentifier, uint64_t videoLayer, Ref<WebCore::SharedMemory>&&, const WebCore::IntSize&, uint32_t bytesPerRow);
++    void release(WebCore::ProcessIdentifier, uint64_t videoLayer);
++
++    // The compositing thread (remoteGraphicsStreamWorkQueue()).
++    WebCore::TextureMapperPlatformLayer* attach(WebCore::ProcessIdentifier, uint64_t videoLayer, WCScene&);
++    void detach(WebCore::ProcessIdentifier, uint64_t videoLayer, WCScene&);
++    void removeAllForProcess(WebCore::ProcessIdentifier);
++
++private:
++    struct Frame {
++        RefPtr<WebCore::SharedMemory> memory;
++        WebCore::IntSize size;
++        uint32_t bytesPerRow { 0 };
++    };
++    class VideoLayer;
++    using VideoLayers = HashMap<uint64_t, std::unique_ptr<VideoLayer>>;
++
++    void deliver(WebCore::ProcessIdentifier, uint64_t videoLayer);
++    VideoLayer& ensureLayer(WebCore::ProcessIdentifier, uint64_t videoLayer);
++    void removeLayer(WebCore::ProcessIdentifier, uint64_t videoLayer, std::unique_ptr<VideoLayer>&&);
++
++    // The compositing thread only.
++    HashMap<WebCore::ProcessIdentifier, VideoLayers> m_layers;
++
++    // Frames on their way to the compositing thread: the newest per video.
++    Lock m_pendingLock;
++    HashMap<WebCore::ProcessIdentifier, HashMap<uint64_t, Frame>> m_pending WTF_GUARDED_BY_LOCK(m_pendingLock);
++};
++
++} // namespace WebKit
++
++#endif // USE(GRAPHICS_LAYER_WC)
+diff --git a/Source/WebKit/Platform/WC.cmake b/Source/WebKit/Platform/WC.cmake
+index 8d6561e70..517b63a52 100644
+--- a/Source/WebKit/Platform/WC.cmake
++++ b/Source/WebKit/Platform/WC.cmake
+@@ -6,6 +6,7 @@ list(APPEND WebKit_SOURCES
+     GPUProcess/graphics/wc/WCRemoteFrameHostLayerManager.cpp
+     GPUProcess/graphics/wc/WCScene.cpp
+     GPUProcess/graphics/wc/WCSceneContext.cpp
++    GPUProcess/graphics/wc/WCVideoLayerManager.cpp
+ 
+     UIProcess/wc/DrawingAreaProxyWC.cpp
+ 
+diff --git a/Source/WebKit/WebProcess/GPU/graphics/wc/RemoteWCLayerTreeHostProxy.cpp b/Source/WebKit/WebProcess/GPU/graphics/wc/RemoteWCLayerTreeHostProxy.cpp
+index a98d2df0f..60450845d 100644
+--- a/Source/WebKit/WebProcess/GPU/graphics/wc/RemoteWCLayerTreeHostProxy.cpp
++++ b/Source/WebKit/WebProcess/GPU/graphics/wc/RemoteWCLayerTreeHostProxy.cpp
+@@ -29,11 +29,15 @@
+ #if USE(GRAPHICS_LAYER_WC)
+ 
+ #include "GPUConnectionToWebProcess.h"
++#include "GPUConnectionToWebProcessMessages.h"
+ #include "MessageSenderInlines.h"
+ #include "RemoteWCLayerTreeHostMessages.h"
+ #include "WCUpdateInfo.h"
+ #include "WebPage.h"
+ #include "WebProcess.h"
++#include <WebCore/SharedMemory.h>
++#include <WebCore/WCPlatformLayer.h>
++#include <wtf/StdLibExtras.h>
+ #include <wtf/TZoneMallocInlines.h>
+ 
+ namespace WebKit {
+@@ -92,6 +96,97 @@ void RemoteWCLayerTreeHostProxy::update(WCUpdateInfo&& updateInfo, CompletionHan
+     sendWithAsyncReply(Messages::RemoteWCLayerTreeHost::Update(updateInfo), WTF::move(completionHandler));
+ }
+ 
++namespace {
++
++// The video element's layer: frames come from WCVideoLayerManager in the
++// GPU process, which knows it by this identifier.
++class WCVideoPlatformLayer final : public WebCore::WCPlatformLayer {
++public:
++    explicit WCVideoPlatformLayer(uint64_t identifier)
++        : m_identifier(identifier)
++    {
++    }
++
++    std::optional<uint64_t> videoLayerIdentifier() const final { return m_identifier; }
++
++private:
++    uint64_t m_identifier;
++};
++
++class WCVideoFrameSinkProxy final : public WebCore::WCVideoFrameSink {
++public:
++    static RefPtr<WebCore::WCVideoFrameSink> create()
++    {
++        ASSERT(isMainThread());
++        static uint64_t nextIdentifier = 1;
++        Ref connection = WebProcess::singleton().ensureGPUProcessConnection().connection();
++        return adoptRef(*new WCVideoFrameSinkProxy(nextIdentifier++, WTF::move(connection)));
++    }
++
++    ~WCVideoFrameSinkProxy()
++    {
++        m_connection->send(Messages::GPUConnectionToWebProcess::ReleaseWCVideoLayer(m_identifier), 0);
++    }
++
++    WebCore::TextureMapperPlatformLayer* platformLayer() final { return &m_layer; }
++
++    // On the media backend's streaming thread: one copy into shared memory,
++    // then the GPU process has it.
++    bool pushFrame(std::span<const uint8_t> pixels, const WebCore::IntSize& size, unsigned bytesPerRow) final
++    {
++        if (size.isEmpty())
++            return false;
++        size_t rowBytes = static_cast<size_t>(size.width()) * 4;
++        size_t height = static_cast<size_t>(size.height());
++        if (bytesPerRow < rowBytes || pixels.size() < bytesPerRow * (height - 1) + rowBytes)
++            return false;
++        RefPtr memory = WebCore::SharedMemory::allocate(rowBytes * height);
++        if (!memory)
++            return false;
++        auto destination = memory->mutableSpan();
++        for (size_t y = 0; y < height; ++y)
++            memcpySpan(destination.subspan(y * rowBytes, rowBytes), pixels.subspan(y * bytesPerRow, rowBytes));
++        auto handle = memory->createHandle(WebCore::SharedMemory::Protection::ReadOnly);
++        if (!handle)
++            return false;
++        m_connection->send(Messages::GPUConnectionToWebProcess::PushWCVideoFrame(m_identifier, WTF::move(*handle), size, static_cast<uint32_t>(rowBytes)), 0);
++        return true;
++    }
++
++private:
++    WCVideoFrameSinkProxy(uint64_t identifier, Ref<IPC::Connection>&& connection)
++        : m_identifier(identifier)
++        , m_layer(identifier)
++        , m_connection(WTF::move(connection))
++    {
++    }
++
++    const uint64_t m_identifier;
++    WCVideoPlatformLayer m_layer;
++    const Ref<IPC::Connection> m_connection;
++};
++
++bool s_offscreenRenderingInProcess = false;
++
++} // namespace
++
++void registerWCVideoFrameSinkFactory(bool usesOffscreenRendering)
++{
++    ASSERT(isMainThread());
++    if (usesOffscreenRendering)
++        s_offscreenRenderingInProcess = true;
++    WebCore::WCVideoFrameSink::setFactory([]() -> RefPtr<WebCore::WCVideoFrameSink> {
++        // WEBKIT_WC_VIDEO_LAYER=0 turns it off: frames are painted by the page.
++        static const bool disabled = [] {
++            const char* value = getenv("WEBKIT_WC_VIDEO_LAYER");
++            return value && !strcmp(value, "0");
++        }();
++        if (disabled || s_offscreenRenderingInProcess)
++            return nullptr;
++        return WCVideoFrameSinkProxy::create();
++    });
++}
++
+ } // namespace WebKit
+ 
+ #endif // USE(GRAPHICS_LAYER_WC)
+diff --git a/Source/WebKit/WebProcess/GPU/graphics/wc/RemoteWCLayerTreeHostProxy.h b/Source/WebKit/WebProcess/GPU/graphics/wc/RemoteWCLayerTreeHostProxy.h
+index 28324fad4..f93db6539 100644
+--- a/Source/WebKit/WebProcess/GPU/graphics/wc/RemoteWCLayerTreeHostProxy.h
++++ b/Source/WebKit/WebProcess/GPU/graphics/wc/RemoteWCLayerTreeHostProxy.h
+@@ -70,6 +70,11 @@ private:
+     bool m_usesOffscreenRendering { false };
+ };
+ 
++// Lets media players send their frames straight to the GPU process
++// (WebCore::WCVideoFrameSink), unless a page in this process renders
++// offscreen: those scenes only reach the screen with an update.
++void registerWCVideoFrameSinkFactory(bool usesOffscreenRendering);
++
+ } // namespace WebKit
+ 
+ #endif // USE(GRAPHICS_LAYER_WC)
+diff --git a/Source/WebKit/WebProcess/WebPage/wc/DrawingAreaWC.cpp b/Source/WebKit/WebProcess/WebPage/wc/DrawingAreaWC.cpp
+index c0c6a216f..6d7795c2c 100644
+--- a/Source/WebKit/WebProcess/WebPage/wc/DrawingAreaWC.cpp
++++ b/Source/WebKit/WebProcess/WebPage/wc/DrawingAreaWC.cpp
+@@ -59,6 +59,7 @@ DrawingAreaWC::DrawingAreaWC(WebPage& webPage, const WebPageCreationParameters&
+     , m_updateRenderingTimer(*this, &DrawingAreaWC::updateRendering)
+     , m_commitQueue(WorkQueue::create("DrawingAreaWC CommitQueue"_s))
+ {
++    registerWCVideoFrameSinkFactory(parameters.usesOffscreenRendering);
+ }
+ 
+ DrawingAreaWC::~DrawingAreaWC()
+diff --git a/Source/WebKit/WebProcess/WebPage/wc/GraphicsLayerWC.cpp b/Source/WebKit/WebProcess/WebPage/wc/GraphicsLayerWC.cpp
+index 9d57b1618..b92368653 100644
+--- a/Source/WebKit/WebProcess/WebPage/wc/GraphicsLayerWC.cpp
++++ b/Source/WebKit/WebProcess/WebPage/wc/GraphicsLayerWC.cpp
+@@ -32,6 +32,7 @@
+ #include "WCPlatformLayerGCGL.h"
+ #include "WCTileGrid.h"
+ #include <WebCore/GraphicsContext.h>
++#include <WebCore/WCPlatformLayer.h>
+ #include <WebCore/TransformState.h>
+ #include <wtf/TZoneMallocInlines.h>
+ 
+@@ -626,10 +627,16 @@ void GraphicsLayerWC::flushCompositingStateForThisLayerOnly()
+         update.backdropFiltersRect = backdropFiltersRect();
+     if (update.changes & WCLayerChange::PlatformLayer) {
+         update.platformLayer.hasLayer = m_platformLayer;
++        if (m_platformLayer) {
++            // Every platform layer here is a WCPlatformLayer: a video's
++            // (frames sent by the media player) or WebGL's.
++            if (auto videoLayer = static_cast<WebCore::WCPlatformLayer*>(m_platformLayer)->videoLayerIdentifier())
++                update.platformLayer.videoLayer = *videoLayer;
+ #if ENABLE(WEBGL)
+-        if (m_platformLayer)
+-            update.platformLayer.identifiers = static_cast<WCPlatformLayerGCGL*>(m_platformLayer)->takeContentBufferIdentifiers();
++            else
++                update.platformLayer.identifiers = static_cast<WCPlatformLayerGCGL*>(m_platformLayer)->takeContentBufferIdentifiers();
+ #endif
++        }
+     }
+     if (update.changes & WCLayerChange::RemoteFrame)
+         update.hostIdentifier = m_hostIdentifier;
+diff --git a/Source/WebKit/WebProcess/WebPage/wc/WCUpdateInfo.h b/Source/WebKit/WebProcess/WebPage/wc/WCUpdateInfo.h
+index cf0ba75b7..d9b7d4289 100644
+--- a/Source/WebKit/WebProcess/WebPage/wc/WCUpdateInfo.h
++++ b/Source/WebKit/WebProcess/WebPage/wc/WCUpdateInfo.h
+@@ -116,6 +116,8 @@ struct WCLayerUpdateInfo {
+     struct PlatformLayerChanges {
+         bool hasLayer;
+         Vector<WCContentBufferIdentifier> identifiers;
++        // A video's layer in the GPU process (WCVideoLayerManager), or 0.
++        uint64_t videoLayer { 0 };
+     } platformLayer { };
+ 
+     Markable<WebCore::LayerHostingContextIdentifier> hostIdentifier { };
+diff --git a/Source/WebKit/WebProcess/WebPage/wc/WCUpdateInfo.serialization.in b/Source/WebKit/WebProcess/WebPage/wc/WCUpdateInfo.serialization.in
+index 9337647fa..7ec5d75d6 100644
+--- a/Source/WebKit/WebProcess/WebPage/wc/WCUpdateInfo.serialization.in
++++ b/Source/WebKit/WebProcess/WebPage/wc/WCUpdateInfo.serialization.in
+@@ -73,6 +73,7 @@ header: "WCUpdateInfo.h"
+ [Nested] struct WebKit::WCLayerUpdateInfo::PlatformLayerChanges {
+     bool hasLayer;
+     Vector<WebKit::WCContentBufferIdentifier> identifiers;
++    uint64_t videoLayer;
+ }
+ 
+ [CustomHeader] struct WebKit::WCLayerUpdateInfo {
+-- 
+2.43.0
+

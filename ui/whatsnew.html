@@ -22,12 +22,20 @@
     <img class="logo" src="prism.svg" alt="">
     <div>
       <h1>What's new in Prism</h1>
-      <span class="version">Version 0.9.40</span>
+      <span class="version">Version 0.9.41</span>
     </div>
   </header>
 
   <div class="card">
-    <h2 style="margin-top:0">Video and crash fixes</h2>
+    <h2 style="margin-top:0">Smooth video</h2>
+    <ul class="notes">
+      <li>Video frames now go straight to the graphics card's drawing, the way other browsers do it. They no longer wait for the page, so YouTube keeps playing smoothly while the page is busy, and scrolling is lighter while a video plays. (This needs the new WebKit build.)</li>
+      <li>If videos stay black or flicker, turn off <strong>Smooth video</strong> in Settings › General and restart Prism.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Video and crash fixes</h2>
     <ul class="notes">
       <li>YouTube no longer freezes at the start of a video. Prism now decodes video with DirectX 11 on your graphics card. The DirectX 12 decoder sometimes never delivered the first frame.</li>
       <li>New in Settings › General: <strong>Video decoding</strong> (graphics card, processor, or automatic). It applies after you restart Prism.</li>

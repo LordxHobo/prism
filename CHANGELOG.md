@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.41
+
+- **WebKit patch 0006, video straight to the compositor.** On the WC compositor, `MediaPlayerPrivateGStreamer` gets a `WebCore::WCVideoFrameSink` (`WCPlatformLayer.h`; WebKit's implementation is in `RemoteWCLayerTreeHostProxy.cpp`, registered by `DrawingAreaWC`): `supportsAcceleratedRendering()` is true, the video's GraphicsLayer gets the sink's `WCPlatformLayer` (`videoLayerIdentifier()`, sent in `WCLayerUpdateInfo::PlatformLayerChanges::videoLayer`), and `triggerRepaint()` hands each new frame from the streaming thread to `pushFrameToWCCompositor()` instead of the main thread. The frame is copied once into shared memory and sent as `GPUConnectionToWebProcess::PushWCVideoFrame`; in the GPU process `WCVideoLayerManager` keeps the newest frame per video (older ones not yet shown are dropped), uploads it as a `BitmapTexture` when painted, and calls `WCScene::recomposite()` for the scenes showing it, which paints and presents the last layer tree without a page update. Offscreen rendering (Compatible page drawing) keeps the old path. Off switch: Settings › General › **Smooth video** (`VideoCompositor`), which sets `WEBKIT_WC_VIDEO_LAYER=0`.
+
 ## 0.9.40
 
 - **Video decoding** (Settings › General, `VideoDecoder`: `d3d11` by default, `cpu`, `auto`): Prism sets `GST_PLUGIN_FEATURE_RANK` before WebKit starts (unless it's set already) so the DirectX 12 decoders (`d3d12*dec`), and with `cpu` the DirectX 11 ones too, aren't used. A log showed `d3d12vp9dec` never delivering YouTube's first frame; the page then froze in the seek's FLUSH_START. With DirectX 11 or the processor it didn't freeze.

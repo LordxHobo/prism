@@ -49,6 +49,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         if (value)
             SetEnvironmentVariableW(L"WEBKIT_GST_VIDEO_DECODING_LIMIT", value);
     }
+    // Video frames straight to the compositor, unless turned off.
+    if (!settings::videoCompositor() && !GetEnvironmentVariableW(L"WEBKIT_WC_VIDEO_LAYER", nullptr, 0))
+        SetEnvironmentVariableW(L"WEBKIT_WC_VIDEO_LAYER", L"0");
     // Which decoders GStreamer picks: the DirectX 12 ones sometimes never
     // deliver a first frame, which froze YouTube; DirectX 11 doesn't.
     if (!GetEnvironmentVariableW(L"GST_PLUGIN_FEATURE_RANK", nullptr, 0)) {

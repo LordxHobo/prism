@@ -74,6 +74,9 @@ std::wstring videoQualityLimit();
 // "cpu" (the processor) or "auto" (GStreamer's choice). Applied when Prism
 // starts (see main.cpp).
 std::wstring videoDecoder();
+// Video frames go straight to WebKit's compositor (WebKit patch 0006) instead
+// of being drawn by the page. Off sets WEBKIT_WC_VIDEO_LAYER=0 (main.cpp).
+bool videoCompositor();
 // Extensions whose buttons are hidden from the toolbar (still in the
 // Extensions menu).
 bool isActionHidden(const std::string& extensionId);

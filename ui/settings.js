@@ -96,6 +96,7 @@ function render(settings) {
   $('compatibleDrawing').checked = !!settings.compatibleDrawing;
   $('videoQualityLimit').value = settings.videoQualityLimit || '1080';
   $('videoDecoder').value = settings.videoDecoder || 'd3d11';
+  $('videoCompositor').checked = settings.videoCompositor !== false;
   renderSegmented('tabLayout', settings.tabLayout);
   renderSegmented('groupStyle', settings.groupStyle);
   renderSegmented('newTabShortcuts', settings.newTabShortcuts);
@@ -305,6 +306,9 @@ $('fingerprinting').addEventListener('change', () => {
 });
 $('compatibleDrawing').addEventListener('change', () => {
   setSetting('compatibleDrawing', $('compatibleDrawing').checked ? '1' : '0');
+});
+$('videoCompositor').addEventListener('change', () => {
+  setSetting('videoCompositor', $('videoCompositor').checked ? '1' : '0');
 });
 $('videoDecoder').addEventListener('change', () => {
   setSetting('videoDecoder', $('videoDecoder').value);
