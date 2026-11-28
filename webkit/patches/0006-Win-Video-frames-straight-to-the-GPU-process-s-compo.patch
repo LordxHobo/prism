@@ -1,4 +1,4 @@
-From bf20a4ec57ba8b2353315e9436eb16f5b241b14f Mon Sep 17 00:00:00 2001
+From 497a606e83bda486b07e0e7874872c41c4efc571 Mon Sep 17 00:00:00 2001
 From: Prism <prism@users.noreply.github.com>
 Date: Fri, 27 Nov 2026 23:01:17 +0100
 Subject: [PATCH] [Win] Video frames straight to the GPU process's compositor
@@ -31,13 +31,14 @@ screen with an update), and WEBKIT_WC_VIDEO_LAYER=0 turns it off.
  .../graphics/wc/WCVideoLayerManager.cpp       | 182 ++++++++++++++++++
  .../graphics/wc/WCVideoLayerManager.h         |  85 ++++++++
  Source/WebKit/Platform/WC.cmake               |   1 +
+ .../webkit/opaque_ipc_types.tracking.in       |   1 +
  .../wc/RemoteWCLayerTreeHostProxy.cpp         |  95 +++++++++
  .../graphics/wc/RemoteWCLayerTreeHostProxy.h  |   5 +
  .../WebProcess/WebPage/wc/DrawingAreaWC.cpp   |   1 +
  .../WebProcess/WebPage/wc/GraphicsLayerWC.cpp |  11 +-
  .../WebProcess/WebPage/wc/WCUpdateInfo.h      |   2 +
  .../WebPage/wc/WCUpdateInfo.serialization.in  |   1 +
- 17 files changed, 556 insertions(+), 4 deletions(-)
+ 18 files changed, 557 insertions(+), 4 deletions(-)
  create mode 100644 Source/WebKit/GPUProcess/graphics/wc/WCVideoLayerManager.cpp
  create mode 100644 Source/WebKit/GPUProcess/graphics/wc/WCVideoLayerManager.h
 
@@ -716,6 +717,18 @@ index 8d6561e70..517b63a52 100644
  
      UIProcess/wc/DrawingAreaProxyWC.cpp
  
+diff --git a/Source/WebKit/Scripts/webkit/opaque_ipc_types.tracking.in b/Source/WebKit/Scripts/webkit/opaque_ipc_types.tracking.in
+index 4a83bf813..4afe47199 100644
+--- a/Source/WebKit/Scripts/webkit/opaque_ipc_types.tracking.in
++++ b/Source/WebKit/Scripts/webkit/opaque_ipc_types.tracking.in
+@@ -468,6 +468,7 @@
+ }
+ 
+ [UnsafeWrapper] WebCore::SharedMemory::Handle {
++    [Legacy] MessageParam GPUConnectionToWebProcess.PushWCVideoFrame frame
+     [Legacy] MessageParam WebPageProxy.SaveImageToLibrary handle
+     [Legacy] MessageParam WebPageProxy.SetPromisedDataForImage imageHandle
+     [Legacy] MessageParam WebPageProxy.SetPromisedDataForImage archiveHandle
 diff --git a/Source/WebKit/WebProcess/GPU/graphics/wc/RemoteWCLayerTreeHostProxy.cpp b/Source/WebKit/WebProcess/GPU/graphics/wc/RemoteWCLayerTreeHostProxy.cpp
 index a98d2df0f..60450845d 100644
 --- a/Source/WebKit/WebProcess/GPU/graphics/wc/RemoteWCLayerTreeHostProxy.cpp
